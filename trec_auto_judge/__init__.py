@@ -1,7 +1,7 @@
 from click import group
 from ._commands._evaluate import evaluate
 
-__version__ == '0.0.1'
+__version__ = '0.0.1'
 
 @group()
 def main():
