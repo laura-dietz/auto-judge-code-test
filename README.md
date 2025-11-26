@@ -31,6 +31,10 @@ You can install the early prototype via:
 pip3 install git+https://github.com/trec-auto-judge/auto-judge-code.git
 ```
 
+### CLI Usage
+
+After installation above, you can run `trec-auto-judge --help` which provides an overview of commands.
+
 ### Unit Tests
 
 Run unit tests via:
