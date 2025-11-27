@@ -29,7 +29,7 @@ def load_run_failsave(path: Path):
                 l["metadata"]["narrative_id"] = l["metadata"]["topic_id"]
 
             if "topic_id" in l["metadata"] and "narrative_id" in l["metadata"] and l["metadata"]["topic_id"] != l["metadata"]["narrative_id"]:
-                raise ValueError(f"Inconsistent metadata: {l["metadata"]}")
+                raise ValueError(f"Inconsistent metadata: {l['metadata']}")
 
 
             l["path"] = str(path.absolute())
