@@ -5,6 +5,12 @@ from pathlib import Path
 from collections import defaultdict
 from tqdm import tqdm
 from statistics import mean
+import random
+
+def rand(seed: str) -> float:
+    random.seed(seed)
+    return random.random()
+
 
 
 @click.command("naive_baseline")
@@ -20,16 +26,17 @@ def main(rag_responses: list[dict], output: Path):
         metadata = rag_response["metadata"]
         run_id = metadata["run_id"]
         topic_id = metadata["narrative_id"]
-
         text = " ".join([i["text"] for i in rag_response["answer"]])
         text_length = len(text.split())
 
         run_to_lengths[run_id].append(text_length)
 
         ret.append(f"{run_id} LENGTH {topic_id} {text_length}")
+        ret.append(f"{run_id} RANDOM {topic_id} {rand(run_id + topic_id)}")
 
     for run_id, text_lengths in run_to_lengths.items():
         ret.append(f"{run_id} LENGTH all {mean(text_lengths)}")
+        ret.append(f"{run_id} RANDOM all {rand(run_id)}")
 
     output.parent.mkdir(exist_ok=True, parents=True)
     output.write_text("\n".join(ret))
