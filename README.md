@@ -1,4 +1,4 @@
-# TREC AutoJudge Code
+# TREC AutoJudge (Meta-) Evaluation & Leaderboard
 
 
 <p align="center">
@@ -21,9 +21,50 @@ This repository contains the code used for evaluation and approaches for the TRE
 - [trec25](trec25) the AutoJudge Pilot at TREC 2025 (**attention: this is work in progress**)
 - [trec26](trec26) the upcoming iteration at TREC 2026 (**attention: this is work in progress**)
 
-## Shared Code
+## What is TREC AutoJudge?
 
-For code that is re-used among different situations (e.g., handling input/output stuff, evaluation, connection to ir_datasets, etc.) we develop code in the [trec_auto_judge](trec_auto_judge) directory (**attention: this is in the very early brain storming phase**).
+
+TREC Auto-Judge offers the first rigorous, cross-task benchmark for
+Large-Language-Model judges.
+
+While Large-Language-Model judges have emerged as a pragmatic solution when
+manual relevance assessment is costly or infeasible. However, recent
+studies reveal wide variation in accuracy across tasks, prompts, and
+model sizes. 
+
+Currently, shared task organizers choose an LLM judge per track ad
+hoc, risking inconsistent baselines and hidden biases.
+
+Auto-Judge provides a test bed for comparing different LLM judge ideas 
+across several tasks and correlate results against manually created relevance 
+judgments. AutoJudge proved a testbed to study emerging evaluation approaches, 
+as well as vulnerabilities of LLM judges, and the efficacy of safeguards for 
+those vulnerabilities. 
+
+This Auto-Judge evaluation script standardizes data handling and evaluation 
+across multiple shared tasks/TREC tracks that rely on LLM judging and 
+provided a centralized, comparative evaluation of LLM judges under realistic 
+conditions.
+
+
+
+## What is this code for?
+
+This project provides a means to evaluate AutoJudge approaches and provide a system ranking / leaderboard.
+
+It will be used by TREC AutoJudge coordinators to score submissions. We encourage prospective participants to run this locally for method development.
+
+This code will handle obtaining data sets (akin to `ir_datasets`), input/output and format conversions, and evaluation measures. 
+
+
+# Code Setup
+
+## Purpose
+
+Initial code is in the [trec_auto_judge](trec_auto_judge) directory (**attention: this is in the very early brain storming phase**).
+
+
+## Installation 
 
 You can install the early prototype via:
 
@@ -31,9 +72,16 @@ You can install the early prototype via:
 pip3 install git+https://github.com/trec-auto-judge/auto-judge-code.git
 ```
 
-### CLI Usage
+## Rationale
+
+After installing the code base, you will have to customize 
+
+## Command Line Usage
 
 After installation above, you can run `trec-auto-judge --help` which provides an overview of commands.
+
+
+# Developer Section
 
 ### Unit Tests
 
