@@ -76,11 +76,20 @@ Lastly, to verify that everything is correct, please run `tira-cli verify-instal
 <details>
 <summary>Step 2: Upload your Submission</summary>
 
-Assuming you have your run 
+An complete overview of all dataset IDs for which you can upload submissions is available at [https://www.tira.io/datasets?query=trec-auto-judge](https://www.tira.io/datasets?query=trec-auto-judge). **Attention, some datasets that have missing responses or duplicated IDs are not yet available, as we first wanted to discuss how to handle them, this is ongoing in [this issue](https://github.com/trec-auto-judge/auto-judge-code/issues/2).**
+
+
+Assuming you have your results in the `leaderboard-upload-skeleton` directory for the dataset id `spot-check-dataset-20251202-training`, then please first ensure that everything is valid via:
 
 ```
-tira-cli upload --dataset foo --directory leaderboard-upload-skeleton
+tira-cli upload --dataset spot-check-dataset-20251202-training --directory leaderboard-upload-skeleton --dry-run
 ```
+
+The output should look like:
+
+<img width="1074" height="131" alt="Screenshot_20251210_123926" src="https://github.com/user-attachments/assets/18c7f1d7-12d2-4ecc-9d2e-73cf31ec3582" />
+
+If everything looks good, you can re-run the command and remove the `--dry-run` argument to upload your submission.
 
 </details>
 
