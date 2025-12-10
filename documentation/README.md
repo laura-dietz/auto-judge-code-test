@@ -129,3 +129,109 @@ As soon as those requirements are met, a code submission to TIRA performs the fo
 
 In the following, we will use the Naive AutoJudge system in [../trec25/judges/naive](../trec25/judges/naive) as an hello world example. You can perform all steps below and just re-submit this system to TIRA to ensure everything works on your side and then switch to your system. (Alternatively, you can also add your code to this repository via a pull request and we conduct the steps for doing the code submissions, as long as there is enough time to the deadline we should always be able to help with this.)
 
+
+
+<details>
+<summary>Step 1: the structure of a system</summary>
+
+The Naive AutoJudge system has the following files in its directory:
+
+```
+├── .devcontainer.json
+├── Dockerfile
+├── naive-baseline.py
+├── README.md
+└── requirements.txt
+```
+
+The `.devcontainer.json` and the `Dockerfile` configure the dev-container. Many IDEs (e.g., VS-Code, but also [Github Codespaces in your browser](https://github.com/features/codespaces)) can directly boot into the dev-container, so that they also help to simplify the development as one can develop directly in an environment where everything is installed.  The `requirements.txt` file describes the requirements and the `naive-baseline.py` provides the actual code (a simple judge that provides random/naive judgments). The judge has to process RAG responses as inputs and produce a leaderboard in a format congruent to `trec_eval -q` outputs. Please see the [minimal spot check dataset](https://github.com/trec-auto-judge/auto-judge-code/tree/main/trec25/datasets/spot-check-dataset#minimal-spot-check-dataset) for a detailed description of inputs and outputs to your system.
+
+</details>
+
+<details>
+<summary>Step 2: Authentication and Login</summary>
+
+We assume you have created an account at TIRA.io and have registered a team to TREC AutoJudge following the prerequisite above.
+
+The preferred way to upload a submission to TIRA is via the command line interface, as this already can check that everything is in the correct format on your side.
+
+Please install the TIRA cli via:
+
+```
+pip3 install --upgrade tira
+```
+
+Next, you need an authentication token:
+
+- Navigate to the TREC AutoJudge task in TIRA [https://www.tira.io/task-overview/trec-auto-judge](https://www.tira.io/task-overview/trec-auto-judge)
+- Click on "submit" => "Code Submissions" => "I want to submit from my local machine". The UI shows your authentication token (alternatively, you can upload via Github Actions, the UI guides you through this and we also offer help, please do not hesitate to reach out, we plan to incorporate corresponding github actions to this repository):
+
+<img width="1839" height="929" alt="Screenshot_20251210_215021" src="https://github.com/user-attachments/assets/e2ab77e7-4818-4d55-abb7-c374b62db945" />
+
+
+Assuming your authentication token is AUTH-TOKEN, please authenticate via:
+
+```
+tira-cli login --token AUTH-TOKEN
+```
+
+Lastly, to verify that everything is correct, please run `tira-cli verify-installation`. Outputs might look like:
+
+<img width="821" height="180" alt="Screenshot_20251210_095410" src="https://github.com/user-attachments/assets/51160132-eb19-4da3-8892-8a53adb41c71" />
+
+</details>
+
+<details>
+<summary>Step 3: Test your system on the spot-check Dataset</summary>
+
+
+Assuming you are in the [../trec25/judges](../trec25/judges) directory we use the `code-submission` command of TIRA against the `spot-check-dataset-20251202-training` dataset to ensure that everything is valid via:
+
+```
+tira-cli code-submission \
+    --path naive \
+    --task trec-auto-judge \
+    --dry-run \
+    --dataset spot-check-dataset-20251202-training \
+    --command '/naive-baseline.py --rag-responses ${inputDataset} --output ${outputDir}/trec-leaderboard.txt'
+```
+
+In this command,
+- `--path naive` indicates that the code that is to be submitted is in the [corresponding directory](../trec25/judges/naive)
+- `--task trec-auto-judge` indicates hat we want to submit to the TREC AutoJudge task
+- `--dry-run` indicates that we want to test that everything works without actually uploading the submission
+- `--command` indicates the to-be-executed command that is to be executed. Every submission is intended to read its inputs from the directory to which the `inputDataset` variable points to and write its results to the directory specified by the `outputDir` variable.
+- `--dataset` indicates that we want to run the code on the spot-check dataset
+
+The output should look like:
+
+<img width="1227" height="154" alt="Screenshot_20251210_215910" src="https://github.com/user-attachments/assets/4aaef384-8ed8-412f-a714-2117eefa19c8" />
+
+</details>
+
+
+<details>
+<summary>Step 4: Upload Your System to TIRA</summary>
+
+Please re-execute the command above but remove the `--dry-run` flag, this will additionaly upload the system to TIRA. The output should look like:
+
+<img width="1230" height="336" alt="Screenshot_20251210_220112" src="https://github.com/user-attachments/assets/0a53a83c-954d-46cf-8c92-60e61907edbf" />
+</details
+
+
+
+<details>
+<summary>Step 5: Run Your System in TIRA</summary>
+
+
+- Navigate to the TREC AutoJudge task in TIRA [https://www.tira.io/task-overview/trec-auto-judge](https://www.tira.io/task-overview/trec-auto-judge)
+- Click on "submit" => "Code Submissions"
+- Select your Submission
+
+Then, you can select on datasets using which resources your approach should be executed within TIRA. We aim to run every submitted system on all datasets.
+
+<img width="1851" height="733" alt="Screenshot_20251210_220656" src="https://github.com/user-attachments/assets/e33e270a-bed9-4b48-9ac7-338d6e6fa4b1" />
+
+</details>
+
+
