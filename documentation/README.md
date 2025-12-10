@@ -1,6 +1,6 @@
 # Submission Guidelines for TREC AutoJudge
 
-We encourage code submissions so that AutoJudge systems can be re-executed by others.
+We encourage [code submissions](#submission-variant-2-code-submissions) so that AutoJudge systems can be re-executed by others.
 Organizing code so that it runs on machines that are not under your control requires more effort (please consider to add the code of your approach via a pull request to this repository as this allows us to provide help and maintain everything in one place).
 We also allow to [manually upload submissions](#submission-variant-1-upload-of-submissions).
 
@@ -27,8 +27,16 @@ If you want to add others to your team, please navigate to your groups (under th
 
 ## Submission Variant 1: Upload of Submissions
 
-In cases where code submissions do not make sense (e.g., for manually curated leaderboards, when systems are very very experimental 
-To support manual submissions and experimental submissions that do not fit well into code submissions, we support the upload of submissions.
+In cases where [code submissions](#submission-variant-2-code-submissions) do not make sense (e.g., for manually curated leaderboards, when systems are very experimental, or when deadlines are close), we encourage to upload your submissions manually.
+
+A manual submission has the following two files:
+
+```
+├── ir-metadata.yml
+└── trec-leaderboard.txt
+```
+
+where xy.
 
 
 ## Submission Variant 2: Code Submissions
