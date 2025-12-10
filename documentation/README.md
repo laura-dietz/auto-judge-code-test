@@ -1,12 +1,11 @@
 # Submission Guidelines for TREC AutoJudge
 
-We aim to encourage code submissions so that submitted AutoJudge systems run within TIRA and also can be easily re-executed by others.
-It usually requires more effort to organize code so that it runs on machines that are not under your control.
-In case you want to make a code submission, we encourage you to organize your code of your approach via pull requests into this repository as this allows us to help you in the progress and also ensures that we can collect all code-submissions in one place.
-We also allow to manually upload submissions in cases when code submissions are not useful (e.g., for human-created leaderboards or highly experimental systems that do not justify the additional effort to have well-organized code).
+We encourage code submissions so that AutoJudge systems can be re-executed by others.
+Organizing code so that it runs on machines that are not under your control requires more effort (please consider to add the code of your approach via a pull request to this repository as this allows us to provide help and maintain everything in one place).
+We also allow to manually upload submissions.
 
 <details>
-<summary>Create an Account at TIRA.io and register a team to TREC AutoJudge in TIRA</summary>
+<summary>Prerequisite: Create an Account at TIRA.io and register a team to TREC AutoJudge in TIRA</summary>
 
 ### Step 1: Create an Account at TIRA
 
@@ -26,6 +25,7 @@ If you want to add others to your team, please navigate to your groups (under th
 
 </details>
 
-## Run Uploads
+## Submission Variant 1: Upload of Submissions
 
+In cases where code submissions do not make sense (e.g., for manually curated leaderboards, when systems are very very experimental 
 To support manual submissions and experimental submissions that do not fit well into code submissions, we support the upload of submissions.
