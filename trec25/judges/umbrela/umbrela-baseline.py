@@ -92,10 +92,10 @@ def main(rag_responses: list[dict], rag_topics: List[Request], output: Path):
         output.write_text("\n".join(ret))
 
     prompt_input = prepare_prompts()
-    print("in", "\n".join(str(p) for p in prompt_input[0:4]))
+    print("Debug in", "\n".join(str(p) for p in prompt_input[0:4]))
     
     prompt_output =  evaluator_run(prompt=Umbrela, output_converter=Umbrela.convert_output,alignment_input_list=prompt_input)
-    print("out", "\n".join(str(p) for p in prompt_input[0:4]))
+    print("Debug out", "\n".join(str(p) for p in prompt_input[0:4]))
 
     write_results(prompt_output=prompt_output)
 
