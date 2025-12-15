@@ -41,13 +41,24 @@ def option_ir_dataset():
             registry.register(str(directory), ds)
         return ds
 
+    def _load_cfg(c):
+        from yaml import safe_load
+
+        if c.is_file():
+            txt = c.read_text()
+            for cfg in txt.split("---"):
+                try:
+                    print(cfg)
+                    return safe_load(cfg)["ir_dataset"]
+                except:
+                    pass
 
     class ClickIrDataset(click.ParamType):
         name = "dir"
 
         def convert(self, value, param, ctx):
             if value == "infer-dataset-from-context":
-                from huggingface_hub import DatasetCard
+                
                 candidate_files = set()
                 if "rag_responses" in ctx.params:
                     for r in ctx.params["rag_responses"]:
@@ -58,13 +69,11 @@ def option_ir_dataset():
                 irds_config = None
                 base_path = None
                 for c in candidate_files:
-                    if c.is_file():
-                        try:
-                            irds_config = DatasetCard.load(str(c)).data["ir_dataset"]
-                            base_path = c.parent
-                            break
-                        except:
-                            pass
+                    irds_config = _load_cfg(c)
+                    if irds_config:
+                        base_path = c.parent
+                        break
+
                 if not irds_config:
                     raise ValueError("ToDo: Better error handling of wrong configurations")
 
