@@ -7,7 +7,7 @@ configs:
 - config_name: truths
   data_files:
   - split: train
-    path: ["trec-leaberboard.txt"]
+    path: ["trec-leaderboard.txt"]
 
 tira_configs:
   resolve_inputs_to: "."
@@ -39,7 +39,7 @@ A complete dataset (our current work-in-progress definition) has a structure lik
 │   ├── run-01
 │   ├── ...
 │   └── run-0n
-└── trec-leaberboard
+└── trec-leaderboard
 ```
 
 Where all files in the `runs` directory are TREC RAG run files and the `trec-leaberboard` file contains the ground-truth leaderboard in a format congruent to `trec_eval -q` outputs.
@@ -94,13 +94,13 @@ An example evaluation might look like:
 
 ```
 trec-auto-judge evaluate \
-	--truth-leaderboard trec-leaberboard \
+	--truth-leaderboard trec-leaderboard.txt \
 	--truth-metric Measure-01 \
-	--input trec-leaberboard	--input trec-leaberboard
+	--input trec-leaderboard.txt
 
            Judge     Metric  kendall  pearson  spearman  tauap_b
-trec-leaberboard Measure-02     -1.0     -1.0      -1.0     -1.0
-trec-leaberboard Measure-01      1.0      1.0       1.0      1.0
+trec-leaderboard Measure-02     -1.0     -1.0      -1.0     -1.0
+trec-leaderboard Measure-01      1.0      1.0       1.0      1.0
 ```
 
 where:
