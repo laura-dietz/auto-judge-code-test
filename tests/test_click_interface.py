@@ -16,9 +16,9 @@ def return_responses(rag_responses):
 class TestClickInterface(unittest.TestCase):
     def test_trec25_spot_check_runs(self):
         expected_metadata = [
-            {'team_id': 'my_fantastic_team', 'run_id': 'my_best_run_01', 'topic_id': '101', 'narrative_id': '101'},
-            {'team_id': 'my_fantastic_team', 'run_id': 'my_best_run_02', 'topic_id': '101', 'narrative_id': '101'},
-            {'team_id': 'my_fantastic_team', 'run_id': 'my_best_run_02_citations', 'topic_id': '101', 'narrative_id': '101'}
+            {'team_id': 'my_fantastic_team', 'run_id': 'my_best_run_01', 'topic_id': '28', 'narrative_id': '28'},
+            {'team_id': 'my_fantastic_team', 'run_id': 'my_best_run_02', 'topic_id': '28', 'narrative_id': '28'},
+            {'team_id': 'my_fantastic_team', 'run_id': 'my_best_run_02_citations', 'topic_id': '28', 'narrative_id': '28'}
         ]
         expected_paths = [
             'my_best_run_01',
