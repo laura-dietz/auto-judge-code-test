@@ -7,7 +7,7 @@ configs:
 - config_name: truths
   data_files:
   - split: train
-    path: ["trec-leaderboard.txt"]
+    path: ["trec-leaberboard.txt"]
 
 tira_configs:
   resolve_inputs_to: "."
@@ -30,7 +30,7 @@ ir_dataset:
 
 # Minimal Spot Check Dataset
 
-This is a minimal spot-check dataset (inspired by the [rag-run-validator](https://github.com/hltcoe/rag-run-validator)) that we use to showcase inputs, outputs, and evaluations with a minimal example (**attention: this is still in development**). This example dataset contains responses to the Cranfield topic 28 on "what application has the linear theory of curved wings" that reference two documents from the Cranfield corpus.
+This is a minimal spot-check dataset (inspired by the [rag-run-validator](https://github.com/hltcoe/rag-run-validator)) that we use to showcase inputs, outputs, and evaluations with a minimal example (**attention: this is still in development**).
 
 A complete dataset (our current work-in-progress definition) has a structure like:
 
@@ -39,7 +39,7 @@ A complete dataset (our current work-in-progress definition) has a structure lik
 │   ├── run-01
 │   ├── ...
 │   └── run-0n
-└── trec-leaderboard
+└── trec-leaberboard
 ```
 
 Where all files in the `runs` directory are TREC RAG run files and the `trec-leaberboard` file contains the ground-truth leaderboard in a format congruent to `trec_eval -q` outputs.
@@ -55,7 +55,7 @@ Runs have a format like:
   "metadata": {
     "team_id": "my_fantastic_team",
     "run_id": "my_best_run_01",
-    "topic_id": "28"
+    "topic_id": "101"
   },
   "responses": [
     {
@@ -77,11 +77,11 @@ Runs have a format like:
 The TREC-style leaderboards have a format like:
 
 ```
-my_best_run_01            Measure-01  28  0.5
+my_best_run_01            Measure-01  101  0.5
 my_best_run_01            Measure-01  all  1
 ```
 
-which indicates that the system `my_best_run_01` achieved an score of 0.5 on topic 28 for the metric `Measure-01` and a score of 1 aggregated over all topics.
+which indicates that the system `my_best_run_01` achieved an score of 0.5 on topic 101 for the metric `Measure-01` and a score of 1 aggregated over all topics.
 
 
 ## Evaluation
@@ -94,13 +94,13 @@ An example evaluation might look like:
 
 ```
 trec-auto-judge evaluate \
-	--truth-leaderboard trec-leaderboard.txt \
+	--truth-leaderboard trec-leaberboard \
 	--truth-metric Measure-01 \
-	--input trec-leaderboard.txt
+	--input trec-leaberboard	--input trec-leaberboard
 
            Judge     Metric  kendall  pearson  spearman  tauap_b
-trec-leaderboard Measure-02     -1.0     -1.0      -1.0     -1.0
-trec-leaderboard Measure-01      1.0      1.0       1.0      1.0
+trec-leaberboard Measure-02     -1.0     -1.0      -1.0     -1.0
+trec-leaberboard Measure-01      1.0      1.0       1.0      1.0
 ```
 
 where:
