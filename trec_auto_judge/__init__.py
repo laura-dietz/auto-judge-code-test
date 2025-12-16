@@ -1,5 +1,5 @@
 from click import group
-from .report import Report
+from .report import Report, load_report
 from .request import Request, load_requests
 from ._commands._evaluate import evaluate
 

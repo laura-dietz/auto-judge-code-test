@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-from trec_auto_judge.click import option_rag_responses, option_rag_topics
 import click
 from pathlib import Path
 from collections import defaultdict
@@ -7,7 +6,9 @@ from tqdm import tqdm
 from statistics import mean
 import random
 
+from trec_auto_judge.click import option_rag_responses, option_rag_topics
 from trec_auto_judge.request import Request
+from trec_auto_judge.report import Report
 
 # crucible
 from nuggety.align import evaluator_run, Umbrela
@@ -38,7 +39,11 @@ class UmbrelaAnnotation(BaseModel):
 @option_rag_responses()
 @option_rag_topics()
 
-def main(rag_responses: list[dict], rag_topics: List[Request], output: Path):
+
+
+
+# def main(rag_responses: List[Report], rag_topics: List[Request])->(Leaderboard, QrelFile):
+def main(rag_responses: List[Report], rag_topics: List[Request], output:Path):
     """
     A naive rag response assessor that just orders each response by its length.
     """

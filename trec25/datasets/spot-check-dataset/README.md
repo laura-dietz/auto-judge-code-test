@@ -96,7 +96,7 @@ An example evaluation might look like:
 trec-auto-judge evaluate \
 	--truth-leaderboard trec-leaberboard \
 	--truth-metric Measure-01 \
-	--input trec-leaberboard
+	--input trec-leaberboard	--input trec-leaberboard
 
            Judge     Metric  kendall  pearson  spearman  tauap_b
 trec-leaberboard Measure-02     -1.0     -1.0      -1.0     -1.0
