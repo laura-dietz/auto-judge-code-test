@@ -30,7 +30,7 @@ ir_dataset:
 
 # Minimal Spot Check Dataset
 
-This is a minimal spot-check dataset (inspired by the [rag-run-validator](https://github.com/hltcoe/rag-run-validator)) that we use to showcase inputs, outputs, and evaluations with a minimal example (**attention: this is still in development**).
+This is a minimal spot-check dataset (inspired by the [rag-run-validator](https://github.com/hltcoe/rag-run-validator)) that we use to showcase inputs, outputs, and evaluations with a minimal example (**attention: this is still in development**). This example dataset contains responses to the Cranfield topic 28 on "what application has the linear theory of curved wings" that reference two documents from the Cranfield corpus.
 
 A complete dataset (our current work-in-progress definition) has a structure like:
 
@@ -55,7 +55,7 @@ Runs have a format like:
   "metadata": {
     "team_id": "my_fantastic_team",
     "run_id": "my_best_run_01",
-    "topic_id": "101"
+    "topic_id": "28"
   },
   "responses": [
     {
@@ -77,11 +77,11 @@ Runs have a format like:
 The TREC-style leaderboards have a format like:
 
 ```
-my_best_run_01            Measure-01  101  0.5
+my_best_run_01            Measure-01  28  0.5
 my_best_run_01            Measure-01  all  1
 ```
 
-which indicates that the system `my_best_run_01` achieved an score of 0.5 on topic 101 for the metric `Measure-01` and a score of 1 aggregated over all topics.
+which indicates that the system `my_best_run_01` achieved an score of 0.5 on topic 28 for the metric `Measure-01` and a score of 1 aggregated over all topics.
 
 
 ## Evaluation
