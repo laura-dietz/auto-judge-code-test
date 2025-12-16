@@ -7,7 +7,7 @@ from . import TREC_25_DATA
 from trec_auto_judge import main
 from tempfile import TemporaryDirectory
 
-EXAMPLE_LEADERBOARD = str((TREC_25_DATA / "spot-check-dataset" / "trec-leaberboard.txt").absolute())
+EXAMPLE_LEADERBOARD = str((TREC_25_DATA / "spot-check-dataset" / "trec-leaderboard.txt").absolute())
 
 def evaluate_command(measure, truth=EXAMPLE_LEADERBOARD, inp=EXAMPLE_LEADERBOARD):
     cmd = ["evaluate", "--truth-leaderboard", truth, "--input", inp, "--truth-metric", measure]
