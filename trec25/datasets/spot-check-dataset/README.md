@@ -24,6 +24,8 @@ tira_configs:
   evaluator:
     image: ghcr.io/trec-auto-judge/auto-judge-code/cli:0.0.1
     command: trec-auto-judge evaluate --input ${inputRun}/trec-leaderboard.txt --aggregate --output ${outputDir}/evaluation.prototext
+ir_dataset:
+  ir_datasets_id: "cranfield"
 ---
 
 # Minimal Spot Check Dataset

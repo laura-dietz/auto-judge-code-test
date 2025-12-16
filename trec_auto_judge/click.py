@@ -17,7 +17,7 @@ def option_rag_responses():
 
             self.fail(f"{value!r} contains no rag runs.", param, ctx)
 
-    """A decorator that wraps a Click command with standard retrieval options."""
+    """Rag Run directory click option."""
     def decorator(func):
         func = click.option(
             "--rag-responses",
@@ -57,6 +57,3 @@ def option_rag_topics():
         return func
 
     return decorator
-
-
-
