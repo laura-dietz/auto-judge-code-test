@@ -11,8 +11,8 @@ from trec_auto_judge.click import option_rag_responses, option_rag_topics
 from trec_auto_judge.request import Request
 from trec_auto_judge.report import Report
 from trec_auto_judge.leaderboard import *
-from trec_auto_judge.qrels import *
-from trec_auto_judge import AutoJudge
+from trec_auto_judge import RagAutoJudge
+from trec_auto_judge.click import auto_judge_to_click_command
 
 # crucible
 from nuggety.align import evaluator_run, Umbrela
@@ -60,7 +60,7 @@ def umbrela_to_qrels(
         )
     return qrels
 
-class UmbrelaJudge:
+class UmbrelaJudge(RagAutoJudge):
     def judge(
         self,
         rag_responses: Sequence[Report],
@@ -128,18 +128,5 @@ class UmbrelaJudge:
         qrels = umbrela_to_qrels(  prompt_output, grade_fn=lambda res: res.answerability)
         return (leaderboard, qrels)
 
-# below here all should move into the TIRA CLI, or be a main class with its own CLI for development
-
-@click.command("umbrela_baseline")
-@option_rag_responses()
-@option_rag_topics()
-@click.option("--output", type=Path, help="The output file.", required=True)
-def main(rag_responses: List[Report], rag_topics: List[Request], output:Path):
-    qrels_opt=None
-    (leaderboard, qrels_opt) = UmbrelaJudge().judge(rag_responses=rag_responses, rag_topics=rag_topics)
-    write_leaderboard(leaderboard=leaderboard, output=output)
-    if qrels_opt is not None:
-        write_qrel_file(qrel_out_file=output.with_suffix(".qrels"), qrel_entries= qrels_opt)
-
 if __name__ == '__main__':
-    main()
+    auto_judge_to_click_command(UmbrelaJudge(), "umbrela_baseline)()
