@@ -1,6 +1,7 @@
 from pathlib import Path
 from .io import load_runs_failsave
 from .request import Request, load_requests_from_irds, load_requests_from_file
+from trec_auto_judge import AutoJudge, RagAutoJudge, QrelAutoJudge
 import click
 
 
@@ -158,3 +159,19 @@ def option_rag_topics():
         return func
 
     return decorator
+
+
+def auto_judge_to_click_command(auto_judge: AutoJudge, cmd_name) -> None:
+    @click.command(cmd_name)
+    @option_rag_responses()
+    @option_rag_topics()
+    @click.option("--output", type=Path, help="The output file.", required=True)
+    def run(rag_topics, rag_responses, output):
+        if isinstance(auto_judge, RagAutoJudge):
+            leaderboard = auto_judge.judge(rag_responses, rag_topics)
+            leaderboard.write(output)
+
+        if isinstance(auto_judge, QrelAutoJudge):
+            raise ValueError("ToDo: Implement")
+
+    return run
