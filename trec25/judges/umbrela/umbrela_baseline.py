@@ -44,14 +44,11 @@ class UmbrelaAnnotation(BaseModel):
     match_score:Optional[float] = None
 
 
-# MEASURES = {
-#     "GRADE": MeasureDef(aggregate=MeanOfFloats),
-#     "IS_MATCH": MeasureDef(aggregate=MeanOfBools),
-# }
-MEASURES: Dict[str, MeasureDef] = {
-    "GRADE": MeasureDef(aggregate=mean_of_floats),
-    "IS_MATCH": MeasureDef(aggregate=mean_of_bools),
-}
+
+UMBRELA_SPEC = LeaderboardSpec(measures=(
+    MeasureSpec("GRADE", aggregate=mean_of_floats, cast=float),
+    MeasureSpec("IS_MATCH", aggregate=mean_of_bools, cast=bool),
+))
 
 
 
@@ -120,19 +117,33 @@ class UmbrelaJudge:
             return alignment_input_list
 
 
-        def umbrela_to_leaderboard(prompt_output: Iterable["UmbrelaAnnotation"], measures) -> Leaderboard:
-                per_topic_entries = [
-                    LeaderboardEntry(
-                        run_id=res.run_id,
-                        topic_id=res.query_id,
-                        values={
-                            "GRADE": float(res.match_score),
-                            "IS_MATCH": bool(res.is_match),
-                        },
-                    )
-                    for res in prompt_output
-                ]
-                return Leaderboard.from_entries_with_all(measures=measures, entries=per_topic_entries)
+        # def umbrela_to_leaderboard(prompt_output: Iterable["UmbrelaAnnotation"], measures) -> Leaderboard:
+        #         per_topic_entries = [
+        #             LeaderboardEntry(
+        #                 run_id=res.run_id,
+        #                 topic_id=res.query_id,
+        #                 values={
+        #                     "GRADE": float(res.match_score),
+        #                     "IS_MATCH": bool(res.is_match),
+        #                 },
+        #             )
+        #             for res in prompt_output
+        #         ]
+        #         return Leaderboard.from_entries_with_all(measures=measures, entries=per_topic_entries)
+
+
+        def umbrela_to_leaderboard(prompt_output):
+            b = LeaderboardBuilder(UMBRELA_SPEC)
+            b.add_records(
+                prompt_output,
+                run_id=lambda r: r.run_id,
+                topic_id=lambda r: r.query_id,
+                get_values=lambda r: {
+                    "GRADE": r.match_score,
+                    "IS_MATCH": r.is_match,
+                },
+            )
+            return b.build()
 
         prompt_input = prepare_prompts()
         print("Debug in", "\n".join(str(p) for p in prompt_input[0:1]))
@@ -140,7 +151,7 @@ class UmbrelaJudge:
         prompt_output = evaluator_run(prompt=Umbrela, output_converter=Umbrela.convert_output, alignment_input_list=prompt_input)
         print("Debug out", "\n".join(str(p) for p in prompt_input[0:1]))
 
-        leaderboard = umbrela_to_leaderboard(prompt_output=prompt_output, measures = MEASURES)
+        leaderboard = umbrela_to_leaderboard(prompt_output=prompt_output)
         qrels = umbrela_to_qrels(  prompt_output, grade_fn=lambda res: res.answerability)
         return (leaderboard, qrels)
 =======
