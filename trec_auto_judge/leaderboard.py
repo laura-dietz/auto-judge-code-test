@@ -10,7 +10,6 @@ from typing import Union, Callable, Sequence, Dict, List, DefaultDict, Iterable
 MeasureName = str
 
 
-
 @dataclass(frozen=True)
 class MeasureDef:
     """
@@ -77,28 +76,27 @@ class Leaderboard:
 
         return cls(measures=measures, entries=base_entries + all_entries)
 
-def write_leaderboard(
-    leaderboard: Leaderboard,
-    output: Path,
-) -> None:
-    """
-    Write the leaderboard to a file. 
-    """
-    lines: List[str] = []
-    for e in leaderboard.entries:
-        for m in leaderboard.all_measure_names():
-            if m in e.values:
-                lines.append("\t".join([e.run_id,m,e.topic_id,str(e.values[m])]))
+    def write(self, output: Path) -> None:
+        """
+        Write the leaderboard to a file. 
+        """
+        lines: List[str] = []
+        for e in self.entries:
+            for m in self.all_measure_names():
+                if m in e.values:
+                    lines.append("\t".join([e.run_id,m,e.topic_id,str(e.values[m])]))
 
-    output.parent.mkdir(parents=True, exist_ok=True)
-    output.write_text("\n".join(lines) + "\n")
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_text("\n".join(lines) + "\n")
 
 # ================
 # Default Aggregators
 
-def mean_of_floats(values: Sequence[object]) -> float:
-    return mean(float(v) for v in values)
+class MeanOfFloats():
+    def aggregate(values: Sequence[object]) -> float:
+        return mean(float(v) for v in values)
 
-def mean_of_bools(values: Sequence[object]) -> float:
-    return mean(1.0 if bool(v) else 0.0 for v in values)
+class MeanOfBools():
+    def aggregate(values: Sequence[object]) -> float:
+        return mean(1.0 if bool(v) else 0.0 for v in values)
 
