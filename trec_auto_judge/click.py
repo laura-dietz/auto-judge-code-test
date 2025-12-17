@@ -1,6 +1,6 @@
 from pathlib import Path
 from .io import load_runs_failsave
-from .request import Request, load_requests_from_irds
+from .request import Request, load_requests_from_irds, load_requests_from_file
 import click
 
 
@@ -36,7 +36,24 @@ def option_rag_responses():
 class ClickIrDataset(click.ParamType):
     name = "ir-dataset"
 
+    def fail_if_ir_datasets_is_not_installed(self, param, ctx, msg=""):
+        try:
+            import ir_datasets
+            from ir_datasets import registry
+        except:
+            msg += " ir_datasets is not installed, so I can not try to load the data via ir_datasets. Please install ir_datasets to load data from there."
+            self.fail(msg.strip(), param, ctx)
+
+        try:
+            import tira
+            from tira.third_party_integrations import ir_datasets
+        except:
+            msg += " tira is not installed, so I can not try to load the data via tira ir_datasets integration. Please install tira to load data from there."
+            self.fail(msg.strip(), param, ctx)
+
     def convert(self, value, param, ctx):
+        self.fail_if_ir_datasets_is_not_installed(param, ctx)
+
         from ir_datasets import registry
         from tira.third_party_integrations import ir_datasets
         from .io import irds_from_dir, load_hf_dataset_config_or_none
@@ -74,7 +91,10 @@ class ClickIrDataset(click.ParamType):
         if value and Path(value).is_dir() and (Path(value) / "queries.jsonl").is_file() and (Path(value) / "corpus.jsonl.gz").is_file():
             return irds_from_dir(value)
 
-        return ir_datasets.load(value)
+        if len(str(value).split("/") == 2):
+            return ir_datasets.load(value)
+        else:
+            raise ValueError("ToDo: Better error handling of incomplete configurations")
 
 
 def option_ir_dataset():
@@ -94,20 +114,34 @@ def option_ir_dataset():
 
 
 class ClickRagTopics(ClickIrDataset):
-    name = "ir-dataset"
+    name = "file-or-ir-dataset"
 
-    def convert(self, value, param, ctx):
-        ds = super().convert(value, param, ctx)
-
-        if not ds:
-            self.fail(f"I could not load the rag topics for ir_dataset {value}.", param, ctx)
-        
-        ret = load_requests_from_irds(ds)
-
-        if len(ret) > 0:
+    def fail_if_empty_or_return_otherwise(self, value, param, ctx, ret):
+        if len(ret) == 0:
+            self.fail(f"{value!r} contains 0 RAG topics.", param, ctx)
+        else:
             return ret
 
-        self.fail(f"{value!r} contains no RAG topics.", param, ctx)
+    def convert(self, value, param, ctx):
+        if value and Path(value).is_file():
+            try:
+                ret = load_requests_from_file(Path(value))
+            except Exception as e:
+                self.fail(f"The file {value} is not valid, no rag-topics could be loaded. {e}", param, ctx)
+            return self.fail_if_empty_or_return_otherwise(value, param, ctx, ret)
+
+        fail_msg = "The argument passed to --rag-topics is not a file."
+
+        self.fail_if_ir_datasets_is_not_installed(param, ctx, msg=fail_msg)
+
+        try:
+            ds = super().convert(value, param, ctx)
+        except:
+            fail_msg += " The argument is also not a valid ir_datasets identifier that could be loaded."
+            self.fail(fail_msg, param, ctx)
+
+        ret = load_requests_from_irds(ds)
+        return self.fail_if_empty_or_return_otherwise(value, param, ctx, ret)
 
 
 def option_rag_topics():
