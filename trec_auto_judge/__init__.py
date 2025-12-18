@@ -6,7 +6,8 @@ from .click_plus import option_rag_responses, option_rag_topics, option_ir_datas
 from .report import Report, load_report
 from .request import Request, load_requests_from_irds, load_requests_from_file
 from .leaderboard.leaderboard import Leaderboard, LeaderboardEntry, MeasureSpec, LeaderboardSpec,  LeaderboardBuilder, VerificationError, verify_complete_measures, verify_complete_topics_per_run, verify_all, mean_of_bools, mean_of_floats, mean_of_ints 
-from .qrels import Qrels, QrelEntry, write_qrel_file, read_qrel_file, doc_id_md5
+# from .qrels import Qrels, QrelEntry, write_qrel_file, read_qrel_file, doc_id_md5
+from .qrels import *
 from ._commands._evaluate import evaluate
 from ._commands._export_corpus import export_corpus
 

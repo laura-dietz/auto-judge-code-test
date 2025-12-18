@@ -306,32 +306,68 @@ def verify_complete_topics_per_run(
         )
 
 
+
+def verify_leaderboard_topics(
+    *,
+    expected_topic_ids: Sequence[str],
+    entries: Iterable["LeaderboardEntry"],
+    all_topic_id: str = "all",
+    include_all_row: bool = False,
+    require_no_extras: bool = False,
+) -> None:
+    expected = set(expected_topic_ids)
+    seen = set()
+
+    for e in entries:
+        if not include_all_row and e.topic_id == all_topic_id:
+            continue
+        if e.topic_id in expected:
+            seen.add(e.topic_id)
+
+    missing = expected - seen
+    if missing:
+        raise ValueError(f"Missing leaderboard entries for {len(missing)} topic_id(s), e.g. {sorted(missing)[:5]}")
+
+    if require_no_extras:
+        extras = {e.topic_id for e in entries if (include_all_row or e.topic_id != all_topic_id)} - expected
+        if extras:
+            raise ValueError(f"Found unexpected topic_id(s) in leaderboard, e.g. {sorted(extras)[:5]}")
+
+from typing import Optional, Sequence
+
 def verify_all(
     *,
     measure_names: Sequence[MeasureName],
-    entries: Iterable[LeaderboardEntry],
+    entries: Iterable["LeaderboardEntry"],
     all_topic_id: str = "all",
     require_all_row_complete: bool = True,
     require_same_topics_per_run: bool = True,
+    expected_topic_ids: Optional[Sequence[str]] = None,
+    require_no_extra_topics: bool = True,
 ) -> None:
-    """
-    Convenience: verify both
-      (1) every entry has all measures
-      (2) every run has the same set of topics
-    """
     verify_complete_measures(
         measure_names=measure_names,
         entries=entries,
         all_topic_id=all_topic_id,
         include_all_row=require_all_row_complete,
     )
+
+    if expected_topic_ids is not None:
+        verify_leaderboard_topics(
+            expected_topic_ids=expected_topic_ids,
+            entries=entries,
+            all_topic_id=all_topic_id,
+            include_all_row=False,
+            require_no_extras=require_no_extra_topics,
+        )
+
     if require_same_topics_per_run:
         verify_complete_topics_per_run(
             entries=entries,
             all_topic_id=all_topic_id,
             include_all_row=False,
         )
-        
+
 
 
 

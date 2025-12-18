@@ -1,7 +1,5 @@
 
-from typing import List, Dict, Optional, Set
-from typing import TypeAlias, List
-from collections import defaultdict
+from typing import TypeVar, Generic, Callable, Iterable
 from pathlib import Path
 from dataclasses import dataclass
 import hashlib
@@ -11,31 +9,134 @@ def doc_id_md5(text: str) -> str:
     return hashlib.md5(text.encode("utf-8")).hexdigest()
 
 
+from dataclasses import dataclass
+from typing import Callable, Generic, Iterable, Sequence, TypeVar
+
+R = TypeVar("R")
+
 @dataclass(frozen=True)
-class QrelEntry:
-    query_id:str
-    doc_id:str
-    grade:int
+class QrelRow:
+    topic_id: str
+    doc_id: str
+    grade: int
+
+@dataclass(frozen=True)
+class QrelsSpec(Generic[R]):
+    topic_id: Callable[[R], str]
+    doc_id: Callable[[R], str]     # <-- already resolved, just a string
+    grade: Callable[[R], int]
+    on_duplicate: str = "error"    # "error" | "keep_max" | "keep_last"
+
+@dataclass(frozen=True)
+class Qrels:
+    """
+    Collection of relevance judgments.
+
+    Qrels are intentionally policy-free:
+      - doc_id is opaque
+      - no assumptions about corpus vs generated content
+      - no assumptions about how grades are produced
+    """
+    rows: Sequence[QrelRow]
     
-    def format_qrels(self) -> str:
-        return f"{self.query_id} 0 {self.doc_id} {self.grade}\n"
+# === Qrel builder ===
 
-Qrels: TypeAlias = List[QrelEntry]
+def build_qrels(*, records: Iterable[R], spec: QrelsSpec[R]) -> list[QrelRow]:
+    seen: dict[tuple[str, str], int] = {}
+    for r in records:
+        tid = spec.topic_id(r)
+        did = spec.doc_id(r)
+        g = int(spec.grade(r))
 
-def write_qrel_file(qrel_out_file:Path, qrel_entries:List[QrelEntry]):
-    '''Use to write qrels file'''
-    with open(qrel_out_file, 'wt', encoding='utf-8') as file:
-        file.writelines(entry.format_qrels() for entry in qrel_entries)
-        file.close()
-
-def read_qrel_file(qrel_in_file:Path) ->List[QrelEntry]:
-    '''Use to read qrel file'''
-    with open(qrel_in_file, 'rt') as file:
-        qrel_entries:List[QrelEntry] = list()
-        for line in file.readlines():
-            splits = line.split(" ")
-            if len(splits)>=4:
-                qrel_entries.append(QrelEntry(query_id=splits[0], doc_id=splits[2], grade=int(splits[3])))
+        key = (tid, did)
+        if key in seen:
+            if spec.on_duplicate == "error":
+                raise ValueError(f"Duplicate qrel for {key}: old={seen[key]} new={g}")
+            elif spec.on_duplicate == "keep_max":
+                seen[key] = max(seen[key], g)
+            elif spec.on_duplicate == "keep_last":
+                seen[key] = g
             else:
-                raise RuntimeError(f"All lines in qrels file needs to contain four columns. Offending line: \"{line}\"")
-    return qrel_entries
+                raise ValueError(f"Unknown on_duplicate: {spec.on_duplicate}")
+        else:
+            seen[key] = g
+
+    return [QrelRow(topic_id=tid, doc_id=did, grade=g) for (tid, did), g in seen.items()]
+
+#  === Qrel verification ===
+
+def verify_all_topics_present(
+    *,
+    expected_topic_ids: Sequence[str],
+    qrels: Iterable[QrelRow],
+) -> None:
+    """
+    Verify that every expected topic_id has at least one qrel row.
+    """
+    expected = set(expected_topic_ids)
+    seen = set()
+
+    for r in qrels:
+        if r.topic_id in expected:
+            seen.add(r.topic_id)
+
+    missing = expected - seen
+    if missing:
+        # Keep message small but actionable
+        raise ValueError(f"Missing qrels for {len(missing)} topic_id(s), e.g. {sorted(missing)[:5]}")
+    
+def verify_no_unexpected_topics(
+    *,
+    expected_topic_ids: Sequence[str],
+    qrels: Iterable[QrelRow],
+) -> None:
+    expected = set(expected_topic_ids)
+    extras = {r.topic_id for r in qrels} - expected
+    if extras:
+        raise ValueError(f"Found unexpected topic_id(s) in qrels, e.g. {sorted(extras)[:5]}")
+
+
+def verify_qrels_topics(
+    *,
+    expected_topic_ids: Sequence[str],
+    qrels: Iterable[QrelRow],
+    require_no_extras: bool = False,
+) -> None:
+    verify_all_topics_present(expected_topic_ids=expected_topic_ids, qrels=qrels)
+    if require_no_extras:
+        verify_no_unexpected_topics(expected_topic_ids=expected_topic_ids, qrels=qrels)
+
+
+# === serialization ===
+
+from pathlib import Path
+from typing import Iterable, Union, TextIO
+
+
+def write_qrel_file(
+    *,
+    qrel_out_file: Union[str, Path],
+    qrel_entries: Iterable["QrelRow"],
+    system_id: str = "0",
+) -> None:
+    """
+    Write qrels in standard TREC format:
+
+        topic_id  system_id  doc_id  grade
+
+    Notes:
+    - `system_id` is conventionally '0' for human or synthetic judgments.
+    - Ordering is deterministic (sorted by topic_id, then doc_id).
+    """
+    path = Path(qrel_out_file)
+    path.parent.mkdir(parents=True, exist_ok=True)
+
+    # Sort for reproducibility
+    rows = sorted(
+        qrel_entries,
+        key=lambda r: (r.topic_id, r.doc_id),
+    )
+
+    with path.open("w", encoding="utf-8") as f:
+        for r in rows:
+            f.write(f"{r.topic_id} {system_id} {r.doc_id} {r.grade}\n")
