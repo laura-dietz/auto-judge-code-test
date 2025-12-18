@@ -53,6 +53,9 @@ class ReportMetaData(BaseModel):
         if self.topic_id is None:
             raise RuntimeError(f"ReportMetaData does not contain topic_id or narrative_id: {self}")
 
+        # Expose as RAG format
+        if self.narrative_id is None:
+            self.narrative_id = self.topic_id
 
     class Config:
         populate_by_name = True
@@ -96,9 +99,13 @@ class Report(BaseModel):
             # RAG
             self.responses = self.answer
 
+        # RAGTIME validation
         if self.responses is None:
             raise RuntimeError(f"Report does not contain responses or amswer: {self}")
 
+        # Expose as RAG format
+        if self.answer is None:
+            self.answer = self.responses
 
         
     def get_report_text(self):
