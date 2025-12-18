@@ -37,7 +37,7 @@ class ReportMetaData(BaseModel):
     # include narrative_id (topic id) and narrative (topic text)
     # if the track requires them; 
     # collection_ids should be ["msmarco_v2.1_doc_segmented"].
-    narrative_id:Optional[str] = None  # topic_id
+    narrative_id:Optional[str|int] = None  # topic_id
     narrative:Optional[str] = None  # topic text
 
 
@@ -47,8 +47,13 @@ class ReportMetaData(BaseModel):
     def model_post_init(self, __context__: dict | None = None) -> None:
         if self.topic_id is None:
             # print("metadata topic_id is None, looking at other fields", self)
-            # RAG
-            self.topic_id = self.narrative_id
+            # RAG input
+            if self.narrative_id is not None:
+                if isinstance(self.narrative_id,int):
+                    self.topic_id = f"{self.narrative_id}"
+                else:
+                    set.topic_id = self.narrative_id
+            
 
         if self.topic_id is None:
             raise RuntimeError(f"ReportMetaData does not contain topic_id or narrative_id: {self}")
@@ -72,25 +77,32 @@ class ReportMetaData(BaseModel):
 
     
 class NeuclirReportSentence(BaseModel):
-    text:str
     citations: Optional[List[str]] = None    
+    text:str
     metadata: Optional[Dict[str,Any]] = None
     evaldata: Optional[Dict[str,Any]] = None
 
 
 class RagtimeReportSentence(BaseModel):
-    text:str
     citations: Optional[Dict[str,float]] = None
+    text:str
     metadata: Optional[Dict[str,Any]] = None
     evaldata: Optional[Dict[str,Any]] = None
 
-ReportSentence: TypeAlias = RagtimeReportSentence | NeuclirReportSentence
+class Rag24ReportSentence(BaseModel):
+    citations: Optional[List[int]] = None    
+    text:str
+    metadata: Optional[Dict[str,Any]] = None
+    evaldata: Optional[Dict[str,Any]] = None
+
+
+ReportSentence: TypeAlias = RagtimeReportSentence | NeuclirReportSentence | Rag24ReportSentence
 
 class Report(BaseModel):
     is_ragtime:bool = True
     metadata:ReportMetaData
-    responses:Optional[List[NeuclirReportSentence]|List[RagtimeReportSentence]]=None
-    answer:Optional[List[NeuclirReportSentence]|List[RagtimeReportSentence]]=None
+    responses:Optional[List[NeuclirReportSentence]|List[RagtimeReportSentence]|List[Rag24ReportSentence]]=None
+    answer:Optional[List[NeuclirReportSentence]|List[RagtimeReportSentence]|List[Rag24ReportSentence]]=None
     path:Optional[Path]=None
     references:Optional[List[str]]=None
     
