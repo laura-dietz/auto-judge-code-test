@@ -52,7 +52,7 @@ class ReportMetaData(BaseModel):
                 if isinstance(self.narrative_id,int):
                     self.topic_id = f"{self.narrative_id}"
                 else:
-                    set.topic_id = self.narrative_id
+                    self.topic_id = self.narrative_id
             
 
         if self.topic_id is None:

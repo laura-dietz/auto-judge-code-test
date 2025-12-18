@@ -7,9 +7,8 @@ from typing import List
 from .report import load_report, Report
 
 
-# TODO: Incorporate the pydantic file that Laura shared.
-_REQUIRED_FIELDS = ["metadata", "responses", "answer"]
-
+# # TODO: Incorporate the pydantic file that Laura shared.
+# _REQUIRED_FIELDS = ["metadata", "responses", "answer"]
 
 # def load_run_failsave(path: Path):
 #     if not path or not path.exists() or not path.is_file():

@@ -8,11 +8,11 @@ from dataclasses import dataclass, field
 
 
 
-from trec_auto_judge.click import option_rag_responses, option_rag_topics
-from trec_auto_judge.request import Request
-from trec_auto_judge.report import Report
-from trec_auto_judge.leaderboard import *
-from trec_auto_judge.qrels import *
+# from trec_auto_judge.click import option_rag_responses, option_rag_topics
+# from trec_auto_judge.request import Request
+# from trec_auto_judge.report import Report
+# from trec_auto_judge.leaderboard import *
+# from trec_auto_judge.qrels import *
 from trec_auto_judge import *
 
 # crucible
@@ -51,6 +51,14 @@ UMBRELA_QRELS = QrelsSpec["UmbrelaAnnotation"](
     grade=lambda r: r.match_score,
     on_duplicate="error"
 )
+
+
+
+def umbrela_to_qrels(
+    prompt_output: Iterable["UmbrelaAnnotation"]
+) -> Qrels:
+    qrels = build_qrels(records=prompt_output, spec=UMBRELA_QRELS)    
+    return qrels
 
 class UmbrelaJudge:
     def judge(
@@ -97,7 +105,6 @@ class UmbrelaJudge:
                                                 ,problem_statement = problem_statement
                                                 )
                 alignment_input_list.append(prompt_objs)
-            # return (alignment_input_list, None)
             return alignment_input_list
 
 
@@ -129,65 +136,8 @@ class UmbrelaJudge:
         print("Debug out", "\n".join(str(p) for p in prompt_input[0:1]))
 
         leaderboard = umbrela_to_leaderboard(prompt_output=prompt_output)
-        qrels = umbrela_to_qrels(  prompt_output, grade_fn=lambda res: res.answerability)
+        qrels = umbrela_to_qrels(  prompt_output)
         return (leaderboard, qrels)
-# =======
-
-#         def prepare_prompts()->List[UmbrelaAnnotation]:
-#             alignment_input_list = list()
-#             for rag_response in rag_responses:
-#                 metadata = rag_response["metadata"]
-#                 run_id = metadata["run_id"]
-#                 topic_id = metadata["narrative_id"]
-
-#                 text = " ".join([i["text"] for i in rag_response["answer"]])  # todo use the Report format
-
-#                 topic = topic_dict[topic_id]
-#                 if topic is None:
-#                     raise RuntimeError("Could not identify request object for topic {topic_id}")
-
-#                 if topic.title is None:
-#                     raise RuntimeError(f"Missing fields in report request: title {topic.title}, background:{topic.background}, problem_statement: {topic.problem_statement}.")
-
-#                 problem_statement = topic.problem_statement if topic.problem_statement else f"Identify information that is relevant to the query {topic.title}"
-#                 background = topic.background if topic.background else f"I want to find relevant information on {topic.title}"
-
-#                 prompt_objs = UmbrelaAnnotation(query_id = topic_id
-#                                                 , run_id = run_id
-#                                                 ,source_document = text
-#                                                 ,metadata= metadata
-#                                                 ,title_query = topic.title
-#                                                 ,background = background
-#                                                 ,problem_statement = problem_statement
-#                                                 )
-#                 alignment_input_list.append(prompt_objs)
-#             # return (alignment_input_list, None)
-#             return alignment_input_list
-
-
-    #     def umbrela_to_leaderboard(prompt_output: Iterable["UmbrelaAnnotation"], measures) -> Leaderboard:
-    #             per_topic_entries = [
-    #                 LeaderboardEntry(
-    #                     run_id=res.run_id,
-    #                     topic_id=res.query_id,
-    #                     values={
-    #                         "GRADE": float(res.match_score),
-    #                         "IS_MATCH": bool(res.is_match),
-    #                     },
-    #                 )
-    #                 for res in prompt_output
-    #             ]
-    #             return Leaderboard.from_entries_with_all(measures=measures, entries=per_topic_entries)
-
-    #     # prompt_input = prepare_prompts()
-    #     # print("Debug in", "\n".join(str(p) for p in prompt_input[0:1]))
-        
-    #     # prompt_output = evaluator_run(prompt=Umbrela, output_converter=Umbrela.convert_output, alignment_input_list=prompt_input)
-    #     # print("Debug out", "\n".join(str(p) for p in prompt_input[0:1]))
-
-    # leaderboard = umbrela_to_leaderboard(prompt_output=prompt_output, measures = MEASURES)
-    # qrels = umbrela_to_qrels(  prompt_output, grade_fn=lambda res: res.answerability)
-    # return (leaderboard, qrels)
 
 # below here all should move into the TIRA CLI, or be a main class with its own CLI for development
 
