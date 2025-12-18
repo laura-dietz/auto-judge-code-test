@@ -28,7 +28,10 @@ jobs:
         run: |
           pip3 install .[test]
           pip3 install --no-deps ir_datasets
-      - name: Run integration tests
+      - name: Prepare Integration Tests
         working-directory: ${{github.workspace}}/
         run: |
           python3 -m pytest integration-tests
+      - name: Test Naive Judge
+        run: |
+          tira-cli code-submission --dry-run --path trec25/judges/naive/ --task trec-auto-judge --dataset spot-check-dataset-20251202-training --command '/naive-baseline.py --rag-responses $inputDataset --output $outputDir/leaderboard.trec'
