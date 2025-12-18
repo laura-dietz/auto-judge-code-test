@@ -209,7 +209,7 @@ def main(rag_responses: List[Report], rag_topics: List[Request], output:Path):
     # write_leaderboard(leaderboard=leaderboard, output=output)
     leaderboard.write(output=output)
     if qrels_opt is not None:
-        write_qrel_file(qrel_out_file=output.with_suffix(".qrels"), qrel_entries= qrels_opt)
+        write_qrel_file(qrel_out_file=output.with_suffix(".qrels"), qrels= qrels_opt)
 
 if __name__ == '__main__':
     main()

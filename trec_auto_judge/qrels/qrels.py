@@ -1,16 +1,14 @@
+from typing import TypeVar, Generic, Callable, Iterable, Sequence, Iterable, Union
 
-from typing import TypeVar, Generic, Callable, Iterable
 from pathlib import Path
 from dataclasses import dataclass
 import hashlib
-
+from pathlib import Path
 
 def doc_id_md5(text: str) -> str:
     return hashlib.md5(text.encode("utf-8")).hexdigest()
 
 
-from dataclasses import dataclass
-from typing import Callable, Generic, Iterable, Sequence, TypeVar
 
 R = TypeVar("R")
 
@@ -23,7 +21,7 @@ class QrelRow:
 @dataclass(frozen=True)
 class QrelsSpec(Generic[R]):
     topic_id: Callable[[R], str]
-    doc_id: Callable[[R], str]     # <-- already resolved, just a string
+    doc_id: Callable[[R], str]   
     grade: Callable[[R], int]
     on_duplicate: str = "error"    # "error" | "keep_max" | "keep_last"
 
@@ -61,14 +59,14 @@ def build_qrels(*, records: Iterable[R], spec: QrelsSpec[R]) -> list[QrelRow]:
         else:
             seen[key] = g
 
-    return [QrelRow(topic_id=tid, doc_id=did, grade=g) for (tid, did), g in seen.items()]
+    return Qrels(rows=[QrelRow(topic_id=tid, doc_id=did, grade=g) for (tid, did), g in seen.items()])
 
 #  === Qrel verification ===
 
 def verify_all_topics_present(
     *,
     expected_topic_ids: Sequence[str],
-    qrels: Iterable[QrelRow],
+    qrels: Qrels,
 ) -> None:
     """
     Verify that every expected topic_id has at least one qrel row.
@@ -76,7 +74,7 @@ def verify_all_topics_present(
     expected = set(expected_topic_ids)
     seen = set()
 
-    for r in qrels:
+    for r in qrels.rows:
         if r.topic_id in expected:
             seen.add(r.topic_id)
 
@@ -88,10 +86,10 @@ def verify_all_topics_present(
 def verify_no_unexpected_topics(
     *,
     expected_topic_ids: Sequence[str],
-    qrels: Iterable[QrelRow],
+    qrels: Qrels,
 ) -> None:
     expected = set(expected_topic_ids)
-    extras = {r.topic_id for r in qrels} - expected
+    extras = {r.topic_id for r in qrels.rows} - expected
     if extras:
         raise ValueError(f"Found unexpected topic_id(s) in qrels, e.g. {sorted(extras)[:5]}")
 
@@ -99,7 +97,7 @@ def verify_no_unexpected_topics(
 def verify_qrels_topics(
     *,
     expected_topic_ids: Sequence[str],
-    qrels: Iterable[QrelRow],
+    qrels: Qrels,
     require_no_extras: bool = False,
 ) -> None:
     verify_all_topics_present(expected_topic_ids=expected_topic_ids, qrels=qrels)
@@ -109,14 +107,11 @@ def verify_qrels_topics(
 
 # === serialization ===
 
-from pathlib import Path
-from typing import Iterable, Union, TextIO
-
 
 def write_qrel_file(
     *,
     qrel_out_file: Union[str, Path],
-    qrel_entries: Iterable["QrelRow"],
+    qrels: Qrels,
     system_id: str = "0",
 ) -> None:
     """
@@ -133,7 +128,7 @@ def write_qrel_file(
 
     # Sort for reproducibility
     rows = sorted(
-        qrel_entries,
+        qrels.rows,
         key=lambda r: (r.topic_id, r.doc_id),
     )
 
