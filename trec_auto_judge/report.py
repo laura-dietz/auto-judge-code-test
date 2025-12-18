@@ -18,7 +18,7 @@ class ReportMetaData(BaseModel):
     """Report meta data for requested reports"""
     team_id:str
     run_id:str
-    topic_id:str
+    topic_id:str = None
     collection_ids:Optional[List[str]] = None
     task:Optional[TaskType] = None
     description:Optional[str] = None
@@ -43,7 +43,16 @@ class ReportMetaData(BaseModel):
 
     # AutoJudge
     evaldata: Optional[Dict[str,Any]] = None
-    
+
+    def model_post_init(self, __context__: dict | None = None) -> None:
+        if self.topic_id is None:
+            # print("metadata topic_id is None, looking at other fields", self)
+            # RAG
+            self.topic_id = self.narrative_id
+
+        if self.topic_id is None:
+            raise RuntimeError(f"ReportMetaData does not contain topic_id or narrative_id: {self}")
+
 
     class Config:
         populate_by_name = True
@@ -82,6 +91,16 @@ class Report(BaseModel):
     path:Optional[Path]=None
     references:Optional[List[str]]=None
     
+    def model_post_init(self, __context__: dict | None = None) -> None:
+        if self.responses is None:
+            # RAG
+            self.responses = self.answer
+
+        if self.responses is None:
+            raise RuntimeError(f"Report does not contain responses or amswer: {self}")
+
+
+        
     def get_report_text(self):
         return " ".join([sent.text for sent in self.responses])
 

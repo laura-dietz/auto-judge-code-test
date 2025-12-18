@@ -66,12 +66,17 @@ class UmbrelaJudge:
 
         def prepare_prompts()->List[UmbrelaAnnotation]:
             alignment_input_list = list()
+            rag_response:Report
             for rag_response in rag_responses:
-                metadata = rag_response["metadata"]
-                run_id = metadata["run_id"]
-                topic_id = metadata["narrative_id"]
+                print("rag response", rag_response)
+                
+                metadata = rag_response.metadata
+                run_id = metadata.run_id
+                topic_id = metadata.topic_id
+                
+                print ("metadata", metadata)
 
-                text = " ".join([i["text"] for i in rag_response["answer"]])  # todo use the Report format
+                text = rag_response.get_report_text()
 
                 topic = topic_dict[topic_id]
                 if topic is None:
