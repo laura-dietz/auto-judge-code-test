@@ -4,20 +4,22 @@ from collections import defaultdict
 from statistics import mean
 from dataclasses import dataclass, field
 
-from typing import Union, Callable, Sequence, Dict, List, DefaultDict, Iterable
+from typing import Union, Callable, Sequence, Dict, List, DefaultDict, Iterable, Any
 
 
 MeasureName = str
 
+AggregateFn = Callable[[Sequence[Any]], Any]
 
 @dataclass(frozen=True)
 class MeasureDef:
-    """
-    Generic definition of a measure.
+    aggregate: AggregateFn
 
-    aggregate(values) should compute the per-run 'all' value from per-topic values.
-    """
-    aggregate: Callable[[Sequence[object]], object]
+def mean_of_floats(values: Sequence[Any]) -> float:
+    return mean(float(v) for v in values)
+
+def mean_of_bools(values: Sequence[Any]) -> float:
+    return mean(1.0 if bool(v) else 0.0 for v in values)
 
 
 @dataclass(frozen=True)
@@ -74,7 +76,9 @@ class Leaderboard:
                 LeaderboardEntry(run_id=run_id, topic_id=all_topic_id, values=agg_vals)
             )
 
-        return cls(measures=measures, entries=base_entries + all_entries)
+        print(f"leaderboard with {len(base_entries)} base entries and {len(all_entries)} all entries")
+        all_entries.extend(base_entries)
+        return cls(measures=measures, entries=all_entries+base_entries)
 
     def write(self, output: Path) -> None:
         """
@@ -87,7 +91,8 @@ class Leaderboard:
                     lines.append("\t".join([e.run_id,m,e.topic_id,str(e.values[m])]))
 
         output.parent.mkdir(parents=True, exist_ok=True)
-        output.write_text("\n".join(lines) + "\n")
+        print(f"Writing leaderboard to {output.absolute()}")
+        output.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 # ================
 # Default Aggregators

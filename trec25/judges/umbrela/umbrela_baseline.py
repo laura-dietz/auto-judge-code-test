@@ -44,7 +44,11 @@ class UmbrelaAnnotation(BaseModel):
     match_score:Optional[float] = None
 
 
-MEASURES = {
+# MEASURES = {
+#     "GRADE": MeasureDef(aggregate=MeanOfFloats),
+#     "IS_MATCH": MeasureDef(aggregate=MeanOfBools),
+# }
+MEASURES: Dict[str, MeasureDef] = {
     "GRADE": MeasureDef(aggregate=mean_of_floats),
     "IS_MATCH": MeasureDef(aggregate=mean_of_bools),
 }
@@ -217,6 +221,7 @@ def main(rag_responses: List[Report], rag_topics: List[Request], output:Path):
 <<<<<<< HEAD
 <<<<<<< HEAD
     (leaderboard, qrels_opt) = UmbrelaJudge().judge(rag_responses=rag_responses, rag_topics=rag_topics)
+<<<<<<< HEAD
 =======
     (leaderboard, qrels_opt) = judge(rag_responses=rag_responses, rag_topics=rag_topics)
 >>>>>>> c17b4ed (Umbrela with Leaderboard and Qrels writing infra)
@@ -224,6 +229,9 @@ def main(rag_responses: List[Report], rag_topics: List[Request], output:Path):
     (leaderboard, qrels_opt) = UmbrelaJudge().judge(rag_responses=rag_responses, rag_topics=rag_topics)
 >>>>>>> 47a29fd (wrapping the UmbrelaJudge in the AutoJudge Protocol)
     write_leaderboard(leaderboard=leaderboard, output=output)
+=======
+    leaderboard.write(output=output)
+>>>>>>> aa06074 (After leaderboad refactor: Umbrela back to working)
     if qrels_opt is not None:
         write_qrel_file(qrel_out_file=output.with_suffix(".qrels"), qrel_entries= qrels_opt)
 
