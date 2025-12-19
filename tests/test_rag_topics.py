@@ -59,49 +59,49 @@ class TestRagTopicsIntegration(unittest.TestCase):
         self.assertIn("Topics: 2", result.output)
         self.assertEqual(0, result.exit_code)
 
-    def _test_local_directory_implicit_via_rag_responses(self):
+    def test_local_directory_implicit_via_rag_responses(self):
         runner = CliRunner()
-        result = runner.invoke(rag_stats2, ["--rag-responses", TREC_25_DATA / "spot-check-dataset"])
+        result = runner.invoke(rag_stats2, ["--rag-responses", TREC_25_DATA / "spot-check-dataset" / "runs"])
         print(result.exception)
         print(result.output)
         self.assertIn("Topics: 225", result.output)
         self.assertEqual(0, result.exit_code)
 
-    def _test_local_directory_implicit_via_rag_responses3(self):
+    def test_local_directory_implicit_via_rag_responses3(self):
         runner = CliRunner()
-        result = runner.invoke(rag_stats3, ["--rag-topics", str(RESORUCES_DIR / "example-irds-corpus"), "--rag-responses", TREC_25_DATA / "spot-check-dataset"])
+        result = runner.invoke(rag_stats3, ["--rag-topics", str(RESORUCES_DIR / "example-irds-corpus"), "--rag-responses", TREC_25_DATA / "spot-check-dataset" / "runs"])
         print(result.exception)
         print(result.output)
         self.assertIn("Topics: 5", result.output)
         self.assertEqual(0, result.exit_code)
 
-    def _test_local_directory_implicit_via_rag_responses4(self):
+    def test_local_directory_implicit_via_rag_responses4(self):
         runner = CliRunner()
-        result = runner.invoke(rag_stats3, ["--rag-responses", TREC_25_DATA / "spot-check-dataset", "--rag-topics", str(RESORUCES_DIR / "example-irds-corpus")])
+        result = runner.invoke(rag_stats3, ["--rag-responses", TREC_25_DATA / "spot-check-dataset" / "runs", "--rag-topics", str(RESORUCES_DIR / "example-irds-corpus")])
         print(result.exception)
         print(result.output)
         self.assertIn("Topics: 5", result.output)
         self.assertEqual(0, result.exit_code)
 
-    def _test_local_directory_implicit_via_rag_responses5(self):
+    def test_local_directory_implicit_via_rag_responses5(self):
         runner = CliRunner()
-        result = runner.invoke(rag_stats2, ["--rag-responses", TREC_25_DATA / "spot-check-dataset", "--rag-topics", str(RESORUCES_DIR / "example-irds-corpus")])
+        result = runner.invoke(rag_stats2, ["--rag-responses", TREC_25_DATA / "spot-check-dataset" / "runs", "--rag-topics", str(RESORUCES_DIR / "example-irds-corpus")])
         print(result.exception)
         print(result.output)
         self.assertIn("Topics: 5", result.output)
         self.assertEqual(0, result.exit_code)
 
-    def _test_local_directory_implicit_on_local_directory1(self):
+    def test_local_directory_implicit_on_local_directory1(self):
         runner = CliRunner()
-        result = runner.invoke(rag_stats2, ["--rag-responses", str(RESORUCES_DIR / "spot-check-fully-local")])
+        result = runner.invoke(rag_stats2, ["--rag-responses", str(RESORUCES_DIR / "spot-check-fully-local" / "runs" )])
         print(result.exception)
         print(result.output)
         self.assertIn("Topics: 5", result.output)
         self.assertEqual(0, result.exit_code)
 
-    def _test_local_directory_implicit_on_local_directory2(self):
+    def test_local_directory_implicit_on_local_directory2(self):
         runner = CliRunner()
-        result = runner.invoke(rag_stats3, ["--rag-responses", str(RESORUCES_DIR / "spot-check-fully-local")])
+        result = runner.invoke(rag_stats3, ["--rag-responses", str(RESORUCES_DIR / "spot-check-fully-local" / "runs")])
         print(result.exception)
         print(result.output)
         self.assertIn("Topics: 5", result.output)
