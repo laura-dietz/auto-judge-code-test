@@ -136,7 +136,8 @@ class UmbrelaJudge:
         print("Debug out", "\n".join(str(p) for p in prompt_input[0:1]))
 
         leaderboard = umbrela_to_leaderboard(prompt_output=prompt_output)
-        qrels = umbrela_to_qrels(  prompt_output)
+        #qrels = umbrela_to_qrels(prompt_output)
+        qrels = None
         return (leaderboard, qrels)
 
 # below here all should move into the TIRA CLI, or be a main class with its own CLI for development
