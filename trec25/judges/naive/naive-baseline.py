@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-from trec_auto_judge.click import option_rag_responses
+from trec_auto_judge import option_rag_responses, Report, LeaderboardSpec, LeaderboardBuilder, mean_of_floats, MeasureSpec
 import click
 from pathlib import Path
 from collections import defaultdict
@@ -7,39 +7,35 @@ from tqdm import tqdm
 from statistics import mean
 import random
 
+
 def rand(seed: str) -> float:
     random.seed(seed)
     return random.random()
 
 
+NAIVE_LEADERBOARD_SPEC = LeaderboardSpec(measures=(
+    MeasureSpec("LENGTH", aggregate=mean_of_floats, cast=float),
+    MeasureSpec("RANDOM", aggregate=mean_of_floats, cast=float),
+))
+
 
 @click.command("naive_baseline")
 @click.option("--output", type=Path, help="The output file.", required=True)
 @option_rag_responses()
-def main(rag_responses: list[dict], output: Path):
+def main(rag_responses: list[Report], output: Path):
     """
     A naive rag response assessor that just orders each response by its length.
     """
-    ret = []
-    run_to_lengths = defaultdict(list)
+    ret = LeaderboardBuilder(NAIVE_LEADERBOARD_SPEC)
+
     for rag_response in tqdm(rag_responses, "Process RAG Responses"):
-        metadata = rag_response["metadata"]
-        run_id = metadata["run_id"]
-        topic_id = metadata["narrative_id"]
-        text = " ".join([i["text"] for i in rag_response["answer"]])
-        text_length = len(text.split())
+        vals = {
+            "LENGTH": len(rag_response.get_report_text().split()),
+            "RANDOM": rand(rag_response.metadata.run_id + rag_response.metadata.topic_id)
+        }
+        ret.add(run_id=rag_response.metadata.run_id, topic_id=rag_response.metadata.topic_id, values=vals)
 
-        run_to_lengths[run_id].append(text_length)
-
-        ret.append(f"{run_id} LENGTH {topic_id} {text_length}")
-        ret.append(f"{run_id} RANDOM {topic_id} {rand(run_id + topic_id)}")
-
-    for run_id, text_lengths in run_to_lengths.items():
-        ret.append(f"{run_id} LENGTH all {mean(text_lengths)}")
-        ret.append(f"{run_id} RANDOM all {rand(run_id)}")
-
-    output.parent.mkdir(exist_ok=True, parents=True)
-    output.write_text("\n".join(ret))
+    ret.build().write(output=output)
 
 
 if __name__ == '__main__':
