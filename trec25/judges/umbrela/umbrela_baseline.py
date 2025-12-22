@@ -30,9 +30,9 @@ UMBRELA_SPEC = LeaderboardSpec(measures=(
 
 UMBRELA_QRELS = QrelsSpec["UmbrelaAnnotation"](
     topic_id=lambda r: r.query_id,
-    doc_id=lambda r: doc_id_md5(r.source_document + r.query_id),
+    doc_id=lambda r: doc_id_md5(r.source_document),
     grade=lambda r: r.match_score,
-    on_duplicate="error"
+    on_duplicate="keep_max"
 )
 
 
