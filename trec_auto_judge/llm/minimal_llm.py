@@ -506,6 +506,9 @@ class OpenAIMinimaLlm(AsyncMinimaLlmBackend):
                 headers = {k.lower(): v for k, v in e.headers.items()} if e.headers else {}
                 data = e.read() if e.fp is not None else b""
                 return int(e.code), headers, data
+            except urllib.error.URLError as e:
+                # Timeout or connection error - return synthetic 408 for retry
+                return 408, {}, f"URLError: {e.reason}".encode()
 
         return await asyncio.to_thread(_do)
 
