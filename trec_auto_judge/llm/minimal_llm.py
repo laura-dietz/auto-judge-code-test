@@ -171,7 +171,6 @@ class _FailureCollector:
     def summary_lines(self) -> List[str]:
         return list(self._summaries)
 
-
 class _Heartbeat:
     def __init__(self, *, interval_seconds: float, stall_timeout_seconds: float) -> None:
         self._every_s = float(interval_seconds)
@@ -183,17 +182,72 @@ class _Heartbeat:
     def mark_done(self) -> None:
         self._last_done = time.monotonic()
 
+    @staticmethod
+    def _fmt_eta(seconds: float) -> str:
+        if seconds < 0 or not seconds < float("inf"):
+            return "?"
+        m, s = divmod(int(seconds), 60)
+        h, m = divmod(m, 60)
+        if h > 0:
+            return f"{h:d}h{m:02d}m"
+        if m > 0:
+            return f"{m:d}m{s:02d}s"
+        return f"{s:d}s"
+
     def maybe_print(self, *, done: int, total: int, failed: int) -> None:
         now = time.monotonic()
+
         if self._every_s > 0 and (now - self._last_print) >= self._every_s:
             elapsed = now - self._start
-            print(f"[{elapsed:7.1f}s] completed={done}/{total} failed={failed}")
+
+            # ETA estimation
+            if done > 0 and elapsed > 0:
+                rate = done / elapsed  # items per second
+                remaining = max(0, total - done)
+                eta_s = remaining / rate if rate > 0 else float("inf")
+                eta_str = self._fmt_eta(eta_s)
+            else:
+                eta_str = "?"
+
+            print(
+                f"[{elapsed:7.1f}s] "
+                f"completed={done}/{total} "
+                f"failed={failed} "
+                f"eta={eta_str}"
+            )
             self._last_print = now
 
         if self._stall_s > 0 and (now - self._last_done) >= self._stall_s:
             elapsed = now - self._start
-            print(f"[{elapsed:7.1f}s] WARNING: no completions for {now - self._last_done:.1f}s")
+            print(
+                f"[{elapsed:7.1f}s] WARNING: "
+                f"no completions for {now - self._last_done:.1f}s"
+            )
             self._last_done = now  # avoid spamming
+
+
+# class _Heartbeat:
+#     def __init__(self, *, interval_seconds: float, stall_timeout_seconds: float) -> None:
+#         self._every_s = float(interval_seconds)
+#         self._stall_s = float(stall_timeout_seconds)
+#         self._start = time.monotonic()
+#         self._last_done = self._start
+#         self._last_print = self._start
+
+#     def mark_done(self) -> None:
+#         self._last_done = time.monotonic()
+
+#     def maybe_print(self, *, done: int, total: int, failed: int) -> None:
+#         now = time.monotonic()
+#         if self._every_s > 0 and (now - self._last_print) >= self._every_s:
+#             elapsed = now - self._start           
+#             print(f"[{elapsed:7.1f}s] completed={done}/{total} failed={failed}")
+#             self._last_print = now
+
+#         if self._stall_s > 0 and (now - self._last_done) >= self._stall_s:
+#             elapsed = now - self._start
+#             print(f"[{elapsed:7.1f}s] WARNING: no completions for {now - self._last_done:.1f}s")
+#             self._last_done = now  # avoid spamming
 
 
 # ----------------------------
@@ -339,9 +393,23 @@ class OpenAIMinimaLlm(AsyncMinimaLlmBackend):
             h["Content-Encoding"] = "gzip"
         return h
 
-    async def _post_json(self, url: str, payload: Json) -> Tuple[int, bytes]:
+    @staticmethod
+    def _parse_retry_after(headers: Dict[str, str]) -> Optional[float]:
+        """Extract Retry-After header as seconds (float)."""
+        ra = headers.get("retry-after")
+        if not ra:
+            return None
+        try:
+            return float(ra)
+        except ValueError:
+            return None
+
+    async def _post_json(self, url: str, payload: Json) -> Tuple[int, Dict[str, str], bytes]:
         """
         Perform a blocking urllib POST in a thread, to keep async-friendly.
+
+        Returns (status_code, headers_dict, body_bytes).
+        Headers are lowercased for consistent lookup.
         """
         body = _json_dumps(payload)
         body_is_gzip = bool(self.cfg.compress_gzip)
@@ -355,13 +423,15 @@ class OpenAIMinimaLlm(AsyncMinimaLlmBackend):
             method="POST",
         )
 
-        def _do() -> Tuple[int, bytes]:
+        def _do() -> Tuple[int, Dict[str, str], bytes]:
             try:
                 with urllib.request.urlopen(req, timeout=self.cfg.timeout_s) as resp:
-                    return int(resp.status), resp.read()
+                    headers = {k.lower(): v for k, v in resp.headers.items()}
+                    return int(resp.status), headers, resp.read()
             except urllib.error.HTTPError as e:
+                headers = {k.lower(): v for k, v in e.headers.items()} if e.headers else {}
                 data = e.read() if e.fp is not None else b""
-                return int(e.code), data
+                return int(e.code), headers, data
 
         return await asyncio.to_thread(_do)
 
@@ -380,7 +450,6 @@ class OpenAIMinimaLlm(AsyncMinimaLlmBackend):
         url = self._endpoint("/v1/chat/completions")
 
         attempt = 0
-        last_status: Optional[int] = None
         last_body: Optional[str] = None
 
         while True:
@@ -389,9 +458,8 @@ class OpenAIMinimaLlm(AsyncMinimaLlmBackend):
             await self._rpm.wait_turn()
 
             async with self._sem:
-                status, raw = await self._post_json(url, payload)
+                status, headers, raw = await self._post_json(url, payload)
 
-            last_status = status
             body_text = raw.decode("utf-8", errors="replace")
             last_body = body_text[:300]
 
@@ -414,10 +482,12 @@ class OpenAIMinimaLlm(AsyncMinimaLlmBackend):
 
                 return MinimaLlmResponse(request_id=req.request_id, text=str(text), raw=data)
 
-            # non-2xx
+            # non-2xx: parse Retry-After if present
+            retry_after = self._parse_retry_after(headers)
+
             if _is_overload_status(status):
-                # bump cooldown gently; server may be overloaded.
-                await self._cooldown.bump(self.cfg.cooldown_floor_s or 1.0)
+                # bump global cooldown with server suggestion (or floor)
+                await self._cooldown.bump(retry_after or self.cfg.cooldown_floor_s or 1.0)
 
             if attempt >= self.cfg.max_attempts or not _is_retriable_status(status):
                 raise RuntimeError(
@@ -425,8 +495,12 @@ class OpenAIMinimaLlm(AsyncMinimaLlmBackend):
                     f"status={status}, attempts={attempt}, body={last_body}"
                 )
 
-            backoff = min(self.cfg.max_backoff_s, self.cfg.base_backoff_s * (2 ** (attempt - 1)))
-            await asyncio.sleep(_jittered(backoff, self.cfg.jitter))
+            # Honor Retry-After if provided; otherwise use exponential backoff
+            if retry_after is not None:
+                await asyncio.sleep(retry_after)
+            else:
+                backoff = min(self.cfg.max_backoff_s, self.cfg.base_backoff_s * (2 ** (attempt - 1)))
+                await asyncio.sleep(_jittered(backoff, self.cfg.jitter))
 
     async def prompt_one(self, req: MinimaLlmRequest) -> MinimaLlmResponse:
         """Backwards-compatible alias for generate()."""
