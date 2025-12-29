@@ -27,7 +27,7 @@ import urllib.request
 from dataclasses import dataclass
 from typing import Any, Awaitable, Callable, Dict, Iterable, List, Optional, Tuple, TypeVar, Union
 
-from .llm_config import MinimaLlmConfig
+from .llm_config import BatchConfig, MinimaLlmConfig
 from .llm_protocol import AsyncMinimaLlmBackend, Json, MinimaLlmRequest, MinimaLlmResponse
 
 T = TypeVar("T")
@@ -146,9 +146,9 @@ def _is_overload_status(status: int) -> bool:
 # ----------------------------
 
 class _FailureCollector:
-    def __init__(self, *, print_first: int, keep_summaries: int) -> None:
-        self._print_first = max(0, int(print_first))
-        self._keep = max(0, int(keep_summaries))
+    def __init__(self, *, print_first_n: int, keep_last_n: int) -> None:
+        self._print_first = max(0, int(print_first_n))
+        self._keep = max(0, int(keep_last_n))
         self._seen = 0
         self._summaries: List[str] = []
 
@@ -156,7 +156,7 @@ class _FailureCollector:
         self._seen += 1
         msg = f"{f.request_id}: {f.error_type}: {f.message}"
         if self._seen <= self._print_first:
-            print(f"⚠️  Failure {self._seen} on request_id={f.request_id}\n    {f.error_type}: {f.message}")
+            print(f"Failure {self._seen} on request_id={f.request_id}\n    {f.error_type}: {f.message}")
             if f.body_snippet:
                 print(f"    body={f.body_snippet}")
         if self._keep > 0:
@@ -173,9 +173,9 @@ class _FailureCollector:
 
 
 class _Heartbeat:
-    def __init__(self, *, every_s: float, stall_s: float) -> None:
-        self._every_s = float(every_s)
-        self._stall_s = float(stall_s)
+    def __init__(self, *, interval_seconds: float, stall_timeout_seconds: float) -> None:
+        self._every_s = float(interval_seconds)
+        self._stall_s = float(stall_timeout_seconds)
         self._start = time.monotonic()
         self._last_done = self._start
         self._last_print = self._start
@@ -201,9 +201,9 @@ class _Heartbeat:
 # ----------------------------
 
 async def run_batched_callable(
-    inputs: List[T],
-    async_fn: Callable[[T], Awaitable[R]],
-    cfg: MinimaLlmConfig,
+    items: List[T],
+    async_callable: Callable[[T], Awaitable[R]],
+    batch_config: Optional[BatchConfig]=None,
 ) -> List[Union[R, MinimaLlmFailure]]:
     """
     Execute a batch of async calls using the worker pool pattern.
@@ -214,11 +214,11 @@ async def run_batched_callable(
 
     Parameters
     ----------
-    inputs : List[T]
-        List of inputs to process
-    async_fn : Callable[[T], Awaitable[R]]
-        Async function to call for each input
-    cfg : MinimaLlmConfig
+    items : List[T]
+        List of items to process
+    async_callable : Callable[[T], Awaitable[R]]
+        Async function to call for each item
+    batch_config : BatchConfig
         Configuration for batch execution (num_workers, max_failures, etc.)
 
     Returns
@@ -226,28 +226,32 @@ async def run_batched_callable(
     List[Union[R, MinimaLlmFailure]]
         Results in input order (success values or MinimaLlmFailure)
     """
-    hb = _Heartbeat(every_s=cfg.heartbeat_s, stall_s=cfg.stall_s)
+    
+    if batch_config is None:
+        batch_config=BatchConfig.from_env()
+    
+    hb = _Heartbeat(interval_seconds=batch_config.heartbeat_s, stall_timeout_seconds=batch_config.stall_s)
     fc = _FailureCollector(
-        print_first=cfg.print_first_failures,
-        keep_summaries=cfg.keep_failure_summaries,
+        print_first_n=batch_config.print_first_failures,
+        keep_last_n=batch_config.keep_failure_summaries,
     )
 
-    total = len(inputs)
+    total = len(items)
     results: List[Optional[Union[R, MinimaLlmFailure]]] = [None] * total
     q: asyncio.Queue[Tuple[int, T]] = asyncio.Queue()
 
-    for i, inp in enumerate(inputs):
-        q.put_nowait((i, inp))
+    for i, item in enumerate(items):
+        q.put_nowait((i, item))
 
     async def worker() -> None:
         while True:
             try:
-                i, inp = q.get_nowait()
+                i, item = q.get_nowait()
             except asyncio.QueueEmpty:
                 return
 
             try:
-                result = await async_fn(inp)
+                result = await async_callable(item)
                 results[i] = result
             except Exception as e:
                 f = MinimaLlmFailure(
@@ -270,14 +274,14 @@ async def run_batched_callable(
                 return
             await asyncio.sleep(0.5)
 
-    workers = [asyncio.create_task(worker()) for _ in range(max(1, int(cfg.num_workers)))]
+    workers = [asyncio.create_task(worker()) for _ in range(max(1, int(batch_config.num_workers)))]
     hb_task = asyncio.create_task(heartbeat_loop())
 
     await asyncio.gather(*workers)
     await hb_task
 
     # Early-abort policy
-    if cfg.max_failures is not None and fc.count > cfg.max_failures:
+    if batch_config.max_failures is not None and fc.count > batch_config.max_failures:
         lines = fc.summary_lines()
         tail = "\n".join(f"  - {s}" for s in lines)
         raise RuntimeError(f"Aborting batch: {fc.count} failures\nRecent failures:\n{tail}")
@@ -439,12 +443,12 @@ class OpenAIMinimaLlm(AsyncMinimaLlmBackend):
         This runs requests concurrently (subject to cfg.max_outstanding) and
         prints a heartbeat for long-running jobs.
         """
-        return await run_batched_callable(requests, self.generate, self.cfg)
+        return await run_batched_callable(requests, self.generate, self.cfg.batch)
 
     async def run_batched_callable(
         self,
-        inputs: List[T],
-        async_fn: Callable[[T], Awaitable[R]],
+        items: List[T],
+        async_callable: Callable[[T], Awaitable[R]],
     ) -> List[Union[R, MinimaLlmFailure]]:
         """
         Execute a batch of async calls using the worker pool pattern.
@@ -452,4 +456,4 @@ class OpenAIMinimaLlm(AsyncMinimaLlmBackend):
         Convenience method that delegates to the standalone run_batched_callable
         function with this backend's configuration.
         """
-        return await run_batched_callable(inputs, async_fn, self.cfg)
+        return await run_batched_callable(items, async_callable, self.cfg.batch)

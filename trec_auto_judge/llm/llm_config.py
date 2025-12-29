@@ -1,10 +1,96 @@
 # llm_config.py
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import os
 from typing import Optional
 
+
+# ----------------------------
+# Helper functions (shared)
+# ----------------------------
+
+def _env_str(name: str) -> Optional[str]:
+    v = os.getenv(name)
+    return None if v in (None, "") else v
+
+
+def _env_int(name: str, default: int) -> int:
+    v = _env_str(name)
+    return default if v is None else int(v)
+
+
+def _env_float(name: str, default: float) -> float:
+    v = _env_str(name)
+    return default if v is None else float(v)
+
+
+def _env_opt_int(name: str, default: Optional[int]) -> Optional[int]:
+    v = _env_str(name)
+    if v is None:
+        return default
+    if v.strip().lower() in ("none", "null"):
+        return None
+    return int(v)
+
+
+def _first_non_none(*vals: Optional[str]) -> Optional[str]:
+    for v in vals:
+        if v is not None:
+            return v
+    return None
+
+
+# ----------------------------
+# Batch configuration
+# ----------------------------
+
+@dataclass(frozen=True)
+class BatchConfig:
+    """
+    Configuration for async batch execution with worker pool pattern.
+
+    This config is used by run_batched_callable() and is independent of
+    LLM-specific settings. It can be used standalone for generic async batching.
+
+    Parameters
+    ----------
+    num_workers : int
+        Number of concurrent workers in the pool
+    max_failures : Optional[int]
+        Abort batch after this many failures (None = never abort)
+    heartbeat_s : float
+        Print progress every N seconds
+    stall_s : float
+        Warn if no completions for N seconds
+    print_first_failures : int
+        Print first N failures verbosely
+    keep_failure_summaries : int
+        Keep last N failure summaries for diagnostics
+    """
+    num_workers: int = 64
+    max_failures: Optional[int] = 25
+    heartbeat_s: float = 10.0
+    stall_s: float = 300.0
+    print_first_failures: int = 5
+    keep_failure_summaries: int = 20
+
+    @classmethod
+    def from_env(cls) -> "BatchConfig":
+        """Load batch configuration from BATCH_* environment variables."""
+        return cls(
+            num_workers=_env_int("BATCH_NUM_WORKERS", 64),
+            max_failures=_env_opt_int("BATCH_MAX_FAILURES", 25),
+            heartbeat_s=_env_float("BATCH_HEARTBEAT_S", 10.0),
+            stall_s=_env_float("BATCH_STALL_S", 300.0),
+            print_first_failures=_env_int("BATCH_PRINT_FIRST_FAILURES", 5),
+            keep_failure_summaries=_env_int("BATCH_KEEP_FAILURE_SUMMARIES", 20),
+        )
+
+
+# ----------------------------
+# LLM configuration
+# ----------------------------
 
 @dataclass(frozen=True)
 class MinimaLlmConfig:
@@ -104,13 +190,8 @@ class MinimaLlmConfig:
     model: str
     api_key: Optional[str] = None  # optional for local endpoints
 
-    # Batch execution (client-side)
-    num_workers: int = 64
-    max_failures: Optional[int] = 25
-    heartbeat_s: float = 10.0
-    stall_s: float = 300.0
-    print_first_failures: int = 5
-    keep_failure_summaries: int = 20
+    # Batch execution (composed)
+    batch: BatchConfig = field(default_factory=BatchConfig)
 
     # Transport / backpressure
     max_outstanding: int = 32
@@ -132,39 +213,36 @@ class MinimaLlmConfig:
     compress_gzip: bool = False
 
     # ----------------------------
-    # Config parsing (private)
+    # Backward compatibility properties
     # ----------------------------
 
-    @staticmethod
-    def _env_str(name: str) -> Optional[str]:
-        v = os.getenv(name)
-        return None if v in (None, "") else v
+    @property
+    def num_workers(self) -> int:
+        return self.batch.num_workers
 
-    @classmethod
-    def _env_int(cls, name: str, default: int) -> int:
-        v = cls._env_str(name)
-        return default if v is None else int(v)
+    @property
+    def max_failures(self) -> Optional[int]:
+        return self.batch.max_failures
 
-    @classmethod
-    def _env_float(cls, name: str, default: float) -> float:
-        v = cls._env_str(name)
-        return default if v is None else float(v)
+    @property
+    def heartbeat_s(self) -> float:
+        return self.batch.heartbeat_s
 
-    @classmethod
-    def _env_opt_int(cls, name: str, default: Optional[int]) -> Optional[int]:
-        v = cls._env_str(name)
-        if v is None:
-            return default
-        if v.strip().lower() in ("none", "null"):
-            return None
-        return int(v)
+    @property
+    def stall_s(self) -> float:
+        return self.batch.stall_s
 
-    @staticmethod
-    def _first_non_none(*vals: Optional[str]) -> Optional[str]:
-        for v in vals:
-            if v is not None:
-                return v
-        return None
+    @property
+    def print_first_failures(self) -> int:
+        return self.batch.print_first_failures
+
+    @property
+    def keep_failure_summaries(self) -> int:
+        return self.batch.keep_failure_summaries
+
+    # ----------------------------
+    # Config parsing (private)
+    # ----------------------------
 
     @staticmethod
     def _normalize_base_url(base_url: str) -> str:
@@ -189,11 +267,11 @@ class MinimaLlmConfig:
           - COOLDOWN_FLOOR_S, COOLDOWN_CAP_S, COOLDOWN_HALFLIFE_S
           - COMPRESS_GZIP
         """
-        base_url = cls._env_str("OPENAI_BASE_URL")
-        model = cls._env_str("OPENAI_MODEL")
-        api_key = cls._first_non_none(
-            cls._env_str("OPENAI_API_KEY"),
-            cls._env_str("OPENAI_TOKEN"),
+        base_url = _env_str("OPENAI_BASE_URL")
+        model = _env_str("OPENAI_MODEL")
+        api_key = _first_non_none(
+            _env_str("OPENAI_API_KEY"),
+            _env_str("OPENAI_TOKEN"),
         )
 
         missing = []
@@ -208,28 +286,22 @@ class MinimaLlmConfig:
             base_url=cls._normalize_base_url(base_url),
             model=model,
             api_key=api_key,
-            # batch execution
-            num_workers=cls._env_int("BATCH_NUM_WORKERS", 64),
-            max_failures=cls._env_opt_int("BATCH_MAX_FAILURES", 25),
-            heartbeat_s=cls._env_float("BATCH_HEARTBEAT_S", 10.0),
-            stall_s=cls._env_float("BATCH_STALL_S", 300.0),
-            print_first_failures=cls._env_int("BATCH_PRINT_FIRST_FAILURES", 5),
-            keep_failure_summaries=cls._env_int("BATCH_KEEP_FAILURE_SUMMARIES", 20),
+            batch=BatchConfig.from_env(),
             # transport
-            max_outstanding=cls._env_int("MAX_OUTSTANDING", 32),
-            rpm=cls._env_int("RPM", 600),
-            timeout_s=cls._env_float("TIMEOUT_S", 60.0),
+            max_outstanding=_env_int("MAX_OUTSTANDING", 32),
+            rpm=_env_int("RPM", 600),
+            timeout_s=_env_float("TIMEOUT_S", 60.0),
             # retry
-            max_attempts=cls._env_int("MAX_ATTEMPTS", 6),
-            base_backoff_s=cls._env_float("BASE_BACKOFF_S", 0.5),
-            max_backoff_s=cls._env_float("MAX_BACKOFF_S", 20.0),
-            jitter=cls._env_float("JITTER", 0.2),
+            max_attempts=_env_int("MAX_ATTEMPTS", 6),
+            base_backoff_s=_env_float("BASE_BACKOFF_S", 0.5),
+            max_backoff_s=_env_float("MAX_BACKOFF_S", 20.0),
+            jitter=_env_float("JITTER", 0.2),
             # cooldown
-            cooldown_floor_s=cls._env_float("COOLDOWN_FLOOR_S", 0.0),
-            cooldown_cap_s=cls._env_float("COOLDOWN_CAP_S", 30.0),
-            cooldown_halflife_s=cls._env_float("COOLDOWN_HALFLIFE_S", 20.0),
+            cooldown_floor_s=_env_float("COOLDOWN_FLOOR_S", 0.0),
+            cooldown_cap_s=_env_float("COOLDOWN_CAP_S", 30.0),
+            cooldown_halflife_s=_env_float("COOLDOWN_HALFLIFE_S", 20.0),
             # http
-            compress_gzip=(cls._env_int("COMPRESS_GZIP", 0) != 0),
+            compress_gzip=(_env_int("COMPRESS_GZIP", 0) != 0),
         )
 
     def describe(self) -> str:
