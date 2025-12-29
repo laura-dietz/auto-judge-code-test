@@ -1,3 +1,5 @@
+# llm_config.py
+from __future__ import annotations
 
 from dataclasses import dataclass
 import os
@@ -7,94 +9,94 @@ from typing import Optional
 @dataclass(frozen=True)
 class MinimaLlmConfig:
     """
-    Construct a MinimaLlmConfig from environment variables.
+    Configuration for the MinimaLlm backend.
 
-    This method is the single entry point for configuring MinimaLlm.
-    All defaults are defined here and can be overridden via environment
-    variables, making batch runs reproducible and easy to tune without
-    code changes.
+    MinimaLlm is a minimal, framework-agnostic adapter for OpenAI-compatible
+    LLM endpoints. The configuration is designed to support long-running,
+    batch-style workloads (such as evaluation or offline scoring), while
+    remaining simple enough for beginners and robust enough for shared
+    infrastructure.
 
-    Required environment variables
-    ------------------------------
-    - OPENAI_BASE_URL
-        Base URL of an OpenAI-compatible endpoint (with or without `/v1`).
+    This config intentionally avoids coupling to any specific client
+    framework (e.g., LangChain, LiteLLM, DSPy). Advanced users may reuse
+    the same environment variables to configure their own tooling.
 
-    - OPENAI_MODEL
+    Endpoint
+    --------
+    base_url:
+        Base URL of the OpenAI-compatible endpoint.
+        Examples:
+          - https://api.openai.com/v1
+          - http://localhost:8000/v1
+
+    model:
         Model identifier understood by the endpoint.
 
-    Optional authentication
-    -----------------------
-    - OPENAI_API_KEY or OPENAI_TOKEN
+    api_key:
         Bearer token used for authentication.
-        May be omitted for local or unsecured endpoints.
+        May be None for local or unsecured endpoints; in that case, no
+        Authorization header is sent.
 
     Batch execution and monitoring
     ------------------------------
-    - BATCH_NUM_WORKERS
-        Number of concurrent batch workers (default: 64).
+    num_workers:
+        Number of concurrent batch workers used by MinimaLlm's batch runner.
+        Workers > max_outstanding is fine; max_outstanding is the real
+        concurrency limit at the HTTP layer.
 
-    - BATCH_MAX_FAILURES
-        Abort the batch after this many failures.
-        Set to an integer value, or to `none` / `null` to disable early abort
-        (default: 25).
+    max_failures:
+        Abort the batch after this many failures. Set to None to disable early
+        abort. (Parsed from BATCH_MAX_FAILURES where "none"/"null" disables.)
 
-    - BATCH_HEARTBEAT_S
-        Interval in seconds at which batch progress is printed
-        (default: 10.0).
+    heartbeat_s:
+        Interval in seconds at which batch progress is printed.
 
-    - BATCH_STALL_S
-        Emit a stall warning if no completions occur for this many seconds
-        (default: 300.0).
+    stall_s:
+        Emit a stall warning if no completions occur for this many seconds.
 
-    - BATCH_PRINT_FIRST_FAILURES
-        Number of initial failures that are printed verbosely
-        (default: 5).
+    print_first_failures:
+        Number of initial failures printed verbosely.
 
-    - BATCH_KEEP_FAILURE_SUMMARIES
-        Number of recent failure summaries kept for abort diagnostics
-        (default: 20).
+    keep_failure_summaries:
+        Number of recent failure summaries retained for abort diagnostics.
 
-    Transport-level protection
-    --------------------------
-    - MAX_OUTSTANDING
-        Maximum number of in-flight HTTP requests (default: 32).
+    Transport / pacing
+    ------------------
+    max_outstanding:
+        Maximum number of in-flight HTTP requests at any time (hard limit).
 
-    - RPM
-        Maximum requests per minute; set to 0 to disable pacing
-        (default: 600).
+    rpm:
+        Maximum requests per minute. Implemented as a simple pacing mechanism.
+        Set to 0 to disable.
 
-    - TIMEOUT_S
-        Per-request timeout in seconds (default: 60.0).
+    timeout_s:
+        Per-request timeout in seconds.
 
-    Retry, backoff, and cooldown
-    ----------------------------
-    - MAX_ATTEMPTS
-        Maximum number of attempts per request (default: 6).
+    Retry and backoff
+    -----------------
+    max_attempts:
+        Maximum number of attempts per request (including initial attempt).
 
-    - BASE_BACKOFF_S
-        Base delay for exponential backoff (default: 0.5).
+    base_backoff_s:
+        Base delay for exponential backoff (seconds).
 
-    - MAX_BACKOFF_S
-        Maximum backoff delay in seconds (default: 20.0).
+    max_backoff_s:
+        Upper bound on backoff delay (seconds).
 
-    - JITTER
-        Proportional jitter applied to backoff delays (default: 0.2).
+    jitter:
+        Proportional random jitter applied to backoff delays (e.g., 0.2 = ±20%).
 
-    - COOLDOWN_FLOOR_S
-        Minimum cooldown applied after overload signals (default: 0.0).
+    Cooldown after overload
+    -----------------------
+    cooldown_floor_s, cooldown_cap_s, cooldown_halflife_s:
+        Parameters controlling a global cooldown after overload signals such as
+        HTTP 429/503/504. Cooldown decays with the given half-life.
 
-    - COOLDOWN_CAP_S
-        Maximum cooldown delay in seconds (default: 30.0).
-
-    - COOLDOWN_HALFLIFE_S
-        Half-life (in seconds) for cooldown decay after overload
-        (default: 20.0).
-
-    HTTP behavior
-    -------------
-    - COMPRESS_GZIP
-        If non-zero, request bodies are gzip-compressed.
-        Disabled by default for compatibility with many endpoints.
+    HTTP
+    ----
+    compress_gzip:
+        If True, request bodies are sent gzip-compressed. Disabled by default,
+        since many OpenAI-compatible servers do not support it.
     """
 
     # Endpoint
@@ -102,15 +104,20 @@ class MinimaLlmConfig:
     model: str
     api_key: Optional[str] = None  # optional for local endpoints
 
-    # Batch execution
+    # Batch execution (client-side)
     num_workers: int = 64
+    max_failures: Optional[int] = 25
+    heartbeat_s: float = 10.0
+    stall_s: float = 300.0
+    print_first_failures: int = 5
+    keep_failure_summaries: int = 20
 
     # Transport / backpressure
     max_outstanding: int = 32
     rpm: int = 600  # 0 disables pacing
     timeout_s: float = 60.0
 
-    # Retry/backoff
+    # Retry / backoff
     max_attempts: int = 6
     base_backoff_s: float = 0.5
     max_backoff_s: float = 20.0
@@ -124,22 +131,24 @@ class MinimaLlmConfig:
     # HTTP
     compress_gzip: bool = False
 
-
-    # Batch execution (client-side)
-    num_workers: int = 64
-
-    # Batch failure policy
-    max_failures: Optional[int] = 25
-    print_first_failures: int = 5
-    keep_failure_summaries: int = 20
-
-    # Heartbeat / stall detection
-    heartbeat_s: float = 10.0
-    stall_s: float = 300.0
-    
     # ----------------------------
     # Config parsing (private)
     # ----------------------------
+
+    @staticmethod
+    def _env_str(name: str) -> Optional[str]:
+        v = os.getenv(name)
+        return None if v in (None, "") else v
+
+    @classmethod
+    def _env_int(cls, name: str, default: int) -> int:
+        v = cls._env_str(name)
+        return default if v is None else int(v)
+
+    @classmethod
+    def _env_float(cls, name: str, default: float) -> float:
+        v = cls._env_str(name)
+        return default if v is None else float(v)
 
     @classmethod
     def _env_opt_int(cls, name: str, default: Optional[int]) -> Optional[int]:
@@ -158,27 +167,8 @@ class MinimaLlmConfig:
         return None
 
     @staticmethod
-    def _env_str(name: str) -> Optional[str]:
-        v = os.getenv(name)
-        return None if v in (None, "") else v
-
-    @classmethod
-    def _env_int(cls, name: str, default: int) -> int:
-        v = cls._env_str(name)
-        return default if v is None else int(v)
-
-    @classmethod
-    def _env_float(cls, name: str, default: float) -> float:
-        v = cls._env_str(name)
-        return default if v is None else float(v)
-
-    @staticmethod
     def _normalize_base_url(base_url: str) -> str:
         return base_url.rstrip("/")
-
-    # ----------------------------
-    # Public constructors
-    # ----------------------------
 
     @classmethod
     def from_env(cls) -> "MinimaLlmConfig":
@@ -188,6 +178,16 @@ class MinimaLlmConfig:
         Required:
           - OPENAI_BASE_URL
           - OPENAI_MODEL
+
+        Optional:
+          - OPENAI_API_KEY or OPENAI_TOKEN
+          - BATCH_NUM_WORKERS, BATCH_MAX_FAILURES
+          - BATCH_HEARTBEAT_S, BATCH_STALL_S
+          - BATCH_PRINT_FIRST_FAILURES, BATCH_KEEP_FAILURE_SUMMARIES
+          - MAX_OUTSTANDING, RPM, TIMEOUT_S
+          - MAX_ATTEMPTS, BASE_BACKOFF_S, MAX_BACKOFF_S, JITTER
+          - COOLDOWN_FLOOR_S, COOLDOWN_CAP_S, COOLDOWN_HALFLIFE_S
+          - COMPRESS_GZIP
         """
         base_url = cls._env_str("OPENAI_BASE_URL")
         model = cls._env_str("OPENAI_MODEL")
@@ -208,41 +208,43 @@ class MinimaLlmConfig:
             base_url=cls._normalize_base_url(base_url),
             model=model,
             api_key=api_key,
-            # 
+            # batch execution
             num_workers=cls._env_int("BATCH_NUM_WORKERS", 64),
-            max_outstanding=cls._env_int("MAX_OUTSTANDING", 32),
             max_failures=cls._env_opt_int("BATCH_MAX_FAILURES", 25),
             heartbeat_s=cls._env_float("BATCH_HEARTBEAT_S", 10.0),
             stall_s=cls._env_float("BATCH_STALL_S", 300.0),
             print_first_failures=cls._env_int("BATCH_PRINT_FIRST_FAILURES", 5),
             keep_failure_summaries=cls._env_int("BATCH_KEEP_FAILURE_SUMMARIES", 20),
-            #
+            # transport
+            max_outstanding=cls._env_int("MAX_OUTSTANDING", 32),
             rpm=cls._env_int("RPM", 600),
             timeout_s=cls._env_float("TIMEOUT_S", 60.0),
+            # retry
             max_attempts=cls._env_int("MAX_ATTEMPTS", 6),
             base_backoff_s=cls._env_float("BASE_BACKOFF_S", 0.5),
             max_backoff_s=cls._env_float("MAX_BACKOFF_S", 20.0),
             jitter=cls._env_float("JITTER", 0.2),
+            # cooldown
             cooldown_floor_s=cls._env_float("COOLDOWN_FLOOR_S", 0.0),
             cooldown_cap_s=cls._env_float("COOLDOWN_CAP_S", 30.0),
             cooldown_halflife_s=cls._env_float("COOLDOWN_HALFLIFE_S", 20.0),
+            # http
             compress_gzip=(cls._env_int("COMPRESS_GZIP", 0) != 0),
-
         )
-        
+
     def describe(self) -> str:
         """
         Return a human-readable description of the active MinimaLlm configuration.
 
-        This is intended for logging at startup of long-running batch jobs,
-        so that execution parameters are recorded alongside results.
+        Intended for logging at startup of long-running batch jobs so the
+        execution parameters are recorded alongside results.
         """
-        lines = []
+        lines: list[str] = []
 
         def add(section: str) -> None:
             lines.append(section)
 
-        def kv(k: str, v) -> None:
+        def kv(k: str, v: object) -> None:
             lines.append(f"  {k}: {v}")
 
         add("MinimaLlmConfig")

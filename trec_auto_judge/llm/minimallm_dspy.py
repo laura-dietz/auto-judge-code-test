@@ -1,4 +1,4 @@
-# minimalllm/dspy_lm.py
+# minimallm_dspy.py
 from __future__ import annotations
 
 import asyncio
@@ -7,16 +7,19 @@ from typing import Any, Dict, List, Optional, Type
 
 import dspy
 
-
-from .llm_config import MinimaLlmConfig
-from .llm_protocol import MinimaLlmRequest, MinimaLlmResponse
+from .llm_protocol import MinimaLlmRequest
 from .minimal_llm import OpenAIMinimaLlm
 
 
-
 def _resolve_dspy_base_lm() -> Type[Any]:
+    """
+    Locate DSPy's BaseLM class across common DSPy layouts.
+
+    DSPy moves internals occasionally; this helper keeps the adapter resilient.
+    """
     if hasattr(dspy, "BaseLM"):
-        return dspy.BaseLM
+        return dspy.BaseLM  # type: ignore[attr-defined]
+
     for mod_name, attr in [
         ("dspy.clients", "BaseLM"),
         ("dspy.clients.base", "BaseLM"),
@@ -30,6 +33,7 @@ def _resolve_dspy_base_lm() -> Type[Any]:
                 return getattr(mod, attr)
         except Exception:
             pass
+
     raise RuntimeError("Could not locate DSPy BaseLM")
 
 
@@ -38,41 +42,37 @@ _BaseLM = _resolve_dspy_base_lm()
 
 class MinimaLlmDSPyLM(_BaseLM):  # type: ignore[misc]
     """
-    DSPy BaseLM adapter that routes all DSPy calls through OpenAIMinimaLlm.
+    DSPy BaseLM adapter that routes calls through OpenAIMinimaLlm.
 
-    Design goals:
-    - No LiteLLM dependency
-    - Compatible with DSPy 2.x and 3.x
-    - Defensive against future BaseLM signature changes
+    This adapter is intentionally minimal:
+      - DSPy handles prompt construction and output parsing.
+      - MinimaLlm handles HTTP transport, backpressure, retries, and pacing.
+      - No LiteLLM dependency.
     """
 
     def __init__(self, minimallm: OpenAIMinimaLlm, **kwargs: Any):
         self._minimallm = minimallm
-        model_value = getattr(minimallm.cfg, "model", "minimalllm")
+        model_value = minimallm.cfg.model
 
-        # ----------------------------
-        # Robust BaseLM initialization
-        # ----------------------------
-        init_kwargs: Dict[str, Any] = {}
+        # Initialize BaseLM in a version-tolerant way (DSPy 2.6.27 requires `model`).
         try:
             sig = inspect.signature(_BaseLM.__init__)  # type: ignore[arg-type]
             params = sig.parameters
+            init_kwargs: Dict[str, Any] = {}
 
-            # Required / common parameters across versions
             if "model" in params:
                 init_kwargs["model"] = model_value
             elif "model_name" in params:
                 init_kwargs["model_name"] = model_value
 
-            # Forward only kwargs that BaseLM explicitly accepts
+            # Forward only kwargs that BaseLM actually accepts.
             for k, v in kwargs.items():
                 if k in params:
                     init_kwargs[k] = v
 
             super().__init__(**init_kwargs)  # type: ignore[misc]
-
         except Exception:
-            # Extremely defensive fallback chain
+            # Fallback chain
             try:
                 super().__init__(model=model_value)  # type: ignore[misc]
             except Exception:
@@ -81,15 +81,13 @@ class MinimaLlmDSPyLM(_BaseLM):  # type: ignore[misc]
                 except Exception:
                     super().__init__()  # type: ignore[misc]
 
-        # ----------------------------
-        # Commonly expected attributes
-        # ----------------------------
+        # Commonly expected attributes (harmless if unused)
         if not hasattr(self, "model"):
             self.model = model_value  # type: ignore[assignment]
-        if not hasattr(self, "history"):
-            self.history = []  # type: ignore[assignment]
         if not hasattr(self, "kwargs"):
             self.kwargs = {}  # type: ignore[assignment]
+        if not hasattr(self, "history"):
+            self.history = []  # type: ignore[assignment]
 
     async def acall(
         self,
@@ -97,6 +95,14 @@ class MinimaLlmDSPyLM(_BaseLM):  # type: ignore[misc]
         messages: Optional[List[Dict[str, Any]]] = None,
         **kwargs: Any,
     ) -> List[str]:
+        """
+        Async LM call used by DSPy.
+
+        Returns
+        -------
+        list[str]
+            DSPy expects a list of completions. We return a singleton list.
+        """
         if messages is None:
             if prompt is None:
                 raise ValueError("DSPy LM requires either prompt or messages")
@@ -107,11 +113,13 @@ class MinimaLlmDSPyLM(_BaseLM):  # type: ignore[misc]
             messages=[{"role": m["role"], "content": m["content"]} for m in messages],
             temperature=kwargs.pop("temperature", None),
             max_tokens=kwargs.pop("max_tokens", None),
-            extra=kwargs,
+            extra=kwargs if kwargs else None,
         )
-        resp = await self._minimallm.prompt_one(req)
+
+        resp = await self._minimallm.generate(req)
         return [resp.text]
 
+    # Some DSPy internals/adapters call forward/aforward.
     async def aforward(self, *args: Any, **kwargs: Any) -> List[str]:
         return await self.acall(*args, **kwargs)
 
@@ -124,6 +132,12 @@ class MinimaLlmDSPyLM(_BaseLM):  # type: ignore[misc]
         messages: Optional[List[Dict[str, Any]]] = None,
         **kwargs: Any,
     ) -> List[str]:
+        """
+        Sync LM call fallback.
+
+        If called inside a running event loop, raise a clear error rather than
+        nesting event loops.
+        """
         try:
             loop = asyncio.get_running_loop()
         except RuntimeError:
@@ -136,30 +150,3 @@ class MinimaLlmDSPyLM(_BaseLM):  # type: ignore[misc]
             )
 
         return asyncio.run(self.acall(prompt=prompt, messages=messages, **kwargs))
-
-
-import dspy
-
-async def example() -> None:
-    cfg = MinimaLlmConfig.from_env()
-    backend = OpenAIMinimaLlm(cfg)
-
-    lm = MinimaLlmDSPyLM(backend)
-    dspy.configure(lm=lm)
-
-    class Sig(dspy.Signature):
-        prompt: str = dspy.InputField()
-        answer: str = dspy.OutputField()
-
-    pred = dspy.Predict(Sig)
-    try:
-        out = await pred.acall(prompt=f"Say 'hi'")
-        print(out.answer)
-    finally:
-        await backend.aclose()
-
-
-if __name__ == "__main__":
-    asyncio.run(example())
-    # asyncio.run(main())
-    # example()

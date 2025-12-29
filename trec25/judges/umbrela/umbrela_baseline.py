@@ -47,6 +47,22 @@ class UmbrelaJudge(AutoJudge):
     # def llm_endpoint_config():
     #     return { "model":"MySmolLLM"}
     
+
+    def my_evaluator_run(prompt:dspy.Signature, output_converter:DspyOutputConverter, alignment_input_list:List[BaseModel], attempts:int = 10, **kwargs)-> List[BaseModel]:
+        try:
+            return EvaluatorLD(prompt_style=prompt
+                            , output_converter=output_converter, **kwargs)(alignment_input_list)
+        except (ConnectionTimeoutError,Timeout, RateLimitError, InternalServerError) as ex:
+            print(ex)
+            if attempts == 0:
+                print(f"Giving up reaching LLM endpoint")
+                raise ex
+            else:
+                print(f"Error reaching LLM endpoint, retrying {attempts} many times.")
+                time.sleep(30)
+                return evaluator_run(prompt=prompt, output_converter=output_converter, alignment_input_list=alignment_input_list, attempts=(attempts-1), **kwargs)
+
+    
     
     def judge(
         self,
@@ -119,7 +135,7 @@ class UmbrelaJudge(AutoJudge):
         prompt_input = prepare_prompts()
         print("Debug in", "\n".join(str(p) for p in prompt_input[0:1]))
         
-        prompt_output = evaluator_run(prompt=Umbrela, output_converter=Umbrela.convert_output, alignment_input_list=prompt_input)
+        prompt_output = my_evaluator_run(prompt=Umbrela, output_converter=Umbrela.convert_output, alignment_input_list=prompt_input)
         print("Debug out", "\n".join(str(p) for p in prompt_input[0:1]))
 
         leaderboard = umbrela_to_leaderboard(prompt_output=prompt_output)
