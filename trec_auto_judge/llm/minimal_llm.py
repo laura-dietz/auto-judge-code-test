@@ -19,8 +19,11 @@ Environment variables are parsed in MinimaLlmConfig.from_env().
 
 import asyncio
 import gzip
+import hashlib
 import json
+import os
 import random
+import sqlite3
 import time
 import urllib.error
 import urllib.request
@@ -139,6 +142,56 @@ def _is_retriable_status(status: int) -> bool:
 
 def _is_overload_status(status: int) -> bool:
     return status in (429, 503, 504)
+
+
+# ----------------------------
+# Prompt cache (SQLite-backed)
+# ----------------------------
+
+class PromptCache:
+    """
+    SQLite-backed prompt cache. Multi-process safe via WAL mode.
+
+    This cache stores LLM responses keyed by a hash of the request parameters.
+    Multiple processes can safely read/write concurrently.
+    """
+
+    def __init__(self, db_path: str):
+        self._conn = sqlite3.connect(db_path, timeout=30.0)
+        self._conn.execute("PRAGMA journal_mode=WAL")
+        self._conn.execute("""
+            CREATE TABLE IF NOT EXISTS cache (
+                key TEXT PRIMARY KEY,
+                response_text TEXT NOT NULL,
+                response_raw TEXT,
+                created_at REAL NOT NULL
+            )
+        """)
+        self._conn.commit()
+
+    def get(self, key: str) -> Optional[Tuple[str, Optional[Json]]]:
+        """Retrieve cached response by key. Returns (text, raw_json) or None."""
+        row = self._conn.execute(
+            "SELECT response_text, response_raw FROM cache WHERE key = ?",
+            (key,)
+        ).fetchone()
+        if row is None:
+            return None
+        raw = json.loads(row[1]) if row[1] else None
+        return (row[0], raw)
+
+    def put(self, key: str, text: str, raw: Optional[Json]) -> None:
+        """Store response in cache."""
+        raw_json = json.dumps(raw) if raw else None
+        self._conn.execute(
+            "INSERT OR REPLACE INTO cache (key, response_text, response_raw, created_at) VALUES (?, ?, ?, ?)",
+            (key, text, raw_json, time.time())
+        )
+        self._conn.commit()
+
+    def close(self) -> None:
+        """Close database connection."""
+        self._conn.close()
 
 
 # ----------------------------
@@ -367,6 +420,13 @@ class OpenAIMinimaLlm(AsyncMinimaLlmBackend):
         self._has_v1 = b.endswith("/v1")
         self._base = b
 
+        # Initialize cache if configured
+        self._cache: Optional[PromptCache] = None
+        if cfg.cache_dir:
+            os.makedirs(cfg.cache_dir, exist_ok=True)
+            db_path = os.path.join(cfg.cache_dir, "minima_llm.db")
+            self._cache = PromptCache(db_path)
+
     @classmethod
     def from_env(cls) -> "OpenAIMinimaLlm":
         """Construct backend from environment variables via MinimaLlmConfig."""
@@ -375,6 +435,8 @@ class OpenAIMinimaLlm(AsyncMinimaLlmBackend):
     async def aclose(self) -> None:
         # urllib has no session to close; keep for symmetry.
         self._closed = True
+        if self._cache is not None:
+            self._cache.close()
 
     def _endpoint(self, path: str) -> str:
         # If base_url already ends in /v1, avoid duplicating /v1.
@@ -403,6 +465,18 @@ class OpenAIMinimaLlm(AsyncMinimaLlmBackend):
             return float(ra)
         except ValueError:
             return None
+
+    def _make_cache_key(self, req: MinimaLlmRequest) -> str:
+        """Generate cache key from request parameters."""
+        obj: Dict[str, Any] = {"model": self.cfg.model, "messages": req.messages}
+        if req.temperature is not None:
+            obj["temperature"] = req.temperature
+        if req.max_tokens is not None:
+            obj["max_tokens"] = req.max_tokens
+        if req.extra:
+            obj["extra"] = req.extra
+        canonical = json.dumps(obj, sort_keys=True, ensure_ascii=True, separators=(",", ":"))
+        return hashlib.sha256(canonical.encode()).hexdigest()
 
     async def _post_json(self, url: str, payload: Json) -> Tuple[int, Dict[str, str], bytes]:
         """
@@ -436,6 +510,14 @@ class OpenAIMinimaLlm(AsyncMinimaLlmBackend):
         return await asyncio.to_thread(_do)
 
     async def generate(self, req: MinimaLlmRequest) -> MinimaLlmResponse:
+        # Check cache first
+        cache_key: Optional[str] = None
+        if self._cache is not None:
+            cache_key = self._make_cache_key(req)
+            cached = self._cache.get(cache_key)
+            if cached is not None:
+                return MinimaLlmResponse(request_id=req.request_id, text=cached[0], raw=cached[1])
+
         payload: Json = {
             "model": self.cfg.model,
             "messages": req.messages,
@@ -479,6 +561,10 @@ class OpenAIMinimaLlm(AsyncMinimaLlmBackend):
                         f"OpenAI-compat response missing expected fields: {e}; "
                         f"status={status}; body={last_body}"
                     ) from e
+
+                # Store in cache on success
+                if self._cache is not None and cache_key is not None:
+                    self._cache.put(cache_key, str(text), data)
 
                 return MinimaLlmResponse(request_id=req.request_id, text=str(text), raw=data)
 

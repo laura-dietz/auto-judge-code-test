@@ -77,3 +77,48 @@ def test_config_loading():
     assert llm_config.model
     assert llm_config.batch is not None
     assert batch_config.num_workers > 0
+
+
+@pytest.mark.asyncio
+async def test_prompt_cache(tmp_path):
+    """Test SQLite prompt cache works correctly"""
+    import os
+
+    cache_dir = str(tmp_path / "cache")
+
+    # Create config with caching enabled
+    base_config = MinimaLlmConfig.from_env()
+    config = MinimaLlmConfig(
+        base_url=base_config.base_url,
+        model=base_config.model,
+        api_key=base_config.api_key,
+        cache_dir=cache_dir,
+    )
+
+    llm = OpenAIMinimaLlm(config)
+
+    req = MinimaLlmRequest(
+        request_id="cache-test-1",
+        messages=[{"role": "user", "content": "Say the word 'cached'"}],
+    )
+
+    # First request - makes actual LLM call
+    response1 = await llm.generate(req)
+    assert isinstance(response1, MinimaLlmResponse)
+
+    # Verify cache file was created
+    db_path = os.path.join(cache_dir, "minima_llm.db")
+    assert os.path.exists(db_path), "Cache DB should be created"
+
+    # Second request with same content - should return from cache
+    req2 = MinimaLlmRequest(
+        request_id="cache-test-2",  # Different request_id, same content
+        messages=[{"role": "user", "content": "Say the word 'cached'"}],
+    )
+    response2 = await llm.generate(req2)
+
+    # Same text response (from cache), but request_id should be the new one
+    assert response2.text == response1.text, "Cached response should match"
+    assert response2.request_id == "cache-test-2", "Request ID should be from new request"
+
+    await llm.aclose()

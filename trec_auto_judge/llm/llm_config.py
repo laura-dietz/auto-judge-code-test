@@ -212,6 +212,9 @@ class MinimaLlmConfig:
     # HTTP
     compress_gzip: bool = False
 
+    # Cache
+    cache_dir: Optional[str] = None  # None = disabled
+
     # ----------------------------
     # Backward compatibility properties
     # ----------------------------
@@ -266,6 +269,7 @@ class MinimaLlmConfig:
           - MAX_ATTEMPTS, BASE_BACKOFF_S, MAX_BACKOFF_S, JITTER
           - COOLDOWN_FLOOR_S, COOLDOWN_CAP_S, COOLDOWN_HALFLIFE_S
           - COMPRESS_GZIP
+          - CACHE_DIR
         """
         base_url = _env_str("OPENAI_BASE_URL")
         model = _env_str("OPENAI_MODEL")
@@ -302,6 +306,8 @@ class MinimaLlmConfig:
             cooldown_halflife_s=_env_float("COOLDOWN_HALFLIFE_S", 20.0),
             # http
             compress_gzip=(_env_int("COMPRESS_GZIP", 0) != 0),
+            # cache
+            cache_dir=_env_str("CACHE_DIR"),
         )
 
     def describe(self) -> str:
@@ -351,5 +357,8 @@ class MinimaLlmConfig:
 
         add("HTTP")
         kv("compress_gzip", self.compress_gzip)
+
+        add("Cache")
+        kv("cache_dir", self.cache_dir if self.cache_dir else "<disabled>")
 
         return "\n".join(lines)
