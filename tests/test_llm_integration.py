@@ -139,6 +139,7 @@ async def test_prompt_cache(tmp_path):
     await llm.aclose()
 
 
+
 @pytest.mark.asyncio
 async def test_dspy_adapter_parse_error_retry():
     """Test that AdapterParseError triggers retry with force_refresh=True.
@@ -146,7 +147,8 @@ async def test_dspy_adapter_parse_error_retry():
     This tests the actual run_dspy_batch function with a mocked predictor that
     fails on first call, then verifies force_refresh is True on retry.
     """
-    import dspy
+    dspy = pytest.importorskip("dspy")
+    # import dspy
     from pydantic import BaseModel
     from typing import Optional
     from unittest.mock import patch
