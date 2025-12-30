@@ -11,6 +11,7 @@ Prerequisites:
 """
 
 import pytest
+import os 
 from trec_auto_judge.llm import (
     BatchConfig,
     MinimaLlmConfig,
@@ -18,6 +19,20 @@ from trec_auto_judge.llm import (
     MinimaLlmResponse,
     OpenAIMinimaLlm,
 )
+
+@pytest.fixture(autouse=True)
+def _prep_env(monkeypatch, tmp_path):
+    monkeypatch.setenv("BATCH_NUM_WORKERS", "16")
+    monkeypatch.setenv("MAX_OUTSTANDING", "8")
+    monkeypatch.setenv("RPM", "0")
+    monkeypatch.setenv("BATCH_MAX_FAILURES", "20")
+    monkeypatch.setenv("BATCH_HEARTBEAT_S", "10.0")
+    monkeypatch.setenv("TIMEOUT_S", "1200.0")
+    
+    cache_dir = tmp_path / "minimallm-cache"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setenv("CACHE_DIR", str(cache_dir))
+    print("Set environment, CACHE_DIR =", os.environ["CACHE_DIR"])
 
 
 @pytest.mark.asyncio
