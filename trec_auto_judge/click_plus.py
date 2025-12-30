@@ -1,6 +1,8 @@
 from pathlib import Path
+from typing import Optional
 from .io import load_runs_failsave
 from .request import load_requests_from_irds, load_requests_from_file
+from .llm import MinimaLlmConfig, ModelPreferences, ModelResolver, ModelResolutionError
 import click
 from . import AutoJudge
 
@@ -163,22 +165,64 @@ def option_rag_topics():
     return decorator
 
 
+def option_llm_config():
+    """Optional llm-config.yml for model preferences."""
+    def decorator(func):
+        func = click.option(
+            "--llm-config",
+            type=click.Path(exists=True, path_type=Path),
+            required=False,
+            default=None,
+            help="Path to llm-config.yml with model preferences"
+        )(func)
+        return func
+    return decorator
+
+
+def _resolve_llm_config(llm_config_path: Optional[Path]) -> MinimaLlmConfig:
+    """
+    Resolve LLM config from llm-config.yml or environment.
+
+    Priority:
+    1. If llm_config_path provided with model_preferences, resolve against available
+    2. Fall back to MinimaLlmConfig.from_env()
+    """
+    if llm_config_path is not None:
+        try:
+            prefs = ModelPreferences.from_yaml(llm_config_path)
+            if prefs.preferences:
+                resolver = ModelResolver.from_env()
+                config = resolver.resolve(prefs)
+                click.echo(f"Resolved model: {config.model} from {config.base_url}", err=True)
+                return config
+        except ModelResolutionError as e:
+            raise click.ClickException(str(e))
+        except Exception as e:
+            click.echo(f"Warning: Could not resolve model from config: {e}", err=True)
+
+    # Fallback to environment-based config
+    return MinimaLlmConfig.from_env()
+
+
 def auto_judge_to_click_command(auto_judge: AutoJudge, cmd_name: str) -> int:
     from .qrels.qrels import write_qrel_file, Qrels, verify_qrels
     from .leaderboard.leaderboard import verify_leaderboard_topics
     from .request import Request
     from .report import Report
-    
+
     from typing import Iterable
 
     @click.command(cmd_name)
     @option_rag_responses()
     @option_rag_topics()
+    @option_llm_config()
     @click.option("--output", type=Path, help="The output file.", required=True)
-    def run(rag_topics:Iterable[Request], rag_responses:Iterable[Report], output:Path):
-        leaderboard, qrels = auto_judge.judge(rag_responses, rag_topics)
-        # print("foo", leaderboard)
-        
+    def run(rag_topics: Iterable[Request], rag_responses: Iterable[Report], llm_config: Optional[Path], output: Path):
+        # Resolve LLM config from file or environment
+        resolved_config = _resolve_llm_config(llm_config)
+
+        leaderboard, qrels = auto_judge.judge(rag_responses, rag_topics, resolved_config)
+
         topic_ids = {t.request_id for t in rag_topics}
         verify_leaderboard_topics(expected_topic_ids=topic_ids,
             entries=leaderboard.entries,
@@ -186,8 +230,7 @@ def auto_judge_to_click_command(auto_judge: AutoJudge, cmd_name: str) -> int:
             require_no_extras=True
         )
         leaderboard.write(output)
-        
-        
+
         if qrels is not None:
             verify_qrels(qrels=qrels
                          , expected_topic_ids=topic_ids
