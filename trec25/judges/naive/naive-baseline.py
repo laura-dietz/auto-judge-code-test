@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-from trec_auto_judge import AutoJudge, Sequence, Optional, Report, Request, LeaderboardSpec, LeaderboardBuilder, mean_of_floats, MeasureSpec, auto_judge_to_click_command, Leaderboard, Qrels
+from trec_auto_judge import AutoJudge, Sequence, Optional, Report, Request, LeaderboardSpec, LeaderboardBuilder, mean_of_floats, MeasureSpec, auto_judge_to_click_command, Leaderboard, Qrels, MinimaLlmConfig
 import click
 from pathlib import Path
 from collections import defaultdict
@@ -20,7 +20,7 @@ NAIVE_LEADERBOARD_SPEC = LeaderboardSpec(measures=(
 
 
 class NaiveJudge(AutoJudge):
-    def judge(self, rag_responses: Sequence["Report"], rag_topics: Sequence["Request"]) -> tuple["Leaderboard", Optional["Qrels"]]:
+    def judge(self, rag_responses: Sequence["Report"], rag_topics: Sequence["Request"], llm_cfg:MinimaLlmConfig, **kwargs) -> tuple["Leaderboard", Optional["Qrels"]]:
         ret = LeaderboardBuilder(NAIVE_LEADERBOARD_SPEC)
 
         for rag_response in tqdm(rag_responses, "Process RAG Responses"):

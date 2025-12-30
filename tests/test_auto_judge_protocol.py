@@ -8,7 +8,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 
 class NaiveJudge(AutoJudge):
-    def judge(self, rag_responses: Sequence["Report"], rag_topics: Sequence["Request"], llm_cfg: MinimaLlmConfig) -> tuple["Leaderboard", Optional["Qrels"]]:
+    def judge(self, rag_responses: Sequence["Report"], rag_topics: Sequence["Request"], llm_cfg: MinimaLlmConfig, **kwargs) -> tuple["Leaderboard", Optional["Qrels"]]:
         ret = LeaderboardBuilder(self.leaderboard_spec())
 
         for r in rag_responses:

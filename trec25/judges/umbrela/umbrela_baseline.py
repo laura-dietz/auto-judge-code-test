@@ -8,7 +8,7 @@ import asyncio
 from typing import *
 from pydantic import BaseModel
 
-from trec_auto_judge.llm import run_dspy_batch
+from trec_auto_judge.llm.minima_llm_dspy import run_dspy_batch
 
 
 class UmbrelaAnnotation(BaseModel):
@@ -137,6 +137,8 @@ class UmbrelaJudge(AutoJudge):
         self,
         rag_responses: Sequence[Report],
         rag_topics: Sequence[Request],
+        llm_cfg: MinimaLlmConfig,
+        **kwargs
     ) -> tuple[Leaderboard, Optional[Qrels]]:
         """
         Umbrela response assessor using MinimaLLM backend with DSPy.

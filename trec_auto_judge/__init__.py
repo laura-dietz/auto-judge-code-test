@@ -15,7 +15,8 @@ class AutoJudge(Protocol):
         self,
         rag_responses: Iterable["Report"],
         rag_topics: Sequence["Request"],
-        llm_config: MinimaLlmConfig
+        llm_config: MinimaLlmConfig,
+        **kwargs
     ) -> tuple["Leaderboard", Optional["Qrels"]]:
         ...
 

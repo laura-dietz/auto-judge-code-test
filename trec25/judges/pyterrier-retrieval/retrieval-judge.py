@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-from trec_auto_judge import Report, LeaderboardSpec, LeaderboardBuilder, mean_of_floats, MeasureSpec, AutoJudge, auto_judge_to_click_command, Leaderboard, Qrels, Sequence, Request, Optional
+from trec_auto_judge import Report, LeaderboardSpec, LeaderboardBuilder, mean_of_floats, MeasureSpec, AutoJudge, auto_judge_to_click_command, Leaderboard, Qrels, Sequence, Request, Optional, MinimaLlmConfig
 from collections import defaultdict
 from tqdm import tqdm
 from tira.third_party_integrations import ensure_pyterrier_is_loaded
@@ -31,7 +31,7 @@ LEADERBOARD_SPEC = LeaderboardSpec(measures=(
 
 
 class RetrievalJudge(AutoJudge):
-    def judge(self, rag_responses: Sequence["Report"], rag_topics: Sequence["Request"]) -> tuple["Leaderboard", Optional["Qrels"]]:
+    def judge(self, rag_responses: Sequence["Report"], rag_topics: Sequence["Request"], llm_cfg:MinimaLlmConfig, **kwargs) -> tuple["Leaderboard", Optional["Qrels"]]:
         ensure_pyterrier_is_loaded()
         tokeniser = pt.java.autoclass("org.terrier.indexing.tokenisation.Tokeniser").getTokeniser()
         def pt_tokenize(text):
