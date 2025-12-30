@@ -425,7 +425,7 @@ async def run_batched_callable(
                     raise
                 # LLM and transport errors are recorded as failures
                 f = MinimaLlmFailure(
-                    request_id=f"input-{i}",
+                    request_id=f"input {i}/{item.request_id}" if hasattr(item, "request_id") else  f"input {i}",
                     error_type=type(e).__name__,
                     message=str(e),
                     attempts=1,
