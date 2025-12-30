@@ -64,14 +64,6 @@ class AsyncMinimaLlmBackend(Protocol):
         """Perform one LLM call and return the generated text."""
         ...
 
-    async def prompt_one(self, req: MinimaLlmRequest) -> MinimaLlmResponse:
-        """
-        Backwards-compatible alias for `generate`.
-
-        New code should call `generate`. This method exists to avoid churn in
-        older examples/tests.
-        """
-        ...
 
     async def aclose(self) -> None:
         """Release any backend resources (sessions, files)."""

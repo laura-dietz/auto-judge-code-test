@@ -553,6 +553,7 @@ class OpenAIMinimaLlm(AsyncMinimaLlmBackend):
         Returns MinimaLlmResponse on success, MinimaLlmFailure on error.
         Failures include full retry context: attempt count, timestamps, timeout.
         """
+        
         # Check cache first (unless force_refresh)
         cache_key: Optional[str] = None
         if self._cache is not None:
@@ -653,9 +654,6 @@ class OpenAIMinimaLlm(AsyncMinimaLlmBackend):
                 backoff = min(self.cfg.max_backoff_s, self.cfg.base_backoff_s * (2 ** (attempt - 1)))
                 await asyncio.sleep(_jittered(backoff, self.cfg.jitter))
 
-    async def prompt_one(self, req: MinimaLlmRequest) -> Result:
-        """Backwards-compatible alias for generate()."""
-        return await self.generate(req)
 
     # ----------------------------
     # Batch runner

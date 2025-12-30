@@ -2,9 +2,13 @@
 from __future__ import annotations
 
 import asyncio
+import contextvars
 import inspect
 import typing
 from typing import Any, Callable, Dict, List, Optional, Type, Union, cast, get_args
+
+# Task-local flag for cache bypass (safe for parallel async execution)
+_force_refresh_ctx: contextvars.ContextVar[bool] = contextvars.ContextVar('force_refresh', default=False)
 
 import dspy
 from dspy.adapters.chat_adapter import ChatAdapter
@@ -234,6 +238,12 @@ class MinimaLlmDSPyLM(_BaseLM):  # type: ignore[misc]
         list[str]
             DSPy expects a list of completions. We return a singleton list.
         """
+        # Check contextvar for force_refresh (set by retry logic)
+        force_refresh = force_refresh or _force_refresh_ctx.get()
+
+        # Debug: see every LLM call
+        # print(f"DEBUG acall: force_refresh={force_refresh}")
+
         if messages is None:
             if prompt is None:
                 raise ValueError("DSPy LM requires either prompt or messages")
@@ -521,18 +531,47 @@ async def run_dspy_batch(
     # Get input field names from signature
     input_fields = _get_input_field_names(signature_class)
 
+    # Code errors that should propagate immediately (not retry)
+    CODE_ERRORS = (NameError, TypeError, AttributeError, SyntaxError, ImportError)
+    max_attempts = backend.cfg.max_attempts
+
     # Process each annotation
     async def process_one(obj: BaseModel) -> BaseModel:
         # Extract input kwargs from annotation object
         kwargs = obj.model_dump(include=set(input_fields))
 
-        # Run prediction
-        result = await predictor.acall(**kwargs)
+        last_error: Optional[Exception] = None
 
-        # Update annotation with results
-        output_converter(result, obj)
+        for attempt in range(max_attempts):
+            # On retry, force refresh to bypass cached response that caused error
+            if attempt > 0:
+                token = _force_refresh_ctx.set(True)
+            try:
+                # Run prediction
+                result = await predictor.acall(**kwargs)
 
-        return obj
+                # Update annotation with results
+                output_converter(result, obj)
+
+                return obj
+
+            except CODE_ERRORS:
+                # Code errors propagate immediately
+                raise
+            except AdapterParseError as e:
+                # Parse error - retry
+                last_error = e
+                continue
+            except Exception as e:
+                # Other errors (e.g., from output_converter) - retry
+                last_error = e
+                continue
+            finally:
+                if attempt > 0:
+                    _force_refresh_ctx.reset(token)
+
+        # All retries exhausted
+        raise last_error  # type: ignore[misc]
 
     # Execute batch - returns List[Union[BaseModel, MinimaLlmFailure]]
     results = await backend.run_batched_callable(annotation_objs, process_one)
