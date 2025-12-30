@@ -146,18 +146,17 @@ class UmbrelaJudge(AutoJudge):
         def prepare_prompts() -> List[UmbrelaAnnotation]:
             alignment_input_list = list()
             for rag_response in rag_responses:
-                print("rag response", rag_response)
+                # print("rag response", rag_response)
 
                 metadata = rag_response.metadata
                 run_id = metadata.run_id
                 topic_id = metadata.topic_id
 
-                print("metadata", metadata)
+                # print("metadata", metadata)
 
                 text = rag_response.get_report_text()
 
                 topic = topic_dict[topic_id]
-                print("topic/request = ", topic)
                 if topic is None:
                     raise RuntimeError(f"Could not identify request object for topic {topic_id}")
 
