@@ -310,6 +310,28 @@ class MinimaLlmConfig:
             cache_dir=_env_str("CACHE_DIR"),
         )
 
+    # ----------------------------
+    # Pickle support (exclude api_key for security)
+    # ----------------------------
+
+    def __getstate__(self) -> dict:
+        """Exclude api_key from pickled state for security."""
+        state = {k: getattr(self, k) for k in self.__dataclass_fields__}
+        state.pop("api_key", None)
+        return state
+
+    def __setstate__(self, state: dict) -> None:
+        """Restore state, re-fetching api_key from environment."""
+        # Re-fetch api_key from environment variables
+        api_key = _first_non_none(
+            _env_str("OPENAI_API_KEY"),
+            _env_str("OPENAI_TOKEN"),
+        )
+        # Frozen dataclass requires object.__setattr__
+        for key, value in state.items():
+            object.__setattr__(self, key, value)
+        object.__setattr__(self, "api_key", api_key)
+
     def describe(self) -> str:
         """
         Return a human-readable description of the active MinimaLlm configuration.
