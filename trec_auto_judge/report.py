@@ -106,6 +106,7 @@ ReportSentence: TypeAlias = RagtimeReportSentence | NeuclirReportSentence | Rag2
 class Report(BaseModel):
     is_ragtime:bool = True
     metadata:ReportMetaData
+    evaldata: Optional[Dict[str,Any]] = None
     responses:Optional[List[NeuclirReportSentence]|List[RagtimeReportSentence]|List[Rag24ReportSentence]]=None
     answer:Optional[List[NeuclirReportSentence]|List[RagtimeReportSentence]|List[Rag24ReportSentence]]=None
     path:Optional[Path]=None
