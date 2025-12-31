@@ -180,6 +180,50 @@ def option_llm_config():
     return decorator
 
 
+class ClickNuggetBanks(click.ParamType):
+    """Click parameter type for loading nugget banks from file or directory."""
+    name = "file-or-dir"
+
+    def convert(self, value, param, ctx):
+        if value is None:
+            return None
+
+        from .nugget_data.nugget_banks import (
+            load_nugget_banks_from_file,
+            load_nugget_banks_from_directory,
+        )
+
+        path = Path(value)
+
+        if path.is_file():
+            try:
+                return load_nugget_banks_from_file(path)
+            except Exception as e:
+                self.fail(f"Could not load nugget banks from {value}: {e}", param, ctx)
+
+        if path.is_dir():
+            try:
+                return load_nugget_banks_from_directory(path)
+            except Exception as e:
+                self.fail(f"Could not load nugget banks from directory {value}: {e}", param, ctx)
+
+        self.fail(f"Path {value} is neither a file nor directory", param, ctx)
+
+
+def option_nugget_banks():
+    """Optional nugget banks CLI option."""
+    def decorator(func):
+        func = click.option(
+            "--nugget-banks",
+            type=ClickNuggetBanks(),
+            required=False,
+            default=None,
+            help="Nugget banks file (JSON/JSONL) or directory. Optional input for judges that use nuggets."
+        )(func)
+        return func
+    return decorator
+
+
 def _resolve_llm_config(llm_config_path: Optional[Path]) -> MinimaLlmConfig:
     """
     Resolve LLM config from llm-config.yml or environment.
@@ -225,8 +269,9 @@ def _resolve_llm_config(llm_config_path: Optional[Path]) -> MinimaLlmConfig:
 
 
 def auto_judge_to_click_command(auto_judge: AutoJudge, cmd_name: str) -> int:
-    from .qrels.qrels import write_qrel_file, Qrels, verify_qrels
+    from .qrels.qrels import write_qrel_file, verify_qrels
     from .leaderboard.leaderboard import verify_leaderboard_topics
+    from .nugget_data.nugget_banks import NuggetBanks
     from .request import Request
     from .report import Report
 
@@ -235,13 +280,22 @@ def auto_judge_to_click_command(auto_judge: AutoJudge, cmd_name: str) -> int:
     @click.command(cmd_name)
     @option_rag_responses()
     @option_rag_topics()
+    @option_nugget_banks()
     @option_llm_config()
     @click.option("--output", type=Path, help="The output file.", required=True)
-    def run(rag_topics: Iterable[Request], rag_responses: Iterable[Report], llm_config: Optional[Path], output: Path):
+    def run(
+        rag_topics: Iterable[Request],
+        rag_responses: Iterable[Report],
+        nugget_banks: Optional[NuggetBanks],
+        llm_config: Optional[Path],
+        output: Path
+    ):
         # Resolve LLM config from file or environment
         resolved_config = _resolve_llm_config(llm_config)
 
-        leaderboard, qrels = auto_judge.judge(rag_responses, rag_topics, resolved_config)
+        leaderboard, qrels = auto_judge.judge(
+            rag_responses, rag_topics, resolved_config, nugget_banks=nugget_banks
+        )
 
         topic_ids = {t.request_id for t in rag_topics}
         verify_leaderboard_topics(expected_topic_ids=topic_ids,
