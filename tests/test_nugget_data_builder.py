@@ -1,0 +1,457 @@
+"""Tests for NuggetBank and NuggetBanks builders."""
+
+import tempfile
+from pathlib import Path
+
+from trec_auto_judge.nugget_data import (
+    Creator, NuggetQuestion, AggregatorType, Answer, NuggetBank, NuggetClaim,
+    Offsets, Reference, load_nugget_bank_json, print_nugget_json,
+    nugget_to_dict, question_nugget_to_dict, write_nugget_bank_json,
+    merge_nugget_claims, merge_nugget_questions
+)
+from trec_auto_judge.nugget_data import (
+    NuggetBanks, load_nugget_banks_from_file, load_nugget_banks_from_directory,
+    write_nugget_banks
+)
+
+
+def build_nugget_bank() -> NuggetBank:
+    """Build a sample NuggetBank with questions and claims."""
+    nuggets = [
+        NuggetQuestion(
+            question="What modern conservation efforts are in place to preserve Machu Picchu?",
+            question_id="1",
+            query_id="1",
+            sub_nuggets=[
+                NuggetQuestion(
+                    query_id="1",
+                    question="How are visitor impacts limited?"
+                ).add_answers([
+                    Answer(answer="restricted numbers"),
+                    Answer(answer="daily quotas")
+                ]),
+                NuggetQuestion(
+                    query_id="1",
+                    question="Which organization sets preservation guidelines?"
+                ).add_answers([Answer(answer="UNESCO")])
+            ]
+        ).add_answers([
+            Answer(answer="visitor numbers are restricted to reduce wear"),
+            Answer(answer="UNESCO provides guidelines for preservation"),
+            Answer(answer="restoration projects use traditional materials and methods")
+        ]).add_creator(Creator(is_human=True, contact=["Laura"])),
+
+        NuggetQuestion(
+            question="How did the Incas likely transport the massive stones used at Machu Picchu?",
+            question_id="2",
+            query_id="1",
+            sub_nuggets=[
+                NuggetQuestion(
+                    query_id="1",
+                    question="Which cylindrical timbers helped move stones?"
+                ).add_answers([Answer(answer="wooden rollers")]),
+                NuggetQuestion(
+                    query_id="1",
+                    question="Which simple machine was used to pry stones?"
+                ).add_answers([Answer(answer="levers")])
+            ],
+            aggregator_type=AggregatorType.OR,
+            importance=1,
+            creator=[Creator(is_human=True, contact=["Laura"])],
+            metadata={"creator": "Laura", "version": "0.0.1"}
+        ),
+
+        # example with answer predicates
+        NuggetQuestion(
+            question="Where is Machu Picchu located?",
+            query_id="1",
+            aggregator_type=AggregatorType.AND
+        ).add_answers([
+            Answer(answer="in Peru"),
+            Answer(answer="in South America")
+        ]).add_creator(Creator(is_human=True, contact=["Laura"])),
+
+        # example with references
+        NuggetQuestion(
+            query_id="1",
+            question="When was Machu Picchu built?",
+            aggregator_type=AggregatorType.OR
+        ).add_answers([
+            Answer.from_lazy(
+                answer="15th Century",
+                references=["03b53809-fbee-46aa-b036-8934a2b1f556",
+                           "0e589240-39b6-49ca-b82f-84f7c55d21f5",
+                           "17770e9d-4865-48e5-9140-ffe85401c9d6"]
+            )
+        ]).add_creator(Creator(is_human=True, contact=["Laura"])),
+
+        NuggetQuestion(
+            query_id="1",
+            question="Is machu pichu the right name?"
+        ).add_answers([
+            Answer(answer="yes"),
+            Answer(answer="no")
+        ]).add_creator(Creator(is_human=True, contact=["Laura"])),
+
+        # Claims (using simplified interface - no related_question_text/related_answer)
+        NuggetClaim(
+            query_id="1",
+            claim="Machu Picchu was built in the 15th century",
+            references=[Reference(
+                doc_id="123",
+                collection="historical_docs",
+                offsets=Offsets(start_offset=0, end_offset=10, encoding="UTF-8")
+            )]
+        ),
+
+        NuggetClaim.from_lazy(
+            query_id="1",
+            claim="The site was never discovered by Spanish conquistadors",
+            references=["doc-456", "doc-789"]
+        ),
+
+        # minimal example
+        NuggetQuestion.from_lazy(
+            "1",
+            "Is machu pichu the right name?",
+            ["yes", "no"],
+            creator=Creator(is_human=True, contact=["Laura"])
+        )
+    ]
+
+    # backwards compatible to v1 style dictionary
+    print("nuggets as v1 style dictionaries")
+    for nugget in nuggets:
+        print(nugget_to_dict(nugget))
+
+    print("add nuggets")
+    nuggetBank = NuggetBank(query_id="123", title_query="Laura Pichu")
+    nuggetBank.add_nuggets(nuggets)
+
+    print(nuggetBank)
+
+    nuggetBank.index_nuggets()
+
+    print("question roots (nugget_bank)")
+    if nuggetBank.nugget_bank:
+        print("\n".join(nuggetBank.nugget_bank.keys()))
+
+    print("claim roots (claim_bank)")
+    if nuggetBank.claim_bank:
+        print("\n".join(nuggetBank.claim_bank.keys()))
+
+    print("all (flattened view)")
+    print("\n".join(nuggetBank.all_nuggets_view.keys()))
+
+    return nuggetBank
+
+
+def test_build_nuggets():
+    """Test building and serializing NuggetBank."""
+    nuggetBank = build_nugget_bank()
+    print_nugget_json(nuggetBank)
+    print(nuggetBank.model_dump_json(indent=2, exclude_none=True))
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        path = Path(tmpdir) / "nugget_bank_example.json.gz"
+        write_nugget_bank_json(nuggetBank, path)
+        loaded = load_nugget_bank_json(path)
+        assert loaded.query_id == nuggetBank.query_id
+        assert len(loaded.nuggets_as_list()) == len(nuggetBank.nuggets_as_list())
+
+
+def test_nugget_bank_separate_storage():
+    """Test that questions go to nugget_bank and claims go to claim_bank."""
+    bank = NuggetBank(query_id="test", title_query="Test Query")
+
+    question = NuggetQuestion.from_lazy("test", "What is X?", ["answer"])
+    claim = NuggetClaim.from_lazy("test", "X is true")
+
+    bank.add_nuggets([question, claim])
+
+    # Check separate storage
+    assert bank.nugget_bank is not None
+    assert bank.claim_bank is not None
+    assert "What is X?" in bank.nugget_bank
+    assert "X is true" in bank.claim_bank
+
+    # Check combined list
+    all_nuggets = bank.nuggets_as_list()
+    assert len(all_nuggets) == 2
+
+    # Check flattened view includes both
+    assert "What is X?" in bank.all_nuggets_view
+    assert "X is true" in bank.all_nuggets_view
+
+
+def test_nugget_bank_read_only_view():
+    """Test that all_nuggets_view is read-only."""
+    bank = NuggetBank(query_id="test", title_query="Test Query")
+    bank.add_nuggets(NuggetQuestion.from_lazy("test", "Q?", ["A"]))
+
+    # Should be able to read
+    assert "Q?" in bank.all_nuggets_view
+
+    # Should not be able to modify
+    try:
+        bank.all_nuggets_view["new_key"] = NuggetQuestion.from_lazy("test", "New?")
+        assert False, "Should have raised TypeError"
+    except TypeError:
+        pass  # Expected
+
+
+def test_iterate_nugget_bank():
+    """Test iterating over questions and claims with answers."""
+    nuggetBank = build_nugget_bank()
+
+    for nugget in nuggetBank.nuggets_as_list():
+        if isinstance(nugget, NuggetQuestion):
+            if nugget.answers is not None:
+                for answer_text, answer in nugget.answers.items():
+                    print(f"id={nugget.question_id}: question={nugget.question} "
+                          f"answer={answer.answer} nugget.references={nugget.references} "
+                          f"answer.references={answer.references}")
+            else:
+                print(f"id={nugget.question_id}: question={nugget.question} "
+                      f"nugget.references={nugget.references}")
+        elif isinstance(nugget, NuggetClaim):
+            print(f"id={nugget.claim_id}: claim={nugget.claim} "
+                  f"references={nugget.references}")
+
+
+def test_build_creator():
+    """Test that creators are preserved."""
+    nuggetBank = build_nugget_bank()
+
+    for nugget in nuggetBank.nugget_bank.values():
+        if any("Laura" in c.contact for c in (nugget.creator or []) if c.contact):
+            return  # Found Laura
+    assert False, "Should have found creator Laura"
+
+
+def test_claim_from_lazy():
+    """Test NuggetClaim.from_lazy factory method."""
+    claim = NuggetClaim.from_lazy(
+        query_id="q1",
+        claim="The sky is blue",
+        references=["doc1", "doc2"],
+        creator=Creator(is_human=True, contact=["Test"])
+    )
+
+    assert claim.query_id == "q1"
+    assert claim.claim == "The sky is blue"
+    assert claim.claim_id is not None  # Auto-generated
+    assert len(claim.references) == 2
+    assert claim.references[0].doc_id == "doc1"
+    assert claim.creator is not None
+
+
+def test_merge_nugget_claims():
+    """Test merging multiple claims."""
+    claim1 = NuggetClaim.from_lazy("q1", "Fact A", references=["doc1"])
+    claim2 = NuggetClaim.from_lazy("q1", "Fact A", references=["doc2"])
+
+    merged = merge_nugget_claims([claim1, claim2])
+
+    assert merged.claim == "Fact A"
+    assert len(merged.references) == 2
+    assert {r.doc_id for r in merged.references} == {"doc1", "doc2"}
+
+
+def test_nugget_to_dict_question():
+    """Test nugget_to_dict for questions."""
+    question = NuggetQuestion.from_lazy(
+        "q1", "What is X?",
+        gold_answers=["A1", "A2"],
+        references=["source-doc"]
+    )
+
+    d = nugget_to_dict(question)
+
+    assert d["query_id"] == "q1"
+    assert d["question_text"] == "What is X?"
+    assert "question_id" in d
+    assert len(d["gold_answers"]) == 2
+    assert "references" in d  # Question-level references
+    assert d["references"] == ["source-doc"]
+
+
+def test_nugget_to_dict_claim():
+    """Test nugget_to_dict for claims."""
+    claim = NuggetClaim.from_lazy("q1", "X is true", references=["doc1"])
+
+    d = nugget_to_dict(claim)
+
+    assert d["query_id"] == "q1"
+    assert d["claim_text"] == "X is true"
+    assert "claim_id" in d
+    assert "references" in d
+    assert d["references"] == ["doc1"]
+
+
+def test_nugget_to_dict_backwards_compat():
+    """Test that question_nugget_to_dict is an alias for nugget_to_dict."""
+    question = NuggetQuestion.from_lazy("q1", "What?", ["A"])
+
+    assert nugget_to_dict(question) == question_nugget_to_dict(question)
+
+
+# ============ NuggetBanks (multi-topic container) tests ============
+
+
+def test_nugget_banks_empty():
+    """Test creating empty NuggetBanks container."""
+    banks = NuggetBanks.empty()
+    assert len(banks) == 0
+    assert list(banks) == []
+
+
+def test_nugget_banks_add_bank():
+    """Test adding banks to NuggetBanks container."""
+    banks = NuggetBanks.empty()
+
+    bank1 = NuggetBank(query_id="topic-1", title_query="Topic 1")
+    bank1.add_nuggets(NuggetQuestion.from_lazy("topic-1", "Q1?", ["A1"]))
+
+    bank2 = NuggetBank(query_id="topic-2", title_query="Topic 2")
+    bank2.add_nuggets(NuggetQuestion.from_lazy("topic-2", "Q2?", ["A2"]))
+
+    banks.add_bank(bank1)
+    banks.add_bank(bank2)
+
+    assert len(banks) == 2
+    assert "topic-1" in banks
+    assert "topic-2" in banks
+    assert banks["topic-1"].title_query == "Topic 1"
+
+
+def test_nugget_banks_dict_interface():
+    """Test dict-like interface of NuggetBanks."""
+    bank = NuggetBank(query_id="q1", title_query="Query 1")
+    banks = NuggetBanks.from_single_bank(bank)
+
+    # Test __getitem__
+    assert banks["q1"] is not None
+    assert banks["nonexistent"] is None
+
+    # Test __contains__
+    assert "q1" in banks
+    assert "q2" not in banks
+
+    # Test __iter__
+    assert list(banks) == ["q1"]
+
+    # Test __len__
+    assert len(banks) == 1
+
+    # Test get with default
+    assert banks.get("q1") is not None
+    assert banks.get("missing", "default") == "default"
+
+
+def test_nugget_banks_from_banks_list():
+    """Test creating NuggetBanks from a list."""
+    bank1 = NuggetBank(query_id="t1", title_query="T1")
+    bank2 = NuggetBank(query_id="t2", title_query="T2")
+
+    banks = NuggetBanks.from_banks_list([bank1, bank2])
+
+    assert len(banks) == 2
+    assert banks.query_ids() == ["t1", "t2"]
+
+
+def test_nugget_banks_merge_on_add():
+    """Test that adding a bank with same query_id merges nuggets."""
+    banks = NuggetBanks.empty()
+
+    bank1 = NuggetBank(query_id="q1", title_query="Query 1")
+    bank1.add_nuggets(NuggetQuestion.from_lazy("q1", "Question A?", ["A"]))
+
+    bank2 = NuggetBank(query_id="q1", title_query="Query 1")
+    bank2.add_nuggets(NuggetQuestion.from_lazy("q1", "Question B?", ["B"]))
+
+    banks.add_bank(bank1)
+    banks.add_bank(bank2)
+
+    # Should have merged into one bank
+    assert len(banks) == 1
+    merged_bank = banks["q1"]
+    assert len(merged_bank.nugget_bank) == 2
+
+
+def test_nugget_banks_write_read_jsonl():
+    """Test writing and reading NuggetBanks in JSONL format."""
+    bank1 = NuggetBank(query_id="t1", title_query="Topic 1")
+    bank1.add_nuggets(NuggetQuestion.from_lazy("t1", "Q1?", ["A1"]))
+
+    bank2 = NuggetBank(query_id="t2", title_query="Topic 2")
+    bank2.add_nuggets(NuggetClaim.from_lazy("t2", "Claim 2"))
+
+    banks = NuggetBanks.from_banks_list([bank1, bank2])
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        path = Path(tmpdir) / "nuggets.jsonl"
+        write_nugget_banks(banks, path, format="jsonl")
+
+        loaded = load_nugget_banks_from_file(path)
+
+        assert len(loaded) == 2
+        assert "t1" in loaded
+        assert "t2" in loaded
+
+
+def test_nugget_banks_write_read_jsonl_gz():
+    """Test writing and reading compressed JSONL."""
+    bank = NuggetBank(query_id="t1", title_query="Topic 1")
+    bank.add_nuggets(NuggetQuestion.from_lazy("t1", "Q?", ["A"]))
+    banks = NuggetBanks.from_single_bank(bank)
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        path = Path(tmpdir) / "nuggets.jsonl.gz"
+        write_nugget_banks(banks, path)
+
+        loaded = load_nugget_banks_from_file(path)
+        assert len(loaded) == 1
+
+
+def test_nugget_banks_write_read_directory():
+    """Test writing and reading from directory format."""
+    bank1 = NuggetBank(query_id="topic-1", title_query="Topic 1")
+    bank1.add_nuggets(NuggetQuestion.from_lazy("topic-1", "Q1?", ["A1"]))
+
+    bank2 = NuggetBank(query_id="topic-2", title_query="Topic 2")
+    bank2.add_nuggets(NuggetQuestion.from_lazy("topic-2", "Q2?", ["A2"]))
+
+    banks = NuggetBanks.from_banks_list([bank1, bank2])
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        out_dir = Path(tmpdir) / "nuggets"
+        write_nugget_banks(banks, out_dir, format="directory")
+
+        # Check files were created
+        assert (out_dir / "topic-1.json.gz").exists()
+        assert (out_dir / "topic-2.json.gz").exists()
+
+        # Load back
+        loaded = load_nugget_banks_from_directory(out_dir)
+        assert len(loaded) == 2
+        assert "topic-1" in loaded
+        assert "topic-2" in loaded
+
+
+def test_backwards_compat_old_claim_fields():
+    """Test that old NuggetClaim fields are ignored (backwards compatibility)."""
+    # Simulate loading old JSON with deprecated fields
+    old_data = {
+        "query_id": "q1",
+        "claim": "Old claim",
+        "related_question_text": "Should be ignored",
+        "related_answer": [{"answer": "Should be ignored"}]
+    }
+
+    # Should not raise - extra fields are ignored
+    claim = NuggetClaim.model_validate(old_data)
+    assert claim.claim == "Old claim"
+    assert claim.query_id == "q1"
+    # Old fields should not be present
+    assert not hasattr(claim, "related_question_text") or claim.__dict__.get("related_question_text") is None

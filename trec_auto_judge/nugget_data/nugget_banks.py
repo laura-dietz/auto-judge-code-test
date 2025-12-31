@@ -33,7 +33,7 @@ class NuggetBanks(BaseModel):
         ...     print(query_id)
     """
 
-    format_version: str = "v1"
+    format_version: str = "v3"
     banks: Dict[str, NuggetBank] = {}
 
     def __getitem__(self, query_id: str) -> Optional[NuggetBank]:
