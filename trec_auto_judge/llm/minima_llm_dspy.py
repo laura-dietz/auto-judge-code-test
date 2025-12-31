@@ -5,6 +5,7 @@ import typing
 from typing import Any, Callable, Dict, List, Optional, Type, Union, cast, get_args
 
 import asyncio
+import contextvars
 import inspect
 import re
 
@@ -537,12 +538,14 @@ async def run_dspy_batch(
         kwargs = obj.model_dump(include=set(input_fields))
 
         last_error: Optional[Exception] = None
+        force_refresh_token: Optional[contextvars.Token[bool]] = None
 
         for attempt in range(max_attempts):
-            # On retry, force refresh to bypass cached response that caused error
-            if attempt > 0:
-                token = set_force_refresh(True)
             try:
+                # On retry, force refresh to bypass cached response that caused error
+                if attempt > 0:
+                    force_refresh_token = set_force_refresh(True)
+
                 # Run prediction
                 result = await predictor.acall(**kwargs)
 
@@ -563,8 +566,9 @@ async def run_dspy_batch(
                 last_error = e
                 continue
             finally:
-                if attempt > 0:
-                    reset_force_refresh(token)
+                if force_refresh_token is not None:
+                    reset_force_refresh(force_refresh_token)
+                    force_refresh_token = None
 
         # All retries exhausted
         raise last_error  # type: ignore[misc]
