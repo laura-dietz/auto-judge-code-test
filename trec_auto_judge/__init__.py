@@ -25,6 +25,7 @@ class AutoJudge(Protocol):
 
 from ._commands._evaluate import evaluate
 from ._commands._export_corpus import export_corpus
+from ._commands._list_models import list_models
 from click import group
 from .click_plus import option_rag_responses, option_rag_topics, option_ir_dataset, auto_judge_to_click_command
 
@@ -35,6 +36,7 @@ def main():
 
 main.command()(evaluate)
 main.command()(export_corpus)
+main.add_command(list_models)
 
 
 if __name__ == '__main__':

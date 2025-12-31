@@ -2,21 +2,38 @@
 
 This guide explains how to request specific LLM models for your AutoJudge implementation.
 
-## Quick Start
+## Two Config Formats
 
-Create a file named `llm-config.yml` in your judge directory:
+### 1. Submission Mode (`llm-config.yml`)
+
+For TIRA submission - declares model preferences resolved against organizer's pool:
 
 ```yaml
 model_preferences:
+  - "llama-3.3-70b-instruct"
   - "gpt-4o"
-  - "gpt-4-turbo"
   - "claude-3-5-sonnet"
+on_no_match: "use_default"
 ```
 
-For development you pass it to your judge via the `--llm-config` flag:
+### 2. Dev Mode (`llm-config.dev.yml`)
+
+For local development - uses your endpoint directly (no resolution):
+
+```yaml
+base_url: "http://localhost:11434/v1"
+model: "llama3.2"
+api_key: ""  # optional
+```
+
+## Usage
 
 ```bash
-./my-judge.py --rag-responses runs/ --llm-config llm-config.yml --output output.txt
+# Development: use your local endpoint
+./my-judge.py --llm-config llm-config.dev.yml --rag-responses runs/ --output output.txt
+
+# Submission: resolve against organizer's available models
+./my-judge.py --llm-config llm-config.yml --rag-responses runs/ --output output.txt
 ```
 
 ## How It Works
@@ -45,12 +62,12 @@ model_preferences:
   - "claude-3-5-sonnet"
 
 # What happens if none of your preferences are available?
-# Options: "error" (default) or "use_default"
-on_no_match: "error"
+# Options: "use_default" (default) or "error"
+on_no_match: "use_default"
 ```
 
+- `on_no_match: "use_default"` (default) - Fall back to the organizer's default model
 - `on_no_match: "error"` - Fail with an error message listing available models
-- `on_no_match: "use_default"` - Fall back to the organizer's default model
 
 ## Available Models
 
@@ -97,7 +114,8 @@ This ensures backwards compatibility with existing judges.
 ```
 my-judge/
 ├── my-judge.py           # Your judge implementation
-├── llm-config.yml        # Model preferences
+├── llm-config.yml        # Submission: model preferences
+├── llm-config.dev.yml    # Dev: your local endpoint
 ├── requirements.txt
 └── Dockerfile
 ```

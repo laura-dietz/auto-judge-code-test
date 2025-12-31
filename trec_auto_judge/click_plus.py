@@ -184,22 +184,41 @@ def _resolve_llm_config(llm_config_path: Optional[Path]) -> MinimaLlmConfig:
     """
     Resolve LLM config from llm-config.yml or environment.
 
-    Priority:
-    1. If llm_config_path provided with model_preferences, resolve against available
-    2. Fall back to MinimaLlmConfig.from_env()
+    Supports two formats:
+    1. Direct config (dev mode): base_url + model → use as-is
+    2. Preferences (submission mode): model_preferences → resolve against available
+
+    Fallback: MinimaLlmConfig.from_env()
     """
+    import yaml
+
     if llm_config_path is not None:
         try:
-            prefs = ModelPreferences.from_yaml(llm_config_path)
-            if prefs.preferences:
+            with open(llm_config_path) as f:
+                data = yaml.safe_load(f) or {}
+
+            # Dev mode: direct config with base_url and model
+            if "base_url" in data and "model" in data:
+                config = MinimaLlmConfig(
+                    base_url=data["base_url"].rstrip("/"),
+                    model=data["model"],
+                    api_key=data.get("api_key", ""),
+                )
+                click.echo(f"Using direct config: {config.model} from {config.base_url}", err=True)
+                return config
+
+            # Submission mode: resolve preferences against available models
+            if "model_preferences" in data:
+                prefs = ModelPreferences.from_dict(data)
                 resolver = ModelResolver.from_env()
                 config = resolver.resolve(prefs)
                 click.echo(f"Resolved model: {config.model} from {config.base_url}", err=True)
                 return config
+
         except ModelResolutionError as e:
             raise click.ClickException(str(e))
         except Exception as e:
-            click.echo(f"Warning: Could not resolve model from config: {e}", err=True)
+            click.echo(f"Warning: Could not load config from {llm_config_path}: {e}", err=True)
 
     # Fallback to environment-based config
     return MinimaLlmConfig.from_env()

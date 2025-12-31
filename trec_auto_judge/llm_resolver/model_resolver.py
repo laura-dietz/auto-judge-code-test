@@ -24,14 +24,14 @@ class ModelResolutionError(Exception):
 class ModelPreferences:
     """Participant-declared model preferences."""
     preferences: Sequence[str]  # Ordered list, first available wins
-    on_no_match: str = "error"  # "error" | "use_default"
+    on_no_match: str = "use_default"  # "use_default" | "error"
 
     @classmethod
     def from_dict(cls, data: Dict) -> "ModelPreferences":
         """Create from dictionary (parsed YAML)."""
         return cls(
             preferences=tuple(data.get("model_preferences", [])),
-            on_no_match=data.get("on_no_match", "error"),
+            on_no_match=data.get("on_no_match", "use_default"),
         )
 
     @classmethod
@@ -43,7 +43,7 @@ class ModelPreferences:
             model_preferences:
               - "gpt-4o"
               - "gpt-4-turbo"
-            on_no_match: "error"  # optional, defaults to "error"
+            on_no_match: "use_default"  # optional, defaults to "use_default"
         """
         with open(path) as f:
             data = yaml.safe_load(f) or {}
@@ -83,9 +83,18 @@ class AvailableModels:
                 batch=batch_config,
             )
 
+        default_model = data.get("default_model")
+        if not default_model:
+            raise ValueError("Organizer config must set 'default_model'")
+        if default_model not in models:
+            raise ValueError(
+                f"default_model '{default_model}' is not an enabled model. "
+                f"Enabled models: {list(models.keys())}"
+            )
+
         return cls(
             models=models,
-            default_model=data.get("default_model"),
+            default_model=default_model,
             aliases=data.get("aliases", {}),
             disabled=disabled,
         )

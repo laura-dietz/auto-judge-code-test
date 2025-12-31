@@ -28,13 +28,13 @@ class TestModelPreferences:
         prefs = ModelPreferences.from_dict({})
 
         assert prefs.preferences == ()
-        assert prefs.on_no_match == "error"
+        assert prefs.on_no_match == "use_default"
 
     def test_from_dict_defaults_on_no_match(self):
         data = {"model_preferences": ["model-a"]}
         prefs = ModelPreferences.from_dict(data)
 
-        assert prefs.on_no_match == "error"
+        assert prefs.on_no_match == "use_default"
 
     def test_from_yaml(self, tmp_path):
         config_file = tmp_path / "llm-config.yml"
