@@ -1,0 +1,2 @@
+# Rubric judge creates nuggets first, then judges using them
+mode: "nuggify-then-judge"
