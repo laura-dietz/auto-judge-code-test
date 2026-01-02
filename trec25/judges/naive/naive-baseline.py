@@ -31,7 +31,7 @@ class NaiveJudge(AutoJudge):
         
     def judge(self, rag_responses: Sequence["Report"]
               , rag_topics: Sequence["Request"]
-              , llm_cfg:MinimaLlmConfig
+              , llm_config:MinimaLlmConfig
               , nugget_banks: Optional[NuggetBanks] = None
               , **kwargs) -> tuple["Leaderboard", Optional["Qrels"]]:
         ret = LeaderboardBuilder(NAIVE_LEADERBOARD_SPEC)

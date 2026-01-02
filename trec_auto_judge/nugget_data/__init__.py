@@ -22,6 +22,9 @@ from .nugget_data import (
     print_nugget_json,
     str_nugget_json,
 )
+from .io import (
+    make_io_functions,
+)
 
 from .nugget_banks import (
     NuggetBanks,

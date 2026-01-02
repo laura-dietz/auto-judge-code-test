@@ -190,6 +190,7 @@ class ClickNuggetBanks(click.ParamType):
         if value is None:
             return None
 
+        from .nugget_data import NuggetBank, NuggetBanks
         from .nugget_data.nugget_banks import (
             load_nugget_banks_from_file,
             load_nugget_banks_from_directory,
@@ -199,13 +200,13 @@ class ClickNuggetBanks(click.ParamType):
 
         if path.is_file():
             try:
-                return load_nugget_banks_from_file(path)
+                return load_nugget_banks_from_file(path, NuggetBank, NuggetBanks)
             except Exception as e:
                 self.fail(f"Could not load nugget banks from {value}: {e}", param, ctx)
 
         if path.is_dir():
             try:
-                return load_nugget_banks_from_directory(path)
+                return load_nugget_banks_from_directory(path, NuggetBank, NuggetBanks)
             except Exception as e:
                 self.fail(f"Could not load nugget banks from directory {value}: {e}", param, ctx)
 

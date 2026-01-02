@@ -250,7 +250,7 @@ class RubricJudge(AutoJudge):
             topic_id = metadata.topic_id
             text = response.get_report_text()
 
-            bank = nugget_banks[topic_id]
+            bank = nugget_banks.banks.get(topic_id)
             if bank is None:
                 print(f"Warning: No nugget bank for topic {topic_id}, skipping")
                 continue

@@ -301,86 +301,75 @@ def test_nugget_to_dict_backwards_compat():
 
 def test_nugget_banks_empty():
     """Test creating empty NuggetBanks container."""
-    banks = NuggetBanks.empty()
-    assert len(banks) == 0
-    assert list(banks) == []
+    banks = NuggetBanks(banks={})
+    assert len(banks.banks) == 0
+    assert list(banks.banks) == []
 
 
-def test_nugget_banks_add_bank():
-    """Test adding banks to NuggetBanks container."""
-    banks = NuggetBanks.empty()
-
+def test_nugget_banks_from_banks_list():
+    """Test creating NuggetBanks from a list."""
     bank1 = NuggetBank(query_id="topic-1", title_query="Topic 1")
     bank1.add_nuggets(NuggetQuestion.from_lazy("topic-1", "Q1?", ["A1"]))
 
     bank2 = NuggetBank(query_id="topic-2", title_query="Topic 2")
     bank2.add_nuggets(NuggetQuestion.from_lazy("topic-2", "Q2?", ["A2"]))
 
-    banks.add_bank(bank1)
-    banks.add_bank(bank2)
-
-    assert len(banks) == 2
-    assert "topic-1" in banks
-    assert "topic-2" in banks
-    assert banks["topic-1"].title_query == "Topic 1"
-
-
-def test_nugget_banks_dict_interface():
-    """Test dict-like interface of NuggetBanks."""
-    bank = NuggetBank(query_id="q1", title_query="Query 1")
-    banks = NuggetBanks.from_single_bank(bank)
-
-    # Test __getitem__
-    assert banks["q1"] is not None
-    assert banks["nonexistent"] is None
-
-    # Test __contains__
-    assert "q1" in banks
-    assert "q2" not in banks
-
-    # Test __iter__
-    assert list(banks) == ["q1"]
-
-    # Test __len__
-    assert len(banks) == 1
-
-    # Test get with default
-    assert banks.get("q1") is not None
-    assert banks.get("missing", "default") == "default"
-
-
-def test_nugget_banks_from_banks_list():
-    """Test creating NuggetBanks from a list."""
-    bank1 = NuggetBank(query_id="t1", title_query="T1")
-    bank2 = NuggetBank(query_id="t2", title_query="T2")
-
     banks = NuggetBanks.from_banks_list([bank1, bank2])
 
-    assert len(banks) == 2
-    assert banks.query_ids() == ["t1", "t2"]
+    assert len(banks.banks) == 2
+    assert "topic-1" in banks.banks
+    assert "topic-2" in banks.banks
+    assert banks.banks["topic-1"].title_query == "Topic 1"
+    assert list(banks.banks.keys()) == ["topic-1", "topic-2"]
 
 
-def test_nugget_banks_merge_on_add():
-    """Test that adding a bank with same query_id merges nuggets."""
-    banks = NuggetBanks.empty()
+def test_nugget_banks_direct_access():
+    """Test direct access to banks field."""
+    bank = NuggetBank(query_id="q1", title_query="Query 1")
+    banks = NuggetBanks.from_banks_list([bank])
 
+    # Direct dict access
+    assert banks.banks["q1"] is not None
+    assert banks.banks.get("nonexistent") is None
+
+    # Membership
+    assert "q1" in banks.banks
+    assert "q2" not in banks.banks
+
+    # Iteration
+    assert list(banks.banks) == ["q1"]
+
+    # Length
+    assert len(banks.banks) == 1
+
+    # Get with default
+    assert banks.banks.get("q1") is not None
+    assert banks.banks.get("missing", "default") == "default"
+
+
+def test_nugget_banks_duplicate_error():
+    """Test that from_banks_list raises on duplicate query_id by default."""
     bank1 = NuggetBank(query_id="q1", title_query="Query 1")
     bank1.add_nuggets(NuggetQuestion.from_lazy("q1", "Question A?", ["A"]))
 
     bank2 = NuggetBank(query_id="q1", title_query="Query 1")
     bank2.add_nuggets(NuggetQuestion.from_lazy("q1", "Question B?", ["B"]))
 
-    banks.add_bank(bank1)
-    banks.add_bank(bank2)
+    # Should raise on duplicate
+    import pytest
+    with pytest.raises(ValueError, match="Duplicate query_id"):
+        NuggetBanks.from_banks_list([bank1, bank2])
 
-    # Should have merged into one bank
-    assert len(banks) == 1
-    merged_bank = banks["q1"]
-    assert len(merged_bank.nugget_bank) == 2
+    # With overwrite=True, should succeed (last wins)
+    banks = NuggetBanks.from_banks_list([bank1, bank2], overwrite=True)
+    assert len(banks.banks) == 1
+    assert banks.banks["q1"] is not None
 
 
 def test_nugget_banks_write_read_jsonl():
     """Test writing and reading NuggetBanks in JSONL format."""
+    from trec_auto_judge.nugget_data import NuggetBank, NuggetBanks
+
     bank1 = NuggetBank(query_id="t1", title_query="Topic 1")
     bank1.add_nuggets(NuggetQuestion.from_lazy("t1", "Q1?", ["A1"]))
 
@@ -395,27 +384,31 @@ def test_nugget_banks_write_read_jsonl():
 
         loaded = load_nugget_banks_from_file(path)
 
-        assert len(loaded) == 2
-        assert "t1" in loaded
-        assert "t2" in loaded
+        assert len(loaded.banks) == 2
+        assert "t1" in loaded.banks
+        assert "t2" in loaded.banks
 
 
 def test_nugget_banks_write_read_jsonl_gz():
     """Test writing and reading compressed JSONL."""
+    from trec_auto_judge.nugget_data import NuggetBank, NuggetBanks, load_nugget_banks_from_file
+
     bank = NuggetBank(query_id="t1", title_query="Topic 1")
     bank.add_nuggets(NuggetQuestion.from_lazy("t1", "Q?", ["A"]))
-    banks = NuggetBanks.from_single_bank(bank)
+    banks = NuggetBanks.from_banks_list([bank])
 
     with tempfile.TemporaryDirectory() as tmpdir:
         path = Path(tmpdir) / "nuggets.jsonl.gz"
         write_nugget_banks(banks, path)
 
         loaded = load_nugget_banks_from_file(path)
-        assert len(loaded) == 1
+        assert len(loaded.banks) == 1
 
 
 def test_nugget_banks_write_read_directory():
     """Test writing and reading from directory format."""
+    from trec_auto_judge.nugget_data import NuggetBank, NuggetBanks, load_nugget_banks_from_directory
+
     bank1 = NuggetBank(query_id="topic-1", title_query="Topic 1")
     bank1.add_nuggets(NuggetQuestion.from_lazy("topic-1", "Q1?", ["A1"]))
 
@@ -434,9 +427,9 @@ def test_nugget_banks_write_read_directory():
 
         # Load back
         loaded = load_nugget_banks_from_directory(out_dir)
-        assert len(loaded) == 2
-        assert "topic-1" in loaded
-        assert "topic-2" in loaded
+        assert len(loaded.banks) == 2
+        assert "topic-1" in loaded.banks
+        assert "topic-2" in loaded.banks
 
 
 def test_backwards_compat_old_claim_fields():

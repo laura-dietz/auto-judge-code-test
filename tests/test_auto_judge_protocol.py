@@ -17,7 +17,7 @@ class NaiveJudge(AutoJudge):
     ) -> Optional["NuggetBanks"]:
         return None
         
-    def judge(self, rag_responses: Sequence["Report"], rag_topics: Sequence["Request"],  llm_cfg: MinimaLlmConfig, nugget_banks: Optional[NuggetBanks] = None, **kwargs) -> tuple["Leaderboard", Optional["Qrels"]]:
+    def judge(self, rag_responses: Sequence["Report"], rag_topics: Sequence["Request"],  llm_config: MinimaLlmConfig, nugget_banks: Optional[NuggetBanks] = None, **kwargs) -> tuple["Leaderboard", Optional["Qrels"]]:
         ret = LeaderboardBuilder(self.leaderboard_spec())
 
         for r in rag_responses:
