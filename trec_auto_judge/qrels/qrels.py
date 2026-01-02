@@ -24,6 +24,7 @@ class QrelsSpec(Generic[R]):
     topic_id: Callable[[R], str]
     doc_id: Callable[[R], str]   
     grade: Callable[[R], int]
+    # todo this should be an enum
     on_duplicate: str = "error"    # "error" | "keep_max" | "keep_last"
 
 @dataclass(frozen=True)

@@ -4,7 +4,7 @@ from .report import Report, load_report
 from .request import Request, load_requests_from_irds, load_requests_from_file
 from .leaderboard.leaderboard import Leaderboard, LeaderboardEntry, MeasureSpec, LeaderboardSpec,  LeaderboardBuilder, VerificationError, verify_complete_measures, verify_complete_topics_per_run, verify_all, mean_of_bools, mean_of_floats, mean_of_ints
 from .qrels.qrels import QrelsSpec, QrelRow, Qrels, build_qrels, verify_all_topics_present, verify_no_unexpected_topics, verify_qrels, write_qrel_file, doc_id_md5
-from .llm.minima_llm import MinimaLlmConfig
+from .llm.minima_llm import MinimaLlmConfig, OpenAIMinimaLlm
 from .nugget_data import NuggetBanks
 __version__ = '0.0.1'
 
@@ -19,7 +19,15 @@ class AutoJudge(Protocol):
         llm_config: MinimaLlmConfig,
         nugget_banks: Optional["NuggetBanks"] = None,
         **kwargs
-    ) -> tuple["Leaderboard", Optional["Qrels"]]:
+    ) -> tuple["Leaderboard", Optional["Qrels"], Optional["NuggetBanks"]]:
+        """
+        Judge RAG responses against topics.
+
+        Returns:
+            - Leaderboard: Rankings/scores for runs
+            - Qrels: Optional fine-grained relevance judgments
+            - NuggetBanks: Optional modified/emitted nuggets (for judge-emits-nuggets mode)
+        """
         ...
 
     def create_nuggets(

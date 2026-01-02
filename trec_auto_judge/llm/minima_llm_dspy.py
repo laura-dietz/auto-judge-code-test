@@ -467,8 +467,8 @@ async def run_dspy_batch(
     signature_class: Type[dspy.Signature],
     annotation_objs: List[BaseModel],
     output_converter: Callable[[Any, BaseModel], None],
+    backend: OpenAIMinimaLlm,
     predictor_class: Type = dspy.ChainOfThought,
-    backend: Optional[OpenAIMinimaLlm] = None
 ) -> List[BaseModel]:
     """
     Execute a DSPy batch with MinimaLLM backend.

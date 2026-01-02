@@ -13,10 +13,12 @@ from trec_auto_judge.nugget_data import (
 import dspy
 import asyncio
 import re
+import json
 from typing import *
 from pydantic import BaseModel
 
 from trec_auto_judge.llm.minima_llm_dspy import run_dspy_batch
+from trec_auto_judge import MinimaLlmConfig, OpenAIMinimaLlm
 
 
 # =============================================================================
@@ -102,7 +104,7 @@ RUBRIC_QRELS = QrelsSpec["NuggetGradeData"](
     topic_id=lambda r: r.query_id,
     doc_id=lambda r: doc_id_md5(r.passage),
     grade=lambda r: float(r.grade),
-    on_duplicate="max"
+    on_duplicate="keep_max"
 )
 
 
@@ -160,9 +162,22 @@ class RubricJudge(AutoJudge):
         # Convert output handler
         def convert_gen_output(prediction: dspy.Prediction, data: NuggetGenerationData) -> None:
             questions = prediction.questions if hasattr(prediction, 'questions') else []
-            # Handle case where questions is a string (should be list)
+            # print("questions debug 1", type(questions), questions)
+            # DSPy may return list as JSON string - parse it
             if isinstance(questions, str):
-                questions = [q.strip() for q in questions.split('\n') if q.strip()]
+                try:
+                    parsed = json.loads(questions)
+                    if isinstance(parsed, list):
+                        questions = [str(q).strip() for q in parsed if q]
+                    else:
+                        # Fallback: split by newlines
+                        questions = [q.strip() for q in questions.split('\n') if q.strip()]
+                except json.JSONDecodeError:
+                    # Fallback: split by newlines
+                    questions = [q.strip() for q in questions.split('\n') if q.strip()]
+            # print("questions debug 2", type(questions), questions)
+            # print("questions debug 3",  questions[0])
+            # print("questions", questions)
             data.questions = questions
 
         # Run LLM generation
@@ -170,7 +185,9 @@ class RubricJudge(AutoJudge):
         gen_data = asyncio.run(run_dspy_batch(
             GenerateNuggetQuestions,
             gen_data,
-            convert_gen_output
+            convert_gen_output,
+            backend=OpenAIMinimaLlm(llm_config)
+            
         ))
         print(f"Rubric: Finished gnerating questions")
 
@@ -201,7 +218,7 @@ class RubricJudge(AutoJudge):
         self,
         rag_responses: Sequence[Report],
         rag_topics: Sequence[Request],
-        llm_cfg: MinimaLlmConfig,
+        llm_config: MinimaLlmConfig,
         nugget_banks: Optional[NuggetBanks] = None,
         **kwargs
     ) -> tuple[Leaderboard, Optional[Qrels]]:
@@ -265,7 +282,8 @@ class RubricJudge(AutoJudge):
             grade_data = asyncio.run(run_dspy_batch(
                 GradeNuggetAnswer,
                 grade_data,
-                convert_grade_output
+                convert_grade_output,
+                backend=OpenAIMinimaLlm(llm_config)
             ))
         print(f"Rubric: Finished grading")
 
@@ -315,7 +333,7 @@ class RubricJudge(AutoJudge):
         # Build qrels from grade data
         qrels = build_qrels(records=grade_data, spec=RUBRIC_QRELS) if grade_data else None
 
-        return (leaderboard, qrels)
+        return (leaderboard, qrels, None)
 
     def _build_leaderboard(self, response_grades: Dict[str, Dict[str, Any]]) -> Leaderboard:
         """Build leaderboard from aggregated response grades."""
@@ -323,7 +341,7 @@ class RubricJudge(AutoJudge):
 
         for response_key, evaldata in response_grades.items():
             run_id, topic_id = response_key.split(":", 1)
-            b.add_entry(
+            b.add(
                 run_id=run_id,
                 topic_id=topic_id,
                 values={

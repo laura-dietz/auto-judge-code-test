@@ -43,7 +43,7 @@ class NaiveJudge(AutoJudge):
             }
             ret.add(run_id=rag_response.metadata.run_id, topic_id=rag_response.metadata.topic_id, values=vals)
 
-        return ret.build(), None
+        return ret.build(), None, None
 
 
 if __name__ == '__main__':

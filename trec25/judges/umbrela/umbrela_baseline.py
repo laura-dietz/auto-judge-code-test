@@ -10,6 +10,7 @@ from typing import *
 from pydantic import BaseModel
 
 from trec_auto_judge.llm.minima_llm_dspy import run_dspy_batch
+from trec_auto_judge import OpenAIMinimaLlm
 
 
 class UmbrelaAnnotation(BaseModel):
@@ -159,7 +160,7 @@ class UmbrelaJudge(AutoJudge):
         self,
         rag_responses: Sequence[Report],
         rag_topics: Sequence[Request],
-        llm_cfg: MinimaLlmConfig,
+        llm_config: MinimaLlmConfig,
         nugget_banks: Optional[NuggetBanks] = None,
         **kwargs
     ) -> tuple[Leaderboard, Optional[Qrels]]:
@@ -235,14 +236,16 @@ class UmbrelaJudge(AutoJudge):
         prompt_output = asyncio.run(run_dspy_batch(
             Umbrela,
             prompt_input,
-            Umbrela.convert_output
+            Umbrela.convert_output,
+
+            backend=OpenAIMinimaLlm(llm_config)
         ))
         print("Debug out", "\n".join(str(p) for p in prompt_output[0:1]))
 
         leaderboard = umbrela_to_leaderboard(prompt_output=prompt_output)
         qrels = umbrela_to_qrels(prompt_output)
         # qrels = None
-        return (leaderboard, qrels)
+        return (leaderboard, qrels, None)
 
 
 if __name__ == '__main__':
