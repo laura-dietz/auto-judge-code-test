@@ -49,5 +49,10 @@ from .protocols import (
     NuggetBanksProtocol,
 )
 
+from .verification import (
+    NuggetBanksVerification,
+    NuggetBanksVerificationError,
+)
+
 # Type alias for backwards compatibility (prefer NuggetBanksProtocol for new code)
 AnyNuggetBanks = Union[NuggetBanks, NuggetizerNuggetBanks]

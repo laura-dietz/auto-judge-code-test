@@ -598,3 +598,196 @@ def test_nuggetizer_nugget_banks_io():
         assert len(loaded.banks) == 1
         assert "nuggetizer-1" in loaded.banks
         assert loaded.banks["nuggetizer-1"].query == "Nuggetizer Query"
+
+
+# ============ NuggetBanks Verification tests ============
+
+def test_nugget_banks_verification_all_pass():
+    """Test that verification passes for complete, valid nugget banks."""
+    import pytest
+    from trec_auto_judge.nugget_data import (
+        NuggetBanks, NuggetBank, NuggetQuestion,
+        NuggetBanksVerification
+    )
+    from trec_auto_judge.request import Request
+
+    # Create topics
+    topics = [
+        Request(request_id="t1", title="Topic 1"),
+        Request(request_id="t2", title="Topic 2"),
+    ]
+
+    # Create matching nugget banks
+    bank1 = NuggetBank(query_id="t1", title_query="Topic 1")
+    bank1.add_nuggets(NuggetQuestion.from_lazy("t1", "Q1?", ["A1"]))
+
+    bank2 = NuggetBank(query_id="t2", title_query="Topic 2")
+    bank2.add_nuggets(NuggetQuestion.from_lazy("t2", "Q2?", ["A2"]))
+
+    banks = NuggetBanks.from_banks_list([bank1, bank2])
+
+    # Should pass all checks
+    NuggetBanksVerification(banks, topics).all()
+
+
+def test_nugget_banks_verification_complete_topics():
+    """Test that verification fails when topics are missing nugget banks."""
+    import pytest
+    from trec_auto_judge.nugget_data import (
+        NuggetBanks, NuggetBank, NuggetQuestion,
+        NuggetBanksVerification, NuggetBanksVerificationError
+    )
+    from trec_auto_judge.request import Request
+
+    # Create 3 topics
+    topics = [
+        Request(request_id="t1", title="Topic 1"),
+        Request(request_id="t2", title="Topic 2"),
+        Request(request_id="t3", title="Topic 3"),
+    ]
+
+    # Only create nugget banks for 2 topics
+    bank1 = NuggetBank(query_id="t1", title_query="Topic 1")
+    bank1.add_nuggets(NuggetQuestion.from_lazy("t1", "Q1?", ["A1"]))
+
+    bank2 = NuggetBank(query_id="t2", title_query="Topic 2")
+    bank2.add_nuggets(NuggetQuestion.from_lazy("t2", "Q2?", ["A2"]))
+
+    banks = NuggetBanks.from_banks_list([bank1, bank2])
+
+    # Should fail on complete_topics check
+    with pytest.raises(NuggetBanksVerificationError, match="Missing nugget banks.*t3"):
+        NuggetBanksVerification(banks, topics).complete_topics()
+
+
+def test_nugget_banks_verification_no_extra_topics():
+    """Test that verification fails when nugget banks exist for unknown topics."""
+    import pytest
+    from trec_auto_judge.nugget_data import (
+        NuggetBanks, NuggetBank, NuggetQuestion,
+        NuggetBanksVerification, NuggetBanksVerificationError
+    )
+    from trec_auto_judge.request import Request
+
+    # Create 1 topic
+    topics = [
+        Request(request_id="t1", title="Topic 1"),
+    ]
+
+    # Create nugget banks for 2 topics (one extra)
+    bank1 = NuggetBank(query_id="t1", title_query="Topic 1")
+    bank1.add_nuggets(NuggetQuestion.from_lazy("t1", "Q1?", ["A1"]))
+
+    bank_extra = NuggetBank(query_id="extra", title_query="Extra Topic")
+    bank_extra.add_nuggets(NuggetQuestion.from_lazy("extra", "Q?", ["A"]))
+
+    banks = NuggetBanks.from_banks_list([bank1, bank_extra])
+
+    # Should fail on no_extra_topics check
+    with pytest.raises(NuggetBanksVerificationError, match="unknown topic.*extra"):
+        NuggetBanksVerification(banks, topics).no_extra_topics()
+
+
+def test_nugget_banks_verification_non_empty_banks():
+    """Test that verification fails when nugget banks are empty."""
+    import pytest
+    from trec_auto_judge.nugget_data import (
+        NuggetBanks, NuggetBank,
+        NuggetBanksVerification, NuggetBanksVerificationError
+    )
+    from trec_auto_judge.request import Request
+
+    # Create topics
+    topics = [
+        Request(request_id="t1", title="Topic 1"),
+    ]
+
+    # Create empty nugget bank (no nuggets added)
+    empty_bank = NuggetBank(query_id="t1", title_query="Topic 1")
+    banks = NuggetBanks.from_banks_list([empty_bank])
+
+    # Should fail on non_empty_banks check
+    with pytest.raises(NuggetBanksVerificationError, match="Empty nugget banks.*t1"):
+        NuggetBanksVerification(banks, topics).non_empty_banks()
+
+
+def test_nugget_banks_verification_chaining():
+    """Test that verification methods can be chained."""
+    from trec_auto_judge.nugget_data import (
+        NuggetBanks, NuggetBank, NuggetQuestion,
+        NuggetBanksVerification
+    )
+    from trec_auto_judge.request import Request
+
+    topics = [Request(request_id="t1", title="Topic 1")]
+
+    bank = NuggetBank(query_id="t1", title_query="Topic 1")
+    bank.add_nuggets(NuggetQuestion.from_lazy("t1", "Q?", ["A"]))
+    banks = NuggetBanks.from_banks_list([bank])
+
+    # All methods return self for chaining
+    result = NuggetBanksVerification(banks, topics).complete_topics().no_extra_topics().non_empty_banks()
+    assert isinstance(result, NuggetBanksVerification)
+
+
+def test_nugget_banks_verification_fail_fast():
+    """Test that verification fails on first error (fail-fast)."""
+    import pytest
+    from trec_auto_judge.nugget_data import (
+        NuggetBanks, NuggetBank,
+        NuggetBanksVerification, NuggetBanksVerificationError
+    )
+    from trec_auto_judge.request import Request
+
+    # Create topics
+    topics = [
+        Request(request_id="t1", title="Topic 1"),
+        Request(request_id="t2", title="Topic 2"),
+    ]
+
+    # Create empty bank for t1 (missing t2)
+    empty_bank = NuggetBank(query_id="t1", title_query="Topic 1")
+    banks = NuggetBanks.from_banks_list([empty_bank])
+
+    # all() should fail on complete_topics first (before non_empty_banks)
+    with pytest.raises(NuggetBanksVerificationError, match="Missing nugget banks"):
+        NuggetBanksVerification(banks, topics).all()
+
+
+def test_nugget_banks_verification_with_nuggetizer_format():
+    """Test verification works with NuggetizerNuggetBanks."""
+    from trec_auto_judge.nugget_data import (
+        NuggetizerNuggetBanks, NuggetizerNuggetBank,
+        NuggetBanksVerification
+    )
+    from trec_auto_judge.nugget_data.nuggetizer.nuggetizer_data import NuggetizerNugget
+    from trec_auto_judge.request import Request
+
+    topics = [Request(request_id="t1", title="Topic 1")]
+
+    # Create NuggetizerNuggetBank with nuggets
+    bank = NuggetizerNuggetBank(qid="t1", query="Topic 1")
+    bank.nuggets = [NuggetizerNugget(text="Key fact")]
+    banks = NuggetizerNuggetBanks.from_banks_list([bank])
+
+    # Should pass all checks
+    NuggetBanksVerification(banks, topics).all()
+
+
+def test_nugget_banks_verification_with_claims():
+    """Test verification recognizes claims as valid nuggets."""
+    from trec_auto_judge.nugget_data import (
+        NuggetBanks, NuggetBank, NuggetClaim,
+        NuggetBanksVerification
+    )
+    from trec_auto_judge.request import Request
+
+    topics = [Request(request_id="t1", title="Topic 1")]
+
+    # Create bank with only claims (no questions)
+    bank = NuggetBank(query_id="t1", title_query="Topic 1")
+    bank.add_nuggets(NuggetClaim.from_lazy("t1", "This is a claim"))
+    banks = NuggetBanks.from_banks_list([bank])
+
+    # Should pass - claims count as valid nuggets
+    NuggetBanksVerification(banks, topics).all()

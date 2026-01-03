@@ -10,6 +10,7 @@ from typing import Iterable, Optional, Sequence
 
 from .nugget_data import (
     NuggetBanksProtocol,
+    NuggetBanksVerification,
     write_nugget_banks_generic,
 )
 from .qrels.qrels import Qrels, verify_qrels, write_qrel_file
@@ -66,9 +67,12 @@ def run_judge(
             llm_config=llm_config,
             nugget_banks=nugget_banks,
         )
-        # Save immediately for crash recovery
-        if current_nuggets is not None and store_nuggets_path:
-            write_nugget_banks_generic(current_nuggets, store_nuggets_path)
+        # Verify created nuggets
+        if current_nuggets is not None:
+            NuggetBanksVerification(current_nuggets, rag_topics).all()
+            # Save immediately for crash recovery
+            if store_nuggets_path:
+                write_nugget_banks_generic(current_nuggets, store_nuggets_path)
 
     # Step 2: Judge if we have responses
     if rag_responses is not None:
@@ -81,6 +85,8 @@ def run_judge(
 
         # Step 3: Handle modified nuggets
         if modify_nuggets and emitted_nuggets is not None:
+            # Verify emitted nuggets
+            NuggetBanksVerification(emitted_nuggets, rag_topics).all()
             current_nuggets = emitted_nuggets
             if store_nuggets_path:
                 write_nugget_banks_generic(emitted_nuggets, store_nuggets_path)
