@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-from trec_auto_judge import Report, LeaderboardSpec, LeaderboardBuilder, mean_of_floats, MeasureSpec, AutoJudge, auto_judge_to_click_command, Leaderboard, Qrels, Sequence, Request, Optional, MinimaLlmConfig, NuggetBanks
+from trec_auto_judge import Report, LeaderboardSpec, LeaderboardBuilder, LeaderboardVerification, mean_of_floats, MeasureSpec, AutoJudge, auto_judge_to_click_command, Leaderboard, Qrels, Sequence, Request, Optional, MinimaLlmConfig, NuggetBanks
 from collections import defaultdict
 from tqdm import tqdm
 from tira.third_party_integrations import ensure_pyterrier_is_loaded
@@ -72,7 +72,9 @@ class RetrievalJudge(AutoJudge):
             for system in all_systems:
                 ret.add(run_id=system, topic_id=topic, values=system_to_wmodel_to_score[system])
 
-        return ret.build(), None
+        leaderboard = ret.build()
+        LeaderboardVerification(leaderboard).all()
+        return leaderboard, None
 
 
 if __name__ == '__main__':

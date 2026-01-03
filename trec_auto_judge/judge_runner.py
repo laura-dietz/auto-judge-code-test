@@ -116,7 +116,7 @@ def _write_outputs(
     """Verify and write leaderboard and qrels."""
     topic_ids = [t.request_id for t in rag_topics]
 
-    LeaderboardVerification(leaderboard, expected_topic_ids=topic_ids).complete_topics().no_extra_topics()
+    LeaderboardVerification(leaderboard, expected_topic_ids=topic_ids).all()
     leaderboard.write(output_path)
 
     if qrels is not None:
