@@ -1,13 +1,19 @@
-import collections
-from typing import Dict, Tuple, TypeVar, Generic, Callable, Iterable, Sequence, Iterable, Union
-
-from pathlib import Path
 from dataclasses import dataclass
-import hashlib
 from pathlib import Path
+from typing import Dict, Tuple, TypeVar, Generic, Callable, Iterable, Sequence, Union
+import hashlib
 
 def doc_id_md5(text: str) -> str:
     return hashlib.md5(text.encode("utf-8")).hexdigest()
+
+
+@dataclass(frozen=True)
+class QrelsVerificationError(Exception):
+    """Raised when qrels verification fails."""
+    message: str
+
+    def __str__(self) -> str:
+        return self.message
 
 
 
@@ -65,53 +71,116 @@ def build_qrels(*, records: Iterable[R], spec: QrelsSpec[R]) -> list[QrelRow]:
 
 #  === Qrel verification ===
 
-def verify_all_topics_present(
-    *,
-    expected_topic_ids: Sequence[str],
-    qrels: Qrels,
-) -> None:
+
+class QrelsVerification:
     """
-    Verify that every expected topic_id has at least one qrel row.
+    Fluent verifier for qrels.
+
+    Chain verification methods to run multiple checks:
+
+        QrelsVerification(qrels, expected_topic_ids).complete_topics().no_duplicates()
+
+    Or run all checks:
+
+        QrelsVerification(qrels, expected_topic_ids).all()
+
+    Each method raises QrelsVerificationError on failure (fail-fast).
     """
-    expected = set(expected_topic_ids)
-    seen = set()
 
-    for r in qrels.rows:
-        if r.topic_id in expected:
-            seen.add(r.topic_id)
+    def __init__(
+        self,
+        qrels: "Qrels",
+        expected_topic_ids: Sequence[str],
+    ):
+        """
+        Initialize verifier.
 
-    missing = expected - seen
-    if missing:
-        # Keep message small but actionable
-        raise ValueError(f"Missing qrels for {len(missing)} topic_id(s), e.g. {sorted(missing)[:5]}")
-    
-def verify_no_unexpected_topics(
-    *,
-    expected_topic_ids: Sequence[str],
-    qrels: Qrels,
-) -> None:
-    expected = set(expected_topic_ids)
-    extras = {r.topic_id for r in qrels.rows} - expected
-    if extras:
-        raise ValueError(f"Found unexpected topic_id(s) in qrels, e.g. {sorted(extras)[:5]}")
+        Args:
+            qrels: The qrels to verify
+            expected_topic_ids: The expected topic IDs to verify against
+        """
+        self.qrels = qrels
+        self.expected_topic_ids = expected_topic_ids
 
-def verify_no_dupes(qrels:Qrels) -> None:
-    checked:Dict[Tuple[str,str]] = dict()
-    for r in qrels.rows:
-        if (r.topic_id, r.doc_id) in checked:
-            raise ValueError(f"Found duplicate entry for topic={r.topic_id} doc_id={r.doc_id}: {checked[(r.topic_id, r.doc_id)]} when adding qrel row {r}")
-        checked[(r.topic_id, r.doc_id)]=r
-        
-def verify_qrels(
-    *,
-    expected_topic_ids: Sequence[str],
-    qrels: Qrels,
-    require_no_extras: bool = False,
-) -> None:
-    verify_no_dupes(qrels=qrels)
-    verify_all_topics_present(expected_topic_ids=expected_topic_ids, qrels=qrels)
-    if require_no_extras:
-        verify_no_unexpected_topics(expected_topic_ids=expected_topic_ids, qrels=qrels)
+    def complete_topics(self) -> "QrelsVerification":
+        """
+        Verify every expected topic has at least one qrel row.
+
+        Raises:
+            QrelsVerificationError: If any topic is missing qrels
+        """
+        expected = set(self.expected_topic_ids)
+        seen = set()
+
+        for r in self.qrels.rows:
+            if r.topic_id in expected:
+                seen.add(r.topic_id)
+
+        missing = expected - seen
+        if missing:
+            missing_list = sorted(missing)
+            preview = ", ".join(missing_list[:10])
+            more = f" ... ({len(missing_list) - 10} more)" if len(missing_list) > 10 else ""
+            raise QrelsVerificationError(
+                f"Missing qrels for {len(missing_list)} topic(s): {preview}{more}"
+            )
+
+        return self
+
+    def no_extra_topics(self) -> "QrelsVerification":
+        """
+        Verify no qrels exist for non-expected topics.
+
+        Raises:
+            QrelsVerificationError: If qrels exist for unknown topics
+        """
+        expected = set(self.expected_topic_ids)
+        extras = {r.topic_id for r in self.qrels.rows} - expected
+
+        if extras:
+            extra_list = sorted(extras)
+            preview = ", ".join(extra_list[:10])
+            more = f" ... ({len(extra_list) - 10} more)" if len(extra_list) > 10 else ""
+            raise QrelsVerificationError(
+                f"Qrels for {len(extra_list)} unexpected topic(s): {preview}{more}"
+            )
+
+        return self
+
+    def no_duplicates(self) -> "QrelsVerification":
+        """
+        Verify no duplicate (topic_id, doc_id) pairs exist.
+
+        Raises:
+            QrelsVerificationError: If duplicates are found
+        """
+        checked: Dict[Tuple[str, str], QrelRow] = {}
+
+        for r in self.qrels.rows:
+            key = (r.topic_id, r.doc_id)
+            if key in checked:
+                raise QrelsVerificationError(
+                    f"Duplicate qrel for topic={r.topic_id} doc_id={r.doc_id}: "
+                    f"first={checked[key]}, duplicate={r}"
+                )
+            checked[key] = r
+
+        return self
+
+    def all(self) -> "QrelsVerification":
+        """
+        Run all verification checks.
+
+        Checks run in order (fail-fast):
+        1. no_duplicates - no duplicate (topic_id, doc_id) pairs
+        2. complete_topics - every expected topic has qrels
+        3. no_extra_topics - no qrels for unknown topics
+
+        Returns:
+            self for chaining
+        """
+        return self.no_duplicates().complete_topics().no_extra_topics()
+
 
 # === serialization ===
 

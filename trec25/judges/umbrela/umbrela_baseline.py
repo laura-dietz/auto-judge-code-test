@@ -219,14 +219,9 @@ class UmbrelaJudge(AutoJudge):
                 },
             )
 
-            verify_all(
-                measure_names=UMBRELA_SPEC.names,
-                entries=b.entries(),
-                all_topic_id=UMBRELA_SPEC.all_topic_id,
-                require_all_row_complete=False,
-                require_same_topics_per_run=True,
-            )
-            return b.build()
+            leaderboard = b.build()
+            LeaderboardVerification(leaderboard).complete_measures(include_all_row=False).same_topics_per_run()
+            return leaderboard
 
         # Prepare input prompts
         prompt_input = prepare_prompts()

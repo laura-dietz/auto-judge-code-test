@@ -213,164 +213,225 @@ class LeaderboardBuilder:
 # === Verification ====
 
 
-
 @dataclass(frozen=True)
-class VerificationError(Exception):
-    """Raised when leaderboard completeness constraints are violated."""
+class LeaderboardVerificationError(Exception):
+    """Raised when leaderboard verification fails."""
     message: str
 
     def __str__(self) -> str:
         return self.message
 
 
-def verify_complete_measures(
-    *,
-    measure_names: Sequence[MeasureName],
-    entries: Iterable[LeaderboardEntry],
-    all_topic_id: str = "all",
-    include_all_row: bool = True,
-) -> None:
+class LeaderboardVerification:
     """
-    Verify that every (run_id, topic_id) entry contains all measures.
+    Fluent verifier for leaderboards.
 
-    By default, also checks the synthetic all_topic_id rows if present.
+    Chain verification methods to run multiple checks:
+
+        LeaderboardVerification(leaderboard).complete_measures().same_topics_per_run()
+
+    Or run all checks:
+
+        LeaderboardVerification(leaderboard, expected_topic_ids=topics).all()
+
+    Each method raises LeaderboardVerificationError on failure (fail-fast).
     """
-    required = set(measure_names)
 
-    missing_reports: list[str] = []
-    for e in entries:
-        if not include_all_row and e.topic_id == all_topic_id:
-            continue
-        present = set(e.values.keys())
-        missing = required - present
-        extra = present - required
-        if missing or extra:
-            parts = []
-            if missing:
-                parts.append(f"missing={sorted(missing)}")
-            if extra:
-                parts.append(f"extra={sorted(extra)}")
-            missing_reports.append(f"{e.run_id}/{e.topic_id}: " + ", ".join(parts))
+    def __init__(
+        self,
+        leaderboard: Leaderboard,
+        expected_topic_ids: Optional[Sequence[str]] = None,
+    ):
+        """
+        Initialize verifier.
 
-    if missing_reports:
-        preview = "\n  ".join(missing_reports[:25])
-        more = "" if len(missing_reports) <= 25 else f"\n  ... ({len(missing_reports) - 25} more)"
-        raise VerificationError(
-            "Leaderboard entries do not match the measure schema:\n  " + preview + more
-        )
+        Args:
+            leaderboard: The leaderboard to verify
+            expected_topic_ids: Optional set of expected topic IDs
+        """
+        self.leaderboard = leaderboard
+        self.expected_topic_ids = expected_topic_ids
 
+    def complete_measures(self, include_all_row: bool = True) -> "LeaderboardVerification":
+        """
+        Verify that every (run_id, topic_id) entry contains all measures.
 
-def verify_complete_topics_per_run(
-    *,
-    entries: Iterable[LeaderboardEntry],
-    all_topic_id: str = "all",
-    include_all_row: bool = False,
-) -> None:
-    """
-    Verify that all runs have the same set of topic_ids.
+        Args:
+            include_all_row: If True, also check synthetic all_topic_id rows
 
-    This catches cases where run A has topics {t1,t2} but run B has {t1,t3},
-    which makes per-run comparisons misleading.
-    """
-    by_run: dict[str, Set[str]] = {}
-    for e in entries:
-        if not include_all_row and e.topic_id == all_topic_id:
-            continue
-        by_run.setdefault(e.run_id, set()).add(e.topic_id)
+        Raises:
+            LeaderboardVerificationError: If any entry is missing or has extra measures
+        """
+        required = set(self.leaderboard.measures)
+        all_topic_id = self.leaderboard.all_topic_id
 
-    if not by_run:
-        return
+        missing_reports: list[str] = []
+        for e in self.leaderboard.entries:
+            if not include_all_row and e.topic_id == all_topic_id:
+                continue
+            present = set(e.values.keys())
+            missing = required - present
+            extra = present - required
+            if missing or extra:
+                parts = []
+                if missing:
+                    parts.append(f"missing={sorted(missing)}")
+                if extra:
+                    parts.append(f"extra={sorted(extra)}")
+                missing_reports.append(f"{e.run_id}/{e.topic_id}: " + ", ".join(parts))
 
-    runs = sorted(by_run.keys())
-    reference_run = runs[0]
-    reference_topics = by_run[reference_run]
+        if missing_reports:
+            preview = "\n  ".join(missing_reports[:25])
+            more = "" if len(missing_reports) <= 25 else f"\n  ... ({len(missing_reports) - 25} more)"
+            raise LeaderboardVerificationError(
+                "Leaderboard entries do not match the measure schema:\n  " + preview + more
+            )
 
-    diffs: list[str] = []
-    for r in runs[1:]:
-        tset = by_run[r]
-        missing = reference_topics - tset
-        extra = tset - reference_topics
-        if missing or extra:
-            parts = []
-            if missing:
-                parts.append(f"missing_topics={sorted(missing)}")
-            if extra:
-                parts.append(f"extra_topics={sorted(extra)}")
-            diffs.append(f"{r} vs {reference_run}: " + ", ".join(parts))
+        return self
 
-    if diffs:
-        preview = "\n  ".join(diffs[:25])
-        more = "" if len(diffs) <= 25 else f"\n  ... ({len(diffs) - 25} more)"
-        raise VerificationError(
-            f"Runs do not share the same topic set (reference={reference_run}):\n  {preview}{more}"
-        )
+    def same_topics_per_run(self, include_all_row: bool = False) -> "LeaderboardVerification":
+        """
+        Verify that all runs have the same set of topic_ids.
 
+        This catches cases where run A has topics {t1,t2} but run B has {t1,t3},
+        which makes per-run comparisons misleading.
 
+        Args:
+            include_all_row: If True, include synthetic all_topic_id rows
 
-def verify_leaderboard_topics(
-    *,
-    expected_topic_ids: Sequence[str],
-    entries: Iterable["LeaderboardEntry"],
-    all_topic_id: str = "all",
-    include_all_row: bool = False,
-    require_no_extras: bool = False,
-) -> None:
-    expected = set(expected_topic_ids)
-    seen = set()
+        Raises:
+            LeaderboardVerificationError: If runs have different topic sets
+        """
+        all_topic_id = self.leaderboard.all_topic_id
+        by_run: dict[str, Set[str]] = {}
 
-    for e in entries:
-        if not include_all_row and e.topic_id == all_topic_id:
-            continue
-        if e.topic_id in expected:
-            seen.add(e.topic_id)
+        for e in self.leaderboard.entries:
+            if not include_all_row and e.topic_id == all_topic_id:
+                continue
+            by_run.setdefault(e.run_id, set()).add(e.topic_id)
 
-    missing = expected - seen
-    if missing:
-        raise ValueError(f"Missing leaderboard entries for {len(missing)} topic_id(s), e.g. {sorted(missing)[:5]}")
+        if not by_run:
+            return self
 
-    if require_no_extras:
-        extras = {e.topic_id for e in entries if (include_all_row or e.topic_id != all_topic_id)} - expected
-        if include_all_row:
-            extras = extras - {all_topic_id}
+        runs = sorted(by_run.keys())
+        reference_run = runs[0]
+        reference_topics = by_run[reference_run]
+
+        diffs: list[str] = []
+        for r in runs[1:]:
+            tset = by_run[r]
+            missing = reference_topics - tset
+            extra = tset - reference_topics
+            if missing or extra:
+                parts = []
+                if missing:
+                    parts.append(f"missing_topics={sorted(missing)}")
+                if extra:
+                    parts.append(f"extra_topics={sorted(extra)}")
+                diffs.append(f"{r} vs {reference_run}: " + ", ".join(parts))
+
+        if diffs:
+            preview = "\n  ".join(diffs[:25])
+            more = "" if len(diffs) <= 25 else f"\n  ... ({len(diffs) - 25} more)"
+            raise LeaderboardVerificationError(
+                f"Runs do not share the same topic set (reference={reference_run}):\n  {preview}{more}"
+            )
+
+        return self
+
+    def complete_topics(self, include_all_row: bool = False) -> "LeaderboardVerification":
+        """
+        Verify that every expected topic has at least one entry.
+
+        Requires expected_topic_ids to be set in constructor.
+
+        Args:
+            include_all_row: If True, include synthetic all_topic_id rows
+
+        Raises:
+            LeaderboardVerificationError: If any expected topic is missing
+        """
+        if self.expected_topic_ids is None:
+            return self
+
+        all_topic_id = self.leaderboard.all_topic_id
+        expected = set(self.expected_topic_ids)
+        seen = set()
+
+        for e in self.leaderboard.entries:
+            if not include_all_row and e.topic_id == all_topic_id:
+                continue
+            if e.topic_id in expected:
+                seen.add(e.topic_id)
+
+        missing = expected - seen
+        if missing:
+            missing_list = sorted(missing)
+            preview = ", ".join(missing_list[:10])
+            more = f" ... ({len(missing_list) - 10} more)" if len(missing_list) > 10 else ""
+            raise LeaderboardVerificationError(
+                f"Missing leaderboard entries for {len(missing_list)} topic(s): {preview}{more}"
+            )
+
+        return self
+
+    def no_extra_topics(self, include_all_row: bool = False) -> "LeaderboardVerification":
+        """
+        Verify no entries exist for non-expected topics.
+
+        Requires expected_topic_ids to be set in constructor.
+
+        Args:
+            include_all_row: If True, include synthetic all_topic_id rows in check
+
+        Raises:
+            LeaderboardVerificationError: If entries exist for unknown topics
+        """
+        if self.expected_topic_ids is None:
+            return self
+
+        all_topic_id = self.leaderboard.all_topic_id
+        expected = set(self.expected_topic_ids)
+        extras = set()
+
+        for e in self.leaderboard.entries:
+            if not include_all_row and e.topic_id == all_topic_id:
+                continue
+            if e.topic_id not in expected and e.topic_id != all_topic_id:
+                extras.add(e.topic_id)
+
         if extras:
-            raise ValueError(f"Found unexpected topic_id(s) in leaderboard, e.g. {sorted(extras)[:5]}")
+            extra_list = sorted(extras)
+            preview = ", ".join(extra_list[:10])
+            more = f" ... ({len(extra_list) - 10} more)" if len(extra_list) > 10 else ""
+            raise LeaderboardVerificationError(
+                f"Leaderboard entries for {len(extra_list)} unexpected topic(s): {preview}{more}"
+            )
 
-from typing import Optional, Sequence
+        return self
 
-def verify_all(
-    *,
-    measure_names: Sequence[MeasureName],
-    entries: Iterable["LeaderboardEntry"],
-    all_topic_id: str = "all",
-    require_all_row_complete: bool = True,
-    require_same_topics_per_run: bool = True,
-    expected_topic_ids: Optional[Sequence[str]] = None,
-    require_no_extra_topics: bool = True,
-):
-    verify_complete_measures(
-        measure_names=measure_names,
-        entries=entries,
-        all_topic_id=all_topic_id,
-        include_all_row=require_all_row_complete,
-    )
+    def all(self, include_all_row: bool = True) -> "LeaderboardVerification":
+        """
+        Run all verification checks.
 
-    if expected_topic_ids is not None:
-        verify_leaderboard_topics(
-            expected_topic_ids=expected_topic_ids,
-            entries=entries,
-            all_topic_id=all_topic_id,
-            include_all_row=False,
-            require_no_extras=require_no_extra_topics,
+        Checks run in order (fail-fast):
+        1. complete_measures - every entry has all measures
+        2. complete_topics - every expected topic has entries (if expected_topic_ids set)
+        3. no_extra_topics - no entries for unknown topics (if expected_topic_ids set)
+        4. same_topics_per_run - all runs have same topic set
+
+        Args:
+            include_all_row: If True, include synthetic all_topic_id rows in measure check
+
+        Returns:
+            self for chaining
+        """
+        return (
+            self.complete_measures(include_all_row=include_all_row)
+            .complete_topics()
+            .no_extra_topics()
+            .same_topics_per_run()
         )
-
-    if require_same_topics_per_run:
-        verify_complete_topics_per_run(
-            entries=entries,
-            all_topic_id=all_topic_id,
-            include_all_row=False,
-        )
-
-
 
 
 #  === Example aggregators (optional helpers) ====

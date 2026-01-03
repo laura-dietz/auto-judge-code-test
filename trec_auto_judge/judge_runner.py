@@ -13,8 +13,8 @@ from .nugget_data import (
     NuggetBanksVerification,
     write_nugget_banks_generic,
 )
-from .qrels.qrels import Qrels, verify_qrels, write_qrel_file
-from .leaderboard.leaderboard import Leaderboard, verify_leaderboard_topics
+from .qrels.qrels import Qrels, QrelsVerification, write_qrel_file
+from .leaderboard.leaderboard import Leaderboard, LeaderboardVerification
 from .llm.minima_llm import MinimaLlmConfig
 from .report import Report
 from .request import Request
@@ -114,16 +114,11 @@ def _write_outputs(
     output_path: Path,
 ) -> None:
     """Verify and write leaderboard and qrels."""
-    topic_ids = {t.request_id for t in rag_topics}
+    topic_ids = [t.request_id for t in rag_topics]
 
-    verify_leaderboard_topics(
-        expected_topic_ids=topic_ids,
-        entries=leaderboard.entries,
-        include_all_row=True,
-        require_no_extras=True,
-    )
+    LeaderboardVerification(leaderboard, expected_topic_ids=topic_ids).complete_topics().no_extra_topics()
     leaderboard.write(output_path)
 
     if qrels is not None:
-        verify_qrels(qrels=qrels, expected_topic_ids=topic_ids, require_no_extras=True)
+        QrelsVerification(qrels, expected_topic_ids=topic_ids).all()
         write_qrel_file(qrel_out_file=output_path.with_suffix(".qrels"), qrels=qrels)

@@ -18,8 +18,8 @@ class TestLeaderboard(unittest.TestCase):
         b.add(run_id="run-01",topic_id="topic-02",values={"measure-01": 0.0})
     
         l = b.build()
-        # will throw exception is mistake found
-        verify_all(entries=l.entries,measure_names=["measure-01"])
+        # will throw exception if mistake found
+        LeaderboardVerification(l).complete_measures()
         
         with TemporaryDirectory() as tmp_dir:
             target_file = Path(tmp_dir) / "leaderboard"

@@ -351,15 +351,9 @@ class RubricJudge(AutoJudge):
                 }
             )
 
-        verify_all(
-            measure_names=RUBRIC_SPEC.names,
-            entries=b.entries(),
-            all_topic_id=RUBRIC_SPEC.all_topic_id,
-            require_all_row_complete=False,
-            require_same_topics_per_run=True,
-        )
-
-        return b.build()
+        leaderboard = b.build()
+        LeaderboardVerification(leaderboard).complete_measures(include_all_row=False).same_topics_per_run()
+        return leaderboard
 
 
 if __name__ == '__main__':
