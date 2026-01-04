@@ -367,15 +367,44 @@ Given a `filebase` setting (e.g., `filebase: "rubric"`), the framework generates
 | Nugget banks | `{filebase}.nuggets.jsonl` |
 | Leaderboard | `{filebase}.judgment.json` |
 | Qrels | `{filebase}.judgment.qrels` |
+| Run config | `{filebase}.config.yml` |
 
 Example with `filebase: "rubric"`:
 ```
 rubric.nuggets.jsonl
 rubric.judgment.json
 rubric.judgment.qrels
+rubric.config.yml
 ```
 
 If `filebase` already has an extension (`.json`, `.jsonl`), it's used as-is.
+
+### Run Configuration File
+
+The `.config.yml` file captures everything needed to reproduce the run:
+
+```yaml
+name: default                    # Variant/sweep name
+create_nuggets: true
+judge: true
+llm_model: gpt-4o
+timestamp: 2024-01-15T10:30:00+00:00
+git:
+  commit: abc123def456...
+  dirty: "false"                 # "true", "false", or "unknown"
+  remote: git@github.com:...     # or "none" or "unknown"
+settings:
+  top_k: 20
+nugget_settings:
+  extraction_style: thorough
+judge_settings:
+  threshold: 0.5
+```
+
+Git info fields:
+- `commit`: Full SHA or "unknown" if not in a git repo
+- `dirty`: Whether there are uncommitted changes
+- `remote`: Origin URL, "none" if no remote, or "unknown" on error
 
 ## How Nugget Types Flow
 

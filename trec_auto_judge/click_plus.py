@@ -607,6 +607,7 @@ def auto_judge_to_click_command(auto_judge: AutoJudge, cmd_name: str):
                 nugget_depends_on_responses=wf.nugget_depends_on_responses,
                 judge_uses_nuggets=wf.judge_uses_nuggets,
                 nugget_banks_type=nugget_banks_type,
+                config_name=config.name,
             )
 
             click.echo(f"Done configuration: {config.name}", err=True)

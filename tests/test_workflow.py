@@ -1,7 +1,14 @@
+import tempfile
 import unittest
 from pathlib import Path
 
+import yaml
+
 from trec_auto_judge.workflow import Workflow, load_workflow
+from trec_auto_judge.judge_runner import (
+    _write_run_config,
+    _resolve_config_file_path,
+)
 
 
 class TestWorkflowModel(unittest.TestCase):
@@ -102,3 +109,111 @@ class TestLoadWorkflowFiles(unittest.TestCase):
                 # Should parse without error and have valid boolean flags
                 self.assertIsInstance(wf.create_nuggets, bool)
                 self.assertIsInstance(wf.judge, bool)
+
+
+class TestWriteRunConfig(unittest.TestCase):
+    """Test _write_run_config() for reproducibility tracking."""
+
+    def test_resolve_config_file_path_adds_extension(self):
+        """Filebase without extension gets .config.yml added."""
+        self.assertEqual(
+            _resolve_config_file_path(Path("rubric")),
+            Path("rubric.config.yml"),
+        )
+        self.assertEqual(
+            _resolve_config_file_path(Path("output/rubric")),
+            Path("output/rubric.config.yml"),
+        )
+
+    def test_resolve_config_file_path_preserves_yml(self):
+        """Filebase with .yml/.yaml extension is used as-is."""
+        self.assertEqual(
+            _resolve_config_file_path(Path("custom.yml")),
+            Path("custom.yml"),
+        )
+        self.assertEqual(
+            _resolve_config_file_path(Path("custom.yaml")),
+            Path("custom.yaml"),
+        )
+
+    def test_writes_required_fields(self):
+        """Config file includes all required fields."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            output_path = Path(tmpdir) / "test"
+
+            _write_run_config(
+                output_path=output_path,
+                config_name="my-variant",
+                do_create_nuggets=True,
+                do_judge=True,
+                llm_model="gpt-4o",
+                settings=None,
+                nugget_settings=None,
+                judge_settings=None,
+            )
+
+            config_path = Path(tmpdir) / "test.config.yml"
+            self.assertTrue(config_path.exists())
+
+            with open(config_path) as f:
+                config = yaml.safe_load(f)
+
+            # Required fields
+            self.assertEqual(config["name"], "my-variant")
+            self.assertEqual(config["create_nuggets"], True)
+            self.assertEqual(config["judge"], True)
+            self.assertEqual(config["llm_model"], "gpt-4o")
+            self.assertIn("timestamp", config)
+            self.assertIn("git", config)
+            self.assertIn("commit", config["git"])
+            self.assertIn("dirty", config["git"])
+            self.assertIn("remote", config["git"])
+
+    def test_omits_empty_settings(self):
+        """Empty settings dicts are not included in config."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            output_path = Path(tmpdir) / "test"
+
+            _write_run_config(
+                output_path=output_path,
+                config_name="default",
+                do_create_nuggets=False,
+                do_judge=True,
+                llm_model="llama-3",
+                settings=None,
+                nugget_settings=None,
+                judge_settings=None,
+            )
+
+            config_path = Path(tmpdir) / "test.config.yml"
+            with open(config_path) as f:
+                config = yaml.safe_load(f)
+
+            self.assertNotIn("settings", config)
+            self.assertNotIn("nugget_settings", config)
+            self.assertNotIn("judge_settings", config)
+
+    def test_includes_nonempty_settings(self):
+        """Non-empty settings dicts are included in config."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            output_path = Path(tmpdir) / "test"
+
+            _write_run_config(
+                output_path=output_path,
+                config_name="default",
+                do_create_nuggets=True,
+                do_judge=True,
+                llm_model="gpt-4o",
+                settings={"top_k": 20, "filebase": "rubric"},
+                nugget_settings={"extraction_style": "thorough"},
+                judge_settings={"threshold": 0.5},
+            )
+
+            config_path = Path(tmpdir) / "test.config.yml"
+            with open(config_path) as f:
+                config = yaml.safe_load(f)
+
+            self.assertEqual(config["settings"]["top_k"], 20)
+            self.assertEqual(config["settings"]["filebase"], "rubric")
+            self.assertEqual(config["nugget_settings"]["extraction_style"], "thorough")
+            self.assertEqual(config["judge_settings"]["threshold"], 0.5)

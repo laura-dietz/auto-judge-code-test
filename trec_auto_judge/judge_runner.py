@@ -4,10 +4,14 @@ JudgeRunner: Orchestrates AutoJudge execution with nugget lifecycle management.
 Consolidates repeated functionality for nugget creation, saving, and judging.
 """
 
+import subprocess
 import sys
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable, Optional, Sequence
+
+import yaml
 
 from .nugget_data import (
     NuggetBanksProtocol,
@@ -69,6 +73,69 @@ def _resolve_judgment_file_paths(filebase: Path) -> tuple[Path, Path]:
     )
 
 
+def _resolve_config_file_path(filebase: Path) -> Path:
+    """Resolve config file path: {filebase}.config.yml"""
+    if filebase.suffix in (".yml", ".yaml"):
+        return filebase
+    return filebase.parent / f"{filebase.name}.config.yml"
+
+
+def _get_git_info() -> dict[str, str]:
+    """
+    Get git repository information for reproducibility.
+
+    Returns dict with:
+        - commit: SHA or "unknown"
+        - dirty: "true", "false", or "unknown"
+        - remote: remote URL or "none" or "unknown"
+    """
+    result = {}
+
+    # Get commit SHA
+    try:
+        commit = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        result["commit"] = commit.stdout.strip() if commit.returncode == 0 else "unknown"
+    except Exception:
+        result["commit"] = "unknown"
+
+    # Check if dirty
+    try:
+        status = subprocess.run(
+            ["git", "status", "--porcelain"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        if status.returncode == 0:
+            result["dirty"] = "true" if status.stdout.strip() else "false"
+        else:
+            result["dirty"] = "unknown"
+    except Exception:
+        result["dirty"] = "unknown"
+
+    # Get remote URL (origin)
+    try:
+        remote = subprocess.run(
+            ["git", "remote", "get-url", "origin"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        if remote.returncode == 0 and remote.stdout.strip():
+            result["remote"] = remote.stdout.strip()
+        else:
+            result["remote"] = "none"
+    except Exception:
+        result["remote"] = "unknown"
+
+    return result
+
+
 def run_judge(
     auto_judge,
     rag_responses: Iterable[Report],
@@ -89,6 +156,8 @@ def run_judge(
     judge_uses_nuggets: bool = True,
     # NuggetBanks type for loading (dotted import path)
     nugget_banks_type: Optional[str] = None,
+    # Configuration name for reproducibility tracking
+    config_name: str = "default",
 ) -> JudgeResult:
     """
     Execute judge workflow with nugget lifecycle management.
@@ -110,6 +179,7 @@ def run_judge(
         nugget_depends_on_responses: If True, pass responses to create_nuggets()
         judge_uses_nuggets: If True, pass nuggets to judge()
         nugget_banks_type: Dotted import path for NuggetBanks class (for loading)
+        config_name: Variant/sweep name for reproducibility tracking (default: "default")
 
     Returns:
         JudgeResult with leaderboard, qrels, and final nuggets
@@ -201,6 +271,16 @@ def run_judge(
                 rag_topics=rag_topics,
                 output_path=output_path,
             )
+            _write_run_config(
+                output_path=output_path,
+                config_name=config_name,
+                do_create_nuggets=do_create_nuggets,
+                do_judge=do_judge,
+                llm_model=effective_llm_config.model,
+                settings=settings,
+                nugget_settings=nugget_settings,
+                judge_settings=judge_settings,
+            )
 
     return JudgeResult(
         leaderboard=leaderboard,
@@ -229,3 +309,47 @@ def _write_outputs(
         QrelsVerification(qrels, expected_topic_ids=topic_ids).all()
         write_qrel_file(qrel_out_file=qrels_path, qrels=qrels)
         print(f"[judge_runner] Qrels saved to: {qrels_path}", file=sys.stderr)
+
+
+def _write_run_config(
+    output_path: Path,
+    config_name: str,
+    do_create_nuggets: bool,
+    do_judge: bool,
+    llm_model: str,
+    settings: Optional[dict[str, Any]],
+    nugget_settings: Optional[dict[str, Any]],
+    judge_settings: Optional[dict[str, Any]],
+) -> None:
+    """
+    Write run configuration for reproducibility.
+
+    Creates {filebase}.config.yml with:
+    - Workflow parameters (name, flags, settings)
+    - LLM model used
+    - Git info (commit, dirty, remote)
+    - Timestamp
+    """
+    config_path = _resolve_config_file_path(output_path)
+
+    config: dict[str, Any] = {
+        "name": config_name,
+        "create_nuggets": do_create_nuggets,
+        "judge": do_judge,
+        "llm_model": llm_model,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "git": _get_git_info(),
+    }
+
+    # Only include non-empty settings
+    if settings:
+        config["settings"] = settings
+    if nugget_settings:
+        config["nugget_settings"] = nugget_settings
+    if judge_settings:
+        config["judge_settings"] = judge_settings
+
+    with open(config_path, "w") as f:
+        yaml.safe_dump(config, f, default_flow_style=False, sort_keys=False)
+
+    print(f"[judge_runner] Config saved to: {config_path}", file=sys.stderr)
