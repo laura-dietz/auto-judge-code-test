@@ -5,10 +5,10 @@ Participants declare their workflow in workflow.yml to enable TIRA orchestration
 """
 
 from pathlib import Path
-from typing import Optional, Union
+from typing import Any, Optional, Union
 
 import yaml
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 # Built-in NuggetBanks type paths (for convenience)
@@ -27,10 +27,32 @@ class Workflow(BaseModel):
     - create_nuggets: Whether to call create_nuggets() to generate/refine nuggets
     - judge: Whether to call judge() to produce leaderboard/qrels
 
+    Settings are passed to AutoJudge methods as **kwargs:
+    - settings: Shared settings for both phases (fallback)
+    - nugget_settings: Override for create_nuggets()
+    - judge_settings: Override for judge()
+
     Example workflow.yml:
         create_nuggets: true
         judge: true
-        nugget_banks_type: "trec_auto_judge.nugget_data.NuggetBanks"
+
+        settings:
+          filebase: "{_name}"
+          top_k: 20
+
+        nugget_settings:
+          extraction_style: "thorough"
+
+        judge_settings:
+          threshold: 0.5
+
+        variants:
+          strict:
+            threshold: 0.8
+
+        sweeps:
+          top-k-sweep:
+            top_k: [10, 20, 50]
     """
 
     create_nuggets: bool = False
@@ -47,6 +69,33 @@ class Workflow(BaseModel):
 
     nugget_output: Optional[str] = None
     """Path to store created/refined nugget banks."""
+
+    # Settings dicts passed to AutoJudge methods as **kwargs
+    settings: dict[str, Any] = Field(default_factory=dict)
+    """Shared settings passed to both create_nuggets() and judge()."""
+
+    nugget_settings: dict[str, Any] = Field(default_factory=dict)
+    """Settings passed to create_nuggets(), merged over shared settings."""
+
+    judge_settings: dict[str, Any] = Field(default_factory=dict)
+    """Settings passed to judge(), merged over shared settings."""
+
+    # Named configurations and parameter sweeps
+    variants: dict[str, dict[str, Any]] = Field(default_factory=dict)
+    """Named configurations that override settings. Key = variant name."""
+
+    sweeps: dict[str, dict[str, Any]] = Field(default_factory=dict)
+    """Parameter sweeps. Values with lists expand to multiple configurations."""
+
+    # Lifecycle flags
+    nugget_depends_on_responses: bool = True
+    """If True, pass responses to create_nuggets(). If False, pass None."""
+
+    judge_uses_nuggets: bool = True
+    """If True, pass nuggets to judge(). If False, pass None."""
+
+    force_recreate_nuggets: bool = False
+    """If True, recreate nuggets even if file exists. CLI can override."""
 
 
 def load_workflow(source: Union[str, Path]) -> Workflow:
