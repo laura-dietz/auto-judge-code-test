@@ -4,7 +4,7 @@ from .io import load_runs_failsave
 from .request import load_requests_from_irds, load_requests_from_file
 from .llm import MinimaLlmConfig
 from .llm_resolver import ModelPreferences, ModelResolver, ModelResolutionError
-from .workflow import load_workflow
+from .workflow import load_workflow, resolve_default, resolve_variant, resolve_sweep
 from .judge_runner import run_judge
 import click
 from . import AutoJudge
@@ -458,6 +458,10 @@ def auto_judge_to_click_command(auto_judge: AutoJudge, cmd_name: str):
     @option_submission()
     @click.option("--output", type=Path, help="Leaderboard output file.", required=True)
     @click.option("--store-nuggets", type=Path, help="Output path for nuggets.", required=False)
+    @click.option("--variant", type=str, help="Run a specific named variant from workflow.", required=False)
+    @click.option("--sweep", type=str, help="Run a parameter sweep from workflow.", required=False)
+    @click.option("--all-variants", is_flag=True, help="Run all variants defined in workflow.")
+    @click.option("--force-recreate-nuggets", is_flag=True, help="Recreate nuggets even if file exists.")
     def run_cmd(
         workflow: Optional[Path],
         rag_responses: Iterable[Report],
@@ -466,7 +470,11 @@ def auto_judge_to_click_command(auto_judge: AutoJudge, cmd_name: str):
         llm_config: Optional[Path],
         submission: bool,
         output: Path,
-        store_nuggets: Optional[Path]
+        store_nuggets: Optional[Path],
+        variant: Optional[str],
+        sweep: Optional[str],
+        all_variants: bool,
+        force_recreate_nuggets: bool,
     ):
         """Run judge according to workflow.yml (default command)."""
         # Load workflow
@@ -482,26 +490,58 @@ def auto_judge_to_click_command(auto_judge: AutoJudge, cmd_name: str):
                 "Alternatively, use explicit subcommands."
             )
 
-        resolved_config = _resolve_llm_config(llm_config, submission)
+        # Validate mutually exclusive options
+        options_set = sum([bool(variant), bool(sweep), all_variants])
+        if options_set > 1:
+            raise click.UsageError("--variant, --sweep, and --all-variants are mutually exclusive.")
 
-        # Resolve nugget output path: CLI arg takes precedence, then workflow config
-        nugget_output_path = store_nuggets
-        if nugget_output_path is None and wf.nugget_output:
-            nugget_output_path = Path(wf.nugget_output)
-            click.echo(f"Using nugget output from workflow: {nugget_output_path}", err=True)
+        resolved_llm_config = _resolve_llm_config(llm_config, submission)
 
-        run_judge(
-            auto_judge=auto_judge,
-            rag_responses=rag_responses,
-            rag_topics=list(rag_topics),
-            llm_config=resolved_config,
-            nugget_banks=nugget_banks,
-            output_path=output,
-            store_nuggets_path=nugget_output_path,
-            do_create_nuggets=wf.create_nuggets,
-            do_judge=wf.judge,
-        )
+        # Resolve configurations based on CLI options
+        if variant:
+            configs = [resolve_variant(wf, variant)]
+        elif sweep:
+            configs = resolve_sweep(wf, sweep)
+        elif all_variants:
+            if not wf.variants:
+                raise click.UsageError("No variants defined in workflow.")
+            configs = [resolve_variant(wf, name) for name in wf.variants]
+        else:
+            configs = [resolve_default(wf)]
 
-        click.echo(f"Done. Leaderboard written to {output}", err=True)
+        # Convert rag_topics to list once (it's an iterable)
+        topics_list = list(rag_topics)
+
+        # Run each configuration
+        for config in configs:
+            click.echo(f"\n=== Running configuration: {config.name} ===", err=True)
+
+            # Determine output paths: CLI args take precedence, then resolved config
+            nugget_output_path = store_nuggets or config.nugget_output_path
+            judge_output_path = output  # CLI --output is required
+
+            if nugget_output_path:
+                click.echo(f"Nugget output: {nugget_output_path}", err=True)
+            if judge_output_path:
+                click.echo(f"Judge output: {judge_output_path}", err=True)
+
+            run_judge(
+                auto_judge=auto_judge,
+                rag_responses=rag_responses,
+                rag_topics=topics_list,
+                llm_config=resolved_llm_config,
+                nugget_banks=nugget_banks,
+                output_path=judge_output_path,
+                store_nuggets_path=nugget_output_path,
+                do_create_nuggets=wf.create_nuggets,
+                do_judge=wf.judge,
+                settings=config.settings,
+                nugget_settings=config.nugget_settings,
+                judge_settings=config.judge_settings,
+            )
+
+            click.echo(f"Done configuration: {config.name}", err=True)
+
+        click.echo(f"\nAll configurations complete. Output: {output}", err=True)
 
     return cli

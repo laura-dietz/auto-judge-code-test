@@ -9,4 +9,9 @@ from .workflow import (
     NUGGET_BANKS_AUTOARGUE,
     NUGGET_BANKS_NUGGETIZER,
     DEFAULT_NUGGET_BANKS_TYPE,
+    # Configuration resolution
+    ResolvedConfiguration,
+    resolve_default,
+    resolve_variant,
+    resolve_sweep,
 )
