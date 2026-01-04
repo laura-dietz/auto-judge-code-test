@@ -4,9 +4,10 @@ JudgeRunner: Orchestrates AutoJudge execution with nugget lifecycle management.
 Consolidates repeated functionality for nugget creation, saving, and judging.
 """
 
+import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable, Optional, Sequence
+from typing import Any, Iterable, Optional, Sequence
 
 from .nugget_data import (
     NuggetBanksProtocol,
@@ -38,6 +39,10 @@ def run_judge(
     store_nuggets_path: Optional[Path] = None,
     do_create_nuggets: bool = False,
     do_judge: bool = True,
+    # Settings dicts passed to AutoJudge methods as **kwargs
+    settings: Optional[dict[str, Any]] = None,
+    nugget_settings: Optional[dict[str, Any]] = None,
+    judge_settings: Optional[dict[str, Any]] = None,
 ) -> JudgeResult:
     """
     Execute judge workflow with nugget lifecycle management.
@@ -52,6 +57,9 @@ def run_judge(
         store_nuggets_path: Path to store created/refined nuggets
         do_create_nuggets: If True, call create_nuggets()
         do_judge: If True, call judge()
+        settings: Shared settings dict passed to both phases (fallback)
+        nugget_settings: Settings dict passed to create_nuggets() (overrides settings)
+        judge_settings: Settings dict passed to judge() (overrides settings)
 
     Returns:
         JudgeResult with leaderboard, qrels, and final nuggets
@@ -62,11 +70,15 @@ def run_judge(
 
     # Step 1: Create/refine nuggets if requested
     if do_create_nuggets:
+        nugget_kwargs = nugget_settings or settings or {}
+        if nugget_kwargs:
+            print(f"[judge_runner] create_nuggets settings: {nugget_kwargs}", file=sys.stderr)
         current_nuggets = auto_judge.create_nuggets(
             rag_responses=rag_responses,
             rag_topics=rag_topics,
             llm_config=llm_config,
             nugget_banks=nugget_banks,
+            **nugget_kwargs,
         )
         # Verify created nuggets
         if current_nuggets is not None:
@@ -77,11 +89,15 @@ def run_judge(
 
     # Step 2: Judge if requested
     if do_judge:
+        judge_kwargs = judge_settings or settings or {}
+        if judge_kwargs:
+            print(f"[judge_runner] judge settings: {judge_kwargs}", file=sys.stderr)
         leaderboard, qrels = auto_judge.judge(
             rag_responses=rag_responses,
             rag_topics=rag_topics,
             llm_config=llm_config,
             nugget_banks=current_nuggets,
+            **judge_kwargs,
         )
 
         # Step 3: Write outputs
