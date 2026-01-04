@@ -1,19 +1,16 @@
+import hashlib
+import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, Tuple, TypeVar, Generic, Callable, Iterable, Sequence, Union
-import hashlib
+from typing import Dict, Optional, Tuple, TypeVar, Generic, Callable, Iterable, Sequence, Union
 
 def doc_id_md5(text: str) -> str:
     return hashlib.md5(text.encode("utf-8")).hexdigest()
 
 
-@dataclass(frozen=True)
 class QrelsVerificationError(Exception):
     """Raised when qrels verification fails."""
-    message: str
-
-    def __str__(self) -> str:
-        return self.message
+    pass
 
 
 
@@ -91,6 +88,7 @@ class QrelsVerification:
         self,
         qrels: "Qrels",
         expected_topic_ids: Sequence[str],
+        warn: Optional[bool]=False
     ):
         """
         Initialize verifier.
@@ -101,6 +99,14 @@ class QrelsVerification:
         """
         self.qrels = qrels
         self.expected_topic_ids = expected_topic_ids
+        self.warn = warn
+
+    def _raise_or_warn(self, err: QrelsVerificationError):
+        if self.warn:
+            print(f"Warning: {err}", file=sys.stderr)
+        else:
+            raise err
+
 
     def complete_topics(self) -> "QrelsVerification":
         """

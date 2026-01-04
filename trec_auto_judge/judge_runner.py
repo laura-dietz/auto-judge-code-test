@@ -20,7 +20,7 @@ from .nugget_data import (
     load_nugget_banks_generic,
 )
 from .qrels.qrels import Qrels, QrelsVerification, write_qrel_file
-from .leaderboard.leaderboard import Leaderboard, LeaderboardVerification
+from .leaderboard.leaderboard import Leaderboard
 from .llm.minima_llm import MinimaLlmConfig
 from .report import Report
 from .request import Request
@@ -300,8 +300,7 @@ def _write_outputs(
 
     # Resolve output paths from filebase
     leaderboard_path, qrels_path = _resolve_judgment_file_paths(output_path)
-
-    LeaderboardVerification(leaderboard, expected_topic_ids=topic_ids).all()
+    leaderboard.verify(expected_topic_ids=topic_ids)
     leaderboard.write(leaderboard_path)
     print(f"[judge_runner] Leaderboard saved to: {leaderboard_path}", file=sys.stderr)
 

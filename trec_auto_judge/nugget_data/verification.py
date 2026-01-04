@@ -1,20 +1,16 @@
 """Verification for nugget banks completeness and consistency."""
 
-from dataclasses import dataclass
-from typing import Sequence, TYPE_CHECKING
+import sys
+from typing import Optional, Sequence, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from ..request import Request
     from .protocols import NuggetBanksProtocol
 
 
-@dataclass(frozen=True)
 class NuggetBanksVerificationError(Exception):
     """Raised when nugget banks verification fails."""
-    message: str
-
-    def __str__(self) -> str:
-        return self.message
+    pass
 
 
 class NuggetBanksVerification:
@@ -36,6 +32,7 @@ class NuggetBanksVerification:
         self,
         nugget_banks: "NuggetBanksProtocol",
         rag_topics: Sequence["Request"],
+        warn: Optional[bool] = False,
     ):
         """
         Initialize verifier.
@@ -43,9 +40,17 @@ class NuggetBanksVerification:
         Args:
             nugget_banks: The nugget banks container to verify
             rag_topics: The topics/requests to verify against
+            warn: If True, print warnings instead of raising exceptions
         """
         self.nugget_banks = nugget_banks
         self.rag_topics = rag_topics
+        self.warn = warn
+
+    def _raise_or_warn(self, err: NuggetBanksVerificationError):
+        if self.warn:
+            print(f"Warning: {err}", file=sys.stderr)
+        else:
+            raise err
 
     def complete_topics(self) -> "NuggetBanksVerification":
         """
@@ -62,9 +67,9 @@ class NuggetBanksVerification:
             missing_list = sorted(missing)
             preview = ", ".join(missing_list[:10])
             more = f" ... ({len(missing_list) - 10} more)" if len(missing_list) > 10 else ""
-            raise NuggetBanksVerificationError(
+            self._raise_or_warn(NuggetBanksVerificationError(
                 f"Missing nugget banks for {len(missing_list)} topic(s): {preview}{more}"
-            )
+            ))
 
         return self
 
@@ -83,9 +88,9 @@ class NuggetBanksVerification:
             extra_list = sorted(extra)
             preview = ", ".join(extra_list[:10])
             more = f" ... ({len(extra_list) - 10} more)" if len(extra_list) > 10 else ""
-            raise NuggetBanksVerificationError(
+            self._raise_or_warn(NuggetBanksVerificationError(
                 f"Nugget banks for {len(extra_list)} unknown topic(s): {preview}{more}"
-            )
+            ))
 
         return self
 
@@ -120,9 +125,9 @@ class NuggetBanksVerification:
         if empty_banks:
             preview = ", ".join(sorted(empty_banks)[:10])
             more = f" ... ({len(empty_banks) - 10} more)" if len(empty_banks) > 10 else ""
-            raise NuggetBanksVerificationError(
+            self._raise_or_warn(NuggetBanksVerificationError(
                 f"Empty nugget banks for {len(empty_banks)} topic(s): {preview}{more}"
-            )
+            ))
 
         return self
 

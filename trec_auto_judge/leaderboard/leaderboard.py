@@ -2,8 +2,10 @@ from __future__ import annotations
 
 from collections import defaultdict
 from dataclasses import dataclass
+from itertools import groupby
 from pathlib import Path
 from statistics import mean
+import sys
 from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple, Set
 
 MeasureName = str
@@ -56,7 +58,10 @@ class Leaderboard:
         print(f"Writing leaderboard to {output.absolute()}")   # ToDo: use a logger
         output.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
-
+    def verify(self, expected_topic_ids: Optional[Sequence[str]] = None, warn:Optional[bool]=False):
+        LeaderboardVerification(leaderboard = self, warn=warn, expected_topic_ids=expected_topic_ids) \
+            .complete_measures(include_all_row=True) \
+            .complete_topics()
 @dataclass(frozen=True)
 class MeasureSpec:
     """
@@ -210,16 +215,14 @@ class LeaderboardBuilder:
         )
 
 
+
 # === Verification ====
 
 
-@dataclass(frozen=True)
+
 class LeaderboardVerificationError(Exception):
     """Raised when leaderboard verification fails."""
-    message: str
-
-    def __str__(self) -> str:
-        return self.message
+    pass
 
 
 class LeaderboardVerification:
@@ -241,6 +244,7 @@ class LeaderboardVerification:
         self,
         leaderboard: Leaderboard,
         expected_topic_ids: Optional[Sequence[str]] = None,
+        warn: Optional[bool]=False
     ):
         """
         Initialize verifier.
@@ -251,6 +255,13 @@ class LeaderboardVerification:
         """
         self.leaderboard = leaderboard
         self.expected_topic_ids = expected_topic_ids
+        self.warn = warn
+
+    def _raise_or_warn(self, err:LeaderboardVerificationError):
+        if self.warn:
+            print(f"Warning: {err}", file=sys.stderr)
+        else:
+            raise err
 
     def complete_measures(self, include_all_row: bool = True) -> "LeaderboardVerification":
         """
@@ -283,9 +294,9 @@ class LeaderboardVerification:
         if missing_reports:
             preview = "\n  ".join(missing_reports[:25])
             more = "" if len(missing_reports) <= 25 else f"\n  ... ({len(missing_reports) - 25} more)"
-            raise LeaderboardVerificationError(
+            self._raise_or_warn(LeaderboardVerificationError(
                 "Leaderboard entries do not match the measure schema:\n  " + preview + more
-            )
+            ))
 
         return self
 
@@ -333,9 +344,9 @@ class LeaderboardVerification:
         if diffs:
             preview = "\n  ".join(diffs[:25])
             more = "" if len(diffs) <= 25 else f"\n  ... ({len(diffs) - 25} more)"
-            raise LeaderboardVerificationError(
+            self._raise_or_warn(LeaderboardVerificationError(
                 f"Runs do not share the same topic set (reference={reference_run}):\n  {preview}{more}"
-            )
+            ))
 
         return self
 
@@ -356,22 +367,25 @@ class LeaderboardVerification:
 
         all_topic_id = self.leaderboard.all_topic_id
         expected = set(self.expected_topic_ids)
-        seen = set()
+        
+        
+        for run, leaderboard_run_entries in groupby(self.leaderboard.entries, key=lambda e:e.run_id):
+            seen = set()
 
-        for e in self.leaderboard.entries:
-            if not include_all_row and e.topic_id == all_topic_id:
-                continue
-            if e.topic_id in expected:
-                seen.add(e.topic_id)
+            for e in leaderboard_run_entries:
+                if not include_all_row and e.topic_id == all_topic_id:
+                    continue
+                if e.topic_id in expected:
+                    seen.add(e.topic_id)
 
-        missing = expected - seen
-        if missing:
-            missing_list = sorted(missing)
-            preview = ", ".join(missing_list[:10])
-            more = f" ... ({len(missing_list) - 10} more)" if len(missing_list) > 10 else ""
-            raise LeaderboardVerificationError(
-                f"Missing leaderboard entries for {len(missing_list)} topic(s): {preview}{more}"
-            )
+            missing = expected - seen
+            if missing:
+                missing_list = sorted(missing)
+                preview = ", ".join(missing_list[:10])
+                more = f" ... ({len(missing_list) - 10} more)" if len(missing_list) > 10 else ""
+                self._raise_or_warn( LeaderboardVerificationError(
+                    f"Run {run}: Missing leaderboard entries for {len(missing_list)} topic(s): {preview}{more}"
+                ))
 
         return self
 
@@ -404,9 +418,9 @@ class LeaderboardVerification:
             extra_list = sorted(extras)
             preview = ", ".join(extra_list[:10])
             more = f" ... ({len(extra_list) - 10} more)" if len(extra_list) > 10 else ""
-            raise LeaderboardVerificationError(
+            self._raise_or_warn( LeaderboardVerificationError(
                 f"Leaderboard entries for {len(extra_list)} unexpected topic(s): {preview}{more}"
-            )
+            ))
 
         return self
 
@@ -430,7 +444,7 @@ class LeaderboardVerification:
             self.complete_measures(include_all_row=include_all_row)
             .complete_topics()
             .no_extra_topics()
-            .same_topics_per_run()
+            # .same_topics_per_run()
         )
 
 

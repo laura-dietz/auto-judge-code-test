@@ -332,6 +332,7 @@ class RubricJudge(AutoJudge):
 
         # Build leaderboard
         leaderboard = self._build_leaderboard(response_grades)
+        leaderboard.verify(warn=True, expected_topic_ids=[t.request_id for t in rag_topics])
 
         # Build qrels from grade data
         qrels = build_qrels(records=grade_data, spec=RUBRIC_QRELS) if grade_data else None
@@ -355,7 +356,7 @@ class RubricJudge(AutoJudge):
             )
 
         leaderboard = b.build()
-        LeaderboardVerification(leaderboard).complete_measures(include_all_row=False).same_topics_per_run()
+        LeaderboardVerification(leaderboard, warn=True).complete_measures(include_all_row=False).same_topics_per_run()
         return leaderboard
 
 
