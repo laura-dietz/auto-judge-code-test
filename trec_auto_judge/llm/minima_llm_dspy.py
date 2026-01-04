@@ -530,7 +530,12 @@ async def run_dspy_batch(
 
     # Code errors that should propagate immediately (not retry)
     CODE_ERRORS = (NameError, TypeError, AttributeError, SyntaxError, ImportError)
-    max_attempts = backend.cfg.max_attempts
+
+    # max_attempts controls HTTP retries in generate().
+    # For parse-error retries here, use a reasonable default if max_attempts=0 (infinite HTTP retries).
+    # This separates concerns: generate() handles server errors, process_one() handles parse errors.
+    http_max_attempts = backend.cfg.max_attempts
+    parse_retry_limit = 3 if http_max_attempts == 0 else http_max_attempts
 
     # Process each annotation
     async def process_one(obj: BaseModel) -> BaseModel:
@@ -540,7 +545,7 @@ async def run_dspy_batch(
         last_error: Optional[Exception] = None
         force_refresh_token: Optional[contextvars.Token[bool]] = None
 
-        for attempt in range(max_attempts):
+        for attempt in range(parse_retry_limit):
             try:
                 # On retry, force refresh to bypass cached response that caused error
                 if attempt > 0:

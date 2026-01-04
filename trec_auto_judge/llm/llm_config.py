@@ -306,13 +306,13 @@ class MinimaLlmConfig:
             rpm=_env_int("RPM", 600),
             timeout_s=_env_float("TIMEOUT_S", 60.0),
             # retry
-            max_attempts=_env_int("MAX_ATTEMPTS", 6),
+            max_attempts=_env_int("MAX_ATTEMPTS", 50),
             base_backoff_s=_env_float("BASE_BACKOFF_S", 0.5),
             max_backoff_s=_env_float("MAX_BACKOFF_S", 20.0),
             jitter=_env_float("JITTER", 0.2),
             # cooldown
             cooldown_floor_s=_env_float("COOLDOWN_FLOOR_S", 0.0),
-            cooldown_cap_s=_env_float("COOLDOWN_CAP_S", 30.0),
+            cooldown_cap_s=_env_float("COOLDOWN_CAP_S", 60.0),
             cooldown_halflife_s=_env_float("COOLDOWN_HALFLIFE_S", 20.0),
             # http
             compress_gzip=(_env_int("COMPRESS_GZIP", 0) != 0),

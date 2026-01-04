@@ -242,3 +242,222 @@ class TestCooldownOnOverload:
 
         # Should have bumped cooldown for each 502 response
         assert len(bump_calls) == 2  # max_attempts=2
+
+
+class TestDspyAdapterInfiniteRetries:
+    """Test DSPy adapter behavior with max_attempts=0.
+
+    When max_attempts=0 (infinite HTTP retries), the DSPy adapter's
+    parse_retry_limit should be set to a reasonable default (3),
+    not 0 (which would cause range(0) = empty loop).
+    """
+
+    def test_parse_retry_limit_with_max_attempts_zero(self, base_config):
+        """With max_attempts=0, parse_retry_limit should be 3, not 0."""
+        dspy = pytest.importorskip("dspy")
+        from pydantic import BaseModel
+        from typing import Optional
+
+        from trec_auto_judge.llm.minima_llm_dspy import run_dspy_batch, MinimaLlmDSPyLM
+
+        config = replace(base_config, max_attempts=0)
+        backend = OpenAIMinimaLlm(config)
+
+        # Simple signature for testing
+        class SimpleSignature(dspy.Signature):
+            input_text: str = dspy.InputField()
+            output_text: str = dspy.OutputField()
+
+        class SimpleAnnotation(BaseModel):
+            input_text: str
+            output_text: Optional[str] = None
+
+        def convert_output(pred, obj: SimpleAnnotation):
+            obj.output_text = pred.output_text
+
+        call_count = 0
+
+        async def mock_acall(self, *args, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            # Return valid DSPy-formatted response
+            return ["[[ ## reasoning ## ]]\nReasoning.\n[[ ## output_text ## ]]\nmocked_response"]
+
+        async def run_test():
+            with patch.object(MinimaLlmDSPyLM, 'acall', mock_acall):
+                annotations = [SimpleAnnotation(input_text="test")]
+                return await run_dspy_batch(
+                    SimpleSignature,
+                    annotations,
+                    convert_output,
+                    backend=backend
+                )
+
+        results = asyncio.run(run_test())
+
+        # With old code (range(0)), call_count would be 0 and we'd get an error
+        # With fix, call_count should be >= 1
+        assert call_count >= 1, "process_one should run at least once with max_attempts=0"
+        assert results[0].output_text == "mocked_response"
+
+    def test_parse_errors_retry_with_max_attempts_zero(self, base_config):
+        """Parse errors should still retry (up to 3 times) with max_attempts=0."""
+        dspy = pytest.importorskip("dspy")
+        from pydantic import BaseModel
+        from typing import Optional
+
+        from trec_auto_judge.llm.minima_llm_dspy import run_dspy_batch, MinimaLlmDSPyLM
+
+        config = replace(base_config, max_attempts=0)
+        backend = OpenAIMinimaLlm(config)
+
+        class SimpleSignature(dspy.Signature):
+            input_text: str = dspy.InputField()
+            output_text: str = dspy.OutputField()
+
+        class SimpleAnnotation(BaseModel):
+            input_text: str
+            output_text: Optional[str] = None
+
+        def convert_output(pred, obj: SimpleAnnotation):
+            obj.output_text = pred.output_text
+
+        call_count = 0
+
+        async def mock_acall(self, *args, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            if call_count < 3:
+                # Return malformed response to trigger parse error retry
+                return ["malformed response without proper headers"]
+            else:
+                # Return valid response on 3rd try
+                return ["[[ ## reasoning ## ]]\nOK.\n[[ ## output_text ## ]]\nsuccess"]
+
+        async def run_test():
+            with patch.object(MinimaLlmDSPyLM, 'acall', mock_acall):
+                annotations = [SimpleAnnotation(input_text="test")]
+                return await run_dspy_batch(
+                    SimpleSignature,
+                    annotations,
+                    convert_output,
+                    backend=backend
+                )
+
+        results = asyncio.run(run_test())
+
+        # Should have retried parse errors and eventually succeeded
+        assert call_count == 3, "Should retry parse errors up to 3 times"
+        assert results[0].output_text == "success"
+
+    def test_infinite_http_retries_through_dspy_adapter(self, base_config):
+        """With max_attempts=0, HTTP 502 errors should retry until success.
+
+        This tests the full path: DSPy adapter -> generate() -> HTTP retries.
+        """
+        dspy = pytest.importorskip("dspy")
+        from pydantic import BaseModel
+        from typing import Optional
+
+        from trec_auto_judge.llm.minima_llm_dspy import run_dspy_batch, MinimaLlmDSPyLM
+
+        config = replace(base_config, max_attempts=0)
+        backend = OpenAIMinimaLlm(config)
+
+        class SimpleSignature(dspy.Signature):
+            input_text: str = dspy.InputField()
+            output_text: str = dspy.OutputField()
+
+        class SimpleAnnotation(BaseModel):
+            input_text: str
+            output_text: Optional[str] = None
+
+        def convert_output(pred, obj: SimpleAnnotation):
+            obj.output_text = pred.output_text
+
+        http_call_count = 0
+        num_502_before_success = 10  # Simulate server down for 10 requests
+
+        async def mock_post_json(url, payload):
+            nonlocal http_call_count
+            http_call_count += 1
+            if http_call_count <= num_502_before_success:
+                return (502, {}, b"Bad Gateway")
+            else:
+                # ChainOfThought format with reasoning
+                response = {
+                    "choices": [{
+                        "message": {
+                            "content": "[[ ## reasoning ## ]]\nDone.\n[[ ## output_text ## ]]\nrecovered"
+                        }
+                    }]
+                }
+                import json
+                return (200, {}, json.dumps(response).encode())
+
+        async def run_test():
+            with patch.object(backend, '_post_json', side_effect=mock_post_json):
+                annotations = [SimpleAnnotation(input_text="test")]
+                return await run_dspy_batch(
+                    SimpleSignature,
+                    annotations,
+                    convert_output,
+                    backend=backend
+                )
+
+        results = asyncio.run(run_test())
+
+        # Should have retried 10 times (502) then succeeded on 11th
+        assert http_call_count == num_502_before_success + 1
+        assert results[0].output_text == "recovered"
+
+    def test_limited_retries_fails_through_dspy_adapter(self, base_config):
+        """With max_attempts=3, HTTP errors should fail after 3 attempts.
+
+        Contrast with infinite retries test above.
+        """
+        dspy = pytest.importorskip("dspy")
+        from pydantic import BaseModel
+        from typing import Optional
+
+        from trec_auto_judge.llm.minima_llm_dspy import run_dspy_batch
+
+        config = replace(base_config, max_attempts=3)
+        backend = OpenAIMinimaLlm(config)
+
+        class SimpleSignature(dspy.Signature):
+            input_text: str = dspy.InputField()
+            output_text: str = dspy.OutputField()
+
+        class SimpleAnnotation(BaseModel):
+            input_text: str
+            output_text: Optional[str] = None
+
+        def convert_output(pred, obj: SimpleAnnotation):
+            obj.output_text = pred.output_text
+
+        http_call_count = 0
+
+        async def mock_post_json(url, payload):
+            nonlocal http_call_count
+            http_call_count += 1
+            return (502, {}, b"Bad Gateway")  # Always fail
+
+        async def run_test():
+            with patch.object(backend, '_post_json', side_effect=mock_post_json):
+                annotations = [SimpleAnnotation(input_text="test")]
+                return await run_dspy_batch(
+                    SimpleSignature,
+                    annotations,
+                    convert_output,
+                    backend=backend
+                )
+
+        # Should raise after exhausting retries
+        with pytest.raises(RuntimeError) as exc_info:
+            asyncio.run(run_test())
+
+        # Should have tried exactly max_attempts times per parse retry (3 * 3 = 9)
+        # generate() retries 3 times, process_one() retries 3 times
+        assert http_call_count == 9
+        assert "502" in str(exc_info.value) or "failed" in str(exc_info.value).lower()
