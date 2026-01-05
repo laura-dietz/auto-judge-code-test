@@ -460,8 +460,8 @@ def auto_judge_to_click_command(auto_judge: AutoJudge, cmd_name: str):
     @option_nugget_banks()
     @option_llm_config()
     @option_submission()
-    @click.option("--output", type=Path, help="Leaderboard output file.", required=True)
-    @click.option("--store-nuggets", type=Path, help="Output path for nuggets.", required=False)
+    @click.option("--filebase", type=str, help="Override workflow filebase (e.g., 'output/my-run').", required=False)
+    @click.option("--store-nuggets", type=Path, help="Override nugget output path.", required=False)
     @click.option("--variant", type=str, help="Run a specific named variant from workflow.", required=False)
     @click.option("--sweep", type=str, help="Run a parameter sweep from workflow.", required=False)
     @click.option("--all-variants", is_flag=True, help="Run all variants defined in workflow.")
@@ -473,7 +473,7 @@ def auto_judge_to_click_command(auto_judge: AutoJudge, cmd_name: str):
         nugget_banks,
         llm_config: Optional[Path],
         submission: bool,
-        output: Path,
+        filebase: Optional[str],
         store_nuggets: Optional[Path],
         variant: Optional[str],
         sweep: Optional[str],
@@ -501,6 +501,11 @@ def auto_judge_to_click_command(auto_judge: AutoJudge, cmd_name: str):
 
         resolved_llm_config = _resolve_llm_config(llm_config, submission)
 
+        # CLI --filebase overrides workflow settings.filebase
+        if filebase:
+            wf.settings["filebase"] = filebase
+            click.echo(f"Filebase override: {filebase}", err=True)
+
         # Resolve configurations based on CLI options
         if variant:
             configs = [resolve_variant(wf, variant)]
@@ -523,9 +528,10 @@ def auto_judge_to_click_command(auto_judge: AutoJudge, cmd_name: str):
             # Validate llm_model against available models in submission mode
             validated_settings = _validate_llm_model_for_submission(config.settings, submission)
 
-            # Determine output paths: CLI args take precedence, then resolved config
+            # Determine output paths: --store-nuggets overrides, otherwise use resolved config
+            # (--filebase was already injected into wf.settings before resolution)
             nugget_output_path = store_nuggets or config.nugget_output_path
-            judge_output_path = output  # CLI --output is required
+            judge_output_path = config.judge_output_path
 
             if nugget_output_path:
                 click.echo(f"Nugget output: {nugget_output_path}", err=True)
@@ -563,6 +569,6 @@ def auto_judge_to_click_command(auto_judge: AutoJudge, cmd_name: str):
 
             click.echo(f"Done configuration: {config.name}", err=True)
 
-        click.echo(f"\nAll configurations complete. Output: {output}", err=True)
+        click.echo(f"\nAll configurations complete.", err=True)
 
     return cli
