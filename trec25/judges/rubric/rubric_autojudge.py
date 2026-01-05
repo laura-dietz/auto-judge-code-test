@@ -5,6 +5,7 @@ Rubric-based AutoJudge that:
 2. Grades how well each response answers each nugget (judge)
 3. Derives evaluation score from nugget coverage
 """
+from textwrap import dedent
 from trec_auto_judge import *
 from trec_auto_judge.nugget_data import (
     NuggetBank, NuggetBanks, NuggetQuestion
@@ -26,7 +27,7 @@ from trec_auto_judge.leaderboard.leaderboard import OnMissing
 # DSPy Signatures
 # =============================================================================
 
-class GenerateNuggetQuestions(dspy.Signature):
+class GenerateNuggetQuestionsMinimal(dspy.Signature):
     """Break a query into concise questions that must be answered."""
 
     query_title: str = dspy.InputField(desc="Query title")
@@ -36,6 +37,21 @@ class GenerateNuggetQuestions(dspy.Signature):
     questions: list[str] = dspy.OutputField(
         desc="List of concise questions that must be answered to address the query"
     )
+
+class GenerateNuggetQuestionsWeb(dspy.Signature):
+    dedent(
+    """Break the query into concise questions that must be answered. 
+     Generate 10 concise insightful questions that reveal whether information relevant for the query was provided, showcasing a deep understanding of the subject matter. Avoid basic or introductory-level inquiries. Keep the questions short."""
+    )
+
+    query_title: str = dspy.InputField(desc="Query title")
+    query_background: str = dspy.InputField(desc="Background context for the query")
+    query_problem: str = dspy.InputField(desc="Problem statement to be addressed")
+
+    questions: list[str] = dspy.OutputField(
+        desc="List of concise questions that must be answered to address the query"
+    )
+
 
 
 class GradeNuggetAnswer(dspy.Signature):
@@ -97,6 +113,7 @@ class NuggetGradeData(BaseModel):
 RUBRIC_SPEC = LeaderboardSpec(measures=(
     MeasureSpec("NUGGET_COVERAGE", aggregate=mean_of_floats, cast=float, default=0.0),
     MeasureSpec("AVG_GRADE", aggregate=mean_of_floats, cast=float, default=0.0),
+    MeasureSpec("MAX_GRADE", aggregate=mean_of_floats, cast=float, default=0.0),
     MeasureSpec("COVERED_COUNT", aggregate=mean_of_floats, cast=float, default=0.0),
 ))
 
@@ -135,17 +152,17 @@ class RubricJudge(AutoJudge):
 
     nugget_banks_type: Type[NuggetBanksProtocol] = NuggetBanks
     
-    def __init__(self, grade_threshold: int = 3):
+    def __init__(self):
         """
         Args:
             grade_threshold: Minimum grade to consider a nugget "covered" (default: 3)
         """
-        self.grade_threshold = grade_threshold
         self.expected_topic_ids:Sequence[str] = []
         self.on_missing_evals: OnMissing = "fix_aggregate"
         
     def create_nuggets(
         self,
+        prompt:str,
         rag_responses: Sequence[Report],
         rag_topics: Sequence[Request],
         llm_config: MinimaLlmConfig,
@@ -168,7 +185,6 @@ class RubricJudge(AutoJudge):
         # Convert output handler
         def convert_gen_output(prediction: dspy.Prediction, data: NuggetGenerationData) -> None:
             questions = prediction.questions if hasattr(prediction, 'questions') else []
-            # print("questions debug 1", type(questions), questions)
             # DSPy may return list as JSON string - parse it
             if isinstance(questions, str):
                 try:
@@ -181,15 +197,20 @@ class RubricJudge(AutoJudge):
                 except json.JSONDecodeError:
                     # Fallback: split by newlines
                     questions = [q.strip() for q in questions.split('\n') if q.strip()]
-            # print("questions debug 2", type(questions), questions)
-            # print("questions debug 3",  questions[0])
-            # print("questions", questions)
             data.questions = questions
 
         # Run LLM generation
         print(f"Rubric: Generating questions...")
+        
+        if prompt == "minimal":
+            prompt_sig = GenerateNuggetQuestionsMinimal
+        elif prompt == "web":
+            prompt_sig = GenerateNuggetQuestionsWeb
+        else:
+            raise RuntimeError(f"Prompt not defined: {prompt}")    
+        
         gen_data = asyncio.run(run_dspy_batch(
-            GenerateNuggetQuestions,
+            prompt_sig,
             gen_data,
             convert_gen_output,
             backend=OpenAIMinimaLlm(llm_config)
@@ -226,6 +247,7 @@ class RubricJudge(AutoJudge):
         rag_topics: Sequence[Request],
         llm_config: MinimaLlmConfig,
         nugget_banks: Optional[NuggetBanks] = None,
+        grade_threshold: int = 3,
         **kwargs
     ) -> tuple[Leaderboard, Optional[Qrels]]:
         """
@@ -316,15 +338,17 @@ class RubricJudge(AutoJudge):
         for response_key, evaldata in response_grades.items():
             grades = evaldata["grades_list"]
             if grades:
-                covered = sum(1 for g in grades if g >= self.grade_threshold)
+                covered = sum(1 for g in grades if g >= grade_threshold)
                 evaldata["coverage_score"] = covered / len(grades)
                 evaldata["avg_grade"] = sum(grades) / len(grades)
+                evaldata["max_grade"] = max(grades)
                 evaldata["covered_count"] = covered
                 evaldata["total_nuggets"] = len(grades)
             else:
                 evaldata["coverage_score"] = 0.0
                 evaldata["avg_grade"] = 0.0
                 evaldata["covered_count"] = 0
+                evaldata["max_grade"] = 0
                 evaldata["total_nuggets"] = 0
             del evaldata["grades_list"]  # Remove temporary field
 
@@ -357,6 +381,7 @@ class RubricJudge(AutoJudge):
                 values={
                     "NUGGET_COVERAGE": evaldata["coverage_score"],
                     "AVG_GRADE": evaldata["avg_grade"],
+                    "MAX_GRADE": evaldata["max_grade"],
                     "COVERED_COUNT": float(evaldata["covered_count"]),
                 }
             )

@@ -268,7 +268,7 @@ def write_pydantic_json_list(objs: List[BaseModel], out: Union[str, Path, TextIO
         # Assume it's already a valid TextIO stream
         for obj in objs:
             line = json.dumps(obj.model_dump(exclude_none=True), separators=(",", ":"), indent=None)
-            f.write(line + "\n")
+            out.write(line + "\n")
 
 
 

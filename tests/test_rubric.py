@@ -115,6 +115,9 @@ class AutoJudgeTestDriver:
         driver.run_judge()
 
         # Then use driver.nuggets, driver.leaderboard, driver.qrels in tests
+
+    For judges that require additional settings (from workflow), pass them as kwargs:
+        driver = AutoJudgeTestDriver(..., prompt="...", model="...")
     """
 
     def __init__(
@@ -123,11 +126,13 @@ class AutoJudgeTestDriver:
         rag_topics: List[Request],
         rag_responses: List[Report],
         llm_config: MinimaLlmConfig,
+        **kwargs,
     ):
         self.auto_judge = auto_judge
         self.rag_topics = rag_topics
         self.rag_responses = rag_responses
         self.llm_config = llm_config
+        self.settings = kwargs  # Additional settings from workflow
 
         # Results populated by run methods
         self.nuggets: Optional[NuggetBanks] = None
@@ -141,6 +146,7 @@ class AutoJudgeTestDriver:
             rag_topics=self.rag_topics,
             llm_config=self.llm_config,
             nugget_banks=existing_nuggets,
+            **self.settings,
         )
         return self.nuggets
 
@@ -153,6 +159,7 @@ class AutoJudgeTestDriver:
             rag_topics=self.rag_topics,
             llm_config=self.llm_config,
             nugget_banks=nuggets_to_use,
+            **self.settings,
         )
 
         return self.leaderboard, self.qrels
@@ -169,16 +176,25 @@ class TestRubricJudgeVerification:
     def rubric_judge(self):
         """Create RubricJudge instance."""
         from trec25.judges.rubric.rubric_autojudge import RubricJudge
-        return RubricJudge(grade_threshold=3)
+        return RubricJudge()
 
     @pytest.fixture
-    def driver(self, rubric_judge, sample_topics, sample_responses, llm_config):
+    def rubric_settings(self):
+        """Settings required by RubricJudge (from workflow)."""
+        return {
+            "prompt": "minimal",
+            "grade_threshold": 3,
+        }
+
+    @pytest.fixture
+    def driver(self, rubric_judge, sample_topics, sample_responses, llm_config, rubric_settings):
         """Create test driver for RubricJudge."""
         return AutoJudgeTestDriver(
             auto_judge=rubric_judge,
             rag_topics=sample_topics,
             rag_responses=sample_responses,
             llm_config=llm_config,
+            **rubric_settings,
         )
 
     # -------------------------------------------------------------------------

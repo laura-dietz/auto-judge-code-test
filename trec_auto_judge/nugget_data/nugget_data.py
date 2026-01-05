@@ -74,7 +74,7 @@ def none_as_empty(x: Optional[Dict[Any, Any]]) -> Dict[Any, Any]:
     if x is None:
         return {}
     else:
-        x
+        return x
 
 
 def none_as(x: Optional[Any], default_val):

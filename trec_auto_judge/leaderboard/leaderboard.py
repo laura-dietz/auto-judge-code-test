@@ -390,7 +390,7 @@ class LeaderboardVerification:
                     parts.append(f"extra={sorted(extra)}")
                 missing_reports.append(f"{e.run_id}/{e.topic_id}: " + ", ".join(parts))
 
-        if missing_reports and self.on_missing is not "fix_aggregate":
+        if missing_reports and self.on_missing != "fix_aggregate":
             self._raise_or_warn(LeaderboardVerificationError(
                 "Leaderboard entries do not match the measure schema:\n  " + format_preview(missing_reports, limit=25, separator="\n  ")
             ))
@@ -457,7 +457,7 @@ class LeaderboardVerification:
         Raises:
             LeaderboardVerificationError: If any expected topic is missing
         """
-        if self.on_missing is "fix_aggregate":
+        if self.on_missing == "fix_aggregate":
             # Not checking for complete topics
             return self
         

@@ -599,3 +599,19 @@ async def run_dspy_batch(
 
     # All results are BaseModel (failures already raised)
     return cast(List[BaseModel], results)
+
+
+
+
+def print_dspy_prompt(sig:dspy.Signature, inputs:Dict[str,Any]):
+    predict = dspy.Predict(sig)
+
+    adapter = dspy.settings.adapter
+
+    messages = adapter.format(
+        signature=predict.signature,
+        demos=[],               # no few-shot examples
+        inputs=inputs
+    )
+
+    print(messages)

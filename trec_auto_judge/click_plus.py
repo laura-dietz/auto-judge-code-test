@@ -99,7 +99,7 @@ class ClickIrDataset(click.ParamType):
         if value and Path(value).is_dir() and (Path(value) / "queries.jsonl").is_file() and (Path(value) / "corpus.jsonl.gz").is_file():
             return irds_from_dir(value)
 
-        if len(str(value).split("/") == 2):
+        if len(str(value).split("/")) == 2:
             return ir_datasets.load(value)
         else:
             raise ValueError("ToDo: Better error handling of incomplete configurations")
