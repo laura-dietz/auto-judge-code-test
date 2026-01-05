@@ -141,8 +141,8 @@ def run_judge(
     rag_topics: Sequence[Request],
     llm_config: MinimaLlmConfig,
     nugget_banks: Optional[NuggetBanksProtocol] = None,
-    output_path: Optional[Path] = None,
-    store_nuggets_path: Optional[Path] = None,
+    judge_output_path: Optional[Path] = None,
+    nugget_output_path: Optional[Path] = None,
     do_create_nuggets: bool = False,
     do_judge: bool = True,
     # Settings dicts passed to AutoJudge methods as **kwargs
@@ -167,8 +167,8 @@ def run_judge(
         rag_topics: Topics/queries to evaluate
         llm_config: LLM configuration
         nugget_banks: Input nugget banks (any NuggetBanksProtocol implementation)
-        output_path: Leaderboard output path
-        store_nuggets_path: Path to store created/refined nuggets
+        judge_output_path: Leaderboard/qrels output path
+        nugget_output_path: Path to store created/refined nuggets
         do_create_nuggets: If True, call create_nuggets()
         do_judge: If True, call judge()
         settings: Shared settings dict passed to both phases (fallback)
@@ -194,7 +194,7 @@ def run_judge(
     qrels = None
 
     # Resolve nugget file path (add .nuggets.jsonl extension if needed)
-    nugget_file_path = _resolve_nugget_file_path(store_nuggets_path) if store_nuggets_path else None
+    nugget_file_path = _resolve_nugget_file_path(nugget_output_path) if nugget_output_path else None
 
     # Step 1: Resolve nuggets (auto-load or create)
     if do_create_nuggets:
@@ -264,15 +264,15 @@ def run_judge(
         )
 
         # Step 3: Write outputs
-        if output_path:
+        if judge_output_path:
             _write_outputs(
                 leaderboard=leaderboard,
                 qrels=qrels,
                 rag_topics=rag_topics,
-                output_path=output_path,
+                judge_output_path=judge_output_path,
             )
             _write_run_config(
-                output_path=output_path,
+                judge_output_path=judge_output_path,
                 config_name=config_name,
                 do_create_nuggets=do_create_nuggets,
                 do_judge=do_judge,
@@ -293,13 +293,13 @@ def _write_outputs(
     leaderboard: Leaderboard,
     qrels: Optional[Qrels],
     rag_topics: Sequence[Request],
-    output_path: Path,
+    judge_output_path: Path,
 ) -> None:
     """Verify and write leaderboard and qrels."""
     topic_ids = [t.request_id for t in rag_topics]
 
     # Resolve output paths from filebase
-    leaderboard_path, qrels_path = _resolve_judgment_file_paths(output_path)
+    leaderboard_path, qrels_path = _resolve_judgment_file_paths(judge_output_path)
     leaderboard.verify(expected_topic_ids=topic_ids, on_missing="fix_aggregate")  # Reconsider setting this to "fix_aggregate" if want to ensure all run/topic combinations have values.
     leaderboard.write(leaderboard_path)
     print(f"[judge_runner] Leaderboard saved to: {leaderboard_path}", file=sys.stderr)
@@ -311,7 +311,7 @@ def _write_outputs(
 
 
 def _write_run_config(
-    output_path: Path,
+    judge_output_path: Path,
     config_name: str,
     do_create_nuggets: bool,
     do_judge: bool,
@@ -329,7 +329,7 @@ def _write_run_config(
     - Git info (commit, dirty, remote)
     - Timestamp
     """
-    config_path = _resolve_config_file_path(output_path)
+    config_path = _resolve_config_file_path(judge_output_path)
 
     config: dict[str, Any] = {
         "name": config_name,
