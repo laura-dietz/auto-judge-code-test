@@ -4,9 +4,9 @@
 
 ```python
 
-from argue_eval.validation.nugget_data import (
+from trec_auto_judge.nugget_data import (
     NuggetBank, NuggetQuestion, NuggetClaim,
-    Answer, Reference, Offsets, Operator
+    Answer, Reference, Offsets, AggregatorType, Creator
 )
 
 # Define some answers with optional references
@@ -114,7 +114,7 @@ bank.add_nuggets(nugget)
 
 
 # Optional: print as JSON
-from argue_eval.validation.nugget_data import print_nugget_json
+from trec_auto_judge.nugget_data import print_nugget_json
 print_nugget_json(nugget_bank)
 
 

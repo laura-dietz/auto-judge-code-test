@@ -1,4 +1,4 @@
-from typing import Any, ClassVar, List, Optional, Dict, Sequence, Type
+from typing import Any, List, Optional, Dict, Sequence, Type
 
 from pydantic import BaseModel
 
@@ -65,10 +65,13 @@ class NuggetizerNuggetBank(BaseModel):
 class NuggetizerNuggetBanks(BaseModel):
     """Container for multiple Nuggetizer NuggetBanks, keyed by qid."""
 
-    _bank_model: ClassVar[Type[NuggetizerNuggetBank]] = NuggetizerNuggetBank  # For protocol-based I/O
-
     format_version: str = "v4"
     banks: Dict[str, NuggetizerNuggetBank] = {}
+
+    @classmethod
+    def get_bank_model(cls) -> Type[NuggetizerNuggetBank]:
+        """Return the bank model class for this container type."""
+        return NuggetizerNuggetBank
 
     @classmethod
     def from_banks_list(

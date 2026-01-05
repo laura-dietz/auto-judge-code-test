@@ -142,7 +142,7 @@ class TestWriteRunConfig(unittest.TestCase):
             output_path = Path(tmpdir) / "test"
 
             _write_run_config(
-                output_path=output_path,
+                judge_output_path=output_path,
                 config_name="my-variant",
                 do_create_nuggets=True,
                 do_judge=True,
@@ -175,7 +175,7 @@ class TestWriteRunConfig(unittest.TestCase):
             output_path = Path(tmpdir) / "test"
 
             _write_run_config(
-                output_path=output_path,
+                judge_output_path=output_path,
                 config_name="default",
                 do_create_nuggets=False,
                 do_judge=True,
@@ -199,7 +199,7 @@ class TestWriteRunConfig(unittest.TestCase):
             output_path = Path(tmpdir) / "test"
 
             _write_run_config(
-                output_path=output_path,
+                judge_output_path=output_path,
                 config_name="default",
                 do_create_nuggets=True,
                 do_judge=True,

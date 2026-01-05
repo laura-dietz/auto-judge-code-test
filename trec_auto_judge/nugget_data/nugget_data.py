@@ -25,9 +25,7 @@ A structured, Pydantic-based representation of query-focused nugget questions an
 ## Usage
 
 ```python
-from argue_eval.validation.nugget_data import NuggetBank, NuggetQuestion, NuggetClaim, Answer
-from .direnv.flake-inputs.syvnmj3hhckkbncm94kfkbl76qsdqqj3-source.pkgs.by-name.os.osquery.update import (
-    force)
+from trec_auto_judge.nugget_data import NuggetBank, NuggetQuestion, NuggetClaim, Answer
 
 # Create simple nuggets with gold answers
 nugget = NuggetQuestion.from_lazy(
@@ -49,7 +47,7 @@ bank.index_nuggets()
 
 # Print flat index of all nuggets
 print(bank.all_nuggets_view)
-
+```
 """
 
 

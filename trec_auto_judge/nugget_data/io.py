@@ -182,7 +182,7 @@ def make_io_functions(
 
 
 # =============================================================================
-# Protocol-based generic I/O (uses _bank_model from NuggetBanksProtocol)
+# Protocol-based generic I/O (uses get_bank_model() from NuggetBanksProtocol)
 # =============================================================================
 
 from .protocols import NuggetBanksProtocol
@@ -199,7 +199,7 @@ def load_nugget_banks_generic(
 
     Args:
         source: Path to JSON, JSONL, or gzipped file
-        container_type: Container class (must have _bank_model attribute)
+        container_type: Container class (must have get_bank_model() method)
 
     Returns:
         Loaded container instance
@@ -208,7 +208,7 @@ def load_nugget_banks_generic(
         banks = load_nugget_banks_generic("nuggets.jsonl", NuggetBanks)
         banks = load_nugget_banks_generic("nuggets.jsonl", NuggetizerNuggetBanks)
     """
-    bank_model = container_type._bank_model
+    bank_model = container_type.get_bank_model()
     return _load_nugget_banks_from_file(source, bank_model, container_type)
 
 
@@ -221,12 +221,12 @@ def load_nugget_banks_from_directory_generic(
 
     Args:
         directory: Directory containing per-topic files
-        container_type: Container class (must have _bank_model attribute)
+        container_type: Container class (must have get_bank_model() method)
 
     Returns:
         Loaded container instance
     """
-    bank_model = container_type._bank_model
+    bank_model = container_type.get_bank_model()
     return _load_nugget_banks_from_directory(directory, bank_model, container_type)
 
 

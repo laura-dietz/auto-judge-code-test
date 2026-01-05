@@ -547,9 +547,9 @@ def test_nugget_banks_protocol_compliance():
     # Check protocol compliance
     assert isinstance(NuggetBanks(banks={}), NuggetBanksProtocol)
 
-    # Check _bank_model attribute
-    assert hasattr(NuggetBanks, "_bank_model")
-    assert NuggetBanks._bank_model is NuggetBank
+    # Check get_bank_model() method
+    assert hasattr(NuggetBanks, "get_bank_model")
+    assert NuggetBanks.get_bank_model() is NuggetBank
 
     # Check NuggetBank protocol compliance
     bank = NuggetBank(query_id="test", title_query="Test")
@@ -565,9 +565,9 @@ def test_nuggetizer_nugget_banks_protocol_compliance():
     # Check protocol compliance
     assert isinstance(NuggetizerNuggetBanks(banks={}), NuggetBanksProtocol)
 
-    # Check _bank_model attribute
-    assert hasattr(NuggetizerNuggetBanks, "_bank_model")
-    assert NuggetizerNuggetBanks._bank_model is NuggetizerNuggetBank
+    # Check get_bank_model() method
+    assert hasattr(NuggetizerNuggetBanks, "get_bank_model")
+    assert NuggetizerNuggetBanks.get_bank_model() is NuggetizerNuggetBank
 
     # Check NuggetizerNuggetBank protocol compliance
     bank = NuggetizerNuggetBank(qid="test", query="Test Query")
