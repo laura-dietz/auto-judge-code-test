@@ -234,6 +234,35 @@ def _merge_settings(
     return result
 
 
+def _resolve_output_paths(
+    name: str,
+    merged_nugget: dict[str, Any],
+    merged_judge: dict[str, Any],
+) -> tuple[Optional[Path], Optional[Path]]:
+    """
+    Resolve nugget and judge output paths from merged settings.
+
+    Args:
+        name: Configuration name (used as _name variable)
+        merged_nugget: Merged nugget settings
+        merged_judge: Merged judge settings
+
+    Returns:
+        Tuple of (nugget_output_path, judge_output_path)
+    """
+    nugget_vars = {"_name": name, **merged_nugget}
+    nugget_output_path = _resolve_filebase(merged_nugget, nugget_vars)
+
+    judge_vars = {
+        "_name": name,
+        "_nugget_filebase": str(nugget_output_path) if nugget_output_path else "",
+        **merged_judge,
+    }
+    judge_output_path = _resolve_filebase(merged_judge, judge_vars)
+
+    return nugget_output_path, judge_output_path
+
+
 def resolve_default(workflow: Workflow) -> ResolvedConfiguration:
     """
     Resolve default configuration (no variant/sweep).
@@ -250,17 +279,9 @@ def resolve_default(workflow: Workflow) -> ResolvedConfiguration:
     merged_nugget = _merge_settings(workflow.settings, workflow.nugget_settings)
     merged_judge = _merge_settings(workflow.settings, workflow.judge_settings)
 
-    # Build variables for template substitution
-    nugget_vars = {"_name": name, **merged_nugget}
-    nugget_output_path = _resolve_filebase(merged_nugget, nugget_vars)
-
-    # Judge gets access to resolved nugget filebase
-    judge_vars = {
-        "_name": name,
-        "_nugget_filebase": str(nugget_output_path) if nugget_output_path else "",
-        **merged_judge,
-    }
-    judge_output_path = _resolve_filebase(merged_judge, judge_vars)
+    nugget_output_path, judge_output_path = _resolve_output_paths(
+        name, merged_nugget, merged_judge
+    )
 
     return ResolvedConfiguration(
         name=name,
@@ -305,16 +326,9 @@ def resolve_variant(workflow: Workflow, variant_name: str) -> ResolvedConfigurat
         workflow.settings, workflow.judge_settings, variant_shared, variant_judge
     )
 
-    # Build variables for template substitution
-    nugget_vars = {"_name": variant_name, **merged_nugget}
-    nugget_output_path = _resolve_filebase(merged_nugget, nugget_vars)
-
-    judge_vars = {
-        "_name": variant_name,
-        "_nugget_filebase": str(nugget_output_path) if nugget_output_path else "",
-        **merged_judge,
-    }
-    judge_output_path = _resolve_filebase(merged_judge, judge_vars)
+    nugget_output_path, judge_output_path = _resolve_output_paths(
+        variant_name, merged_nugget, merged_judge
+    )
 
     return ResolvedConfiguration(
         name=variant_name,
@@ -377,16 +391,9 @@ def resolve_sweep(workflow: Workflow, sweep_name: str) -> list[ResolvedConfigura
             workflow.settings, workflow.judge_settings, fixed_params, sweep_judge, combo
         )
 
-        # Build variables for template substitution
-        nugget_vars = {"_name": sweep_name, **merged_nugget}
-        nugget_output_path = _resolve_filebase(merged_nugget, nugget_vars)
-
-        judge_vars = {
-            "_name": sweep_name,
-            "_nugget_filebase": str(nugget_output_path) if nugget_output_path else "",
-            **merged_judge,
-        }
-        judge_output_path = _resolve_filebase(merged_judge, judge_vars)
+        nugget_output_path, judge_output_path = _resolve_output_paths(
+            sweep_name, merged_nugget, merged_judge
+        )
 
         results.append(ResolvedConfiguration(
             name=sweep_name,
