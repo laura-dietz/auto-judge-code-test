@@ -2,7 +2,11 @@ import hashlib
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple, TypeVar, Generic, Callable, Iterable, Sequence, Union
+from typing import Dict, List, Literal, Optional, Tuple, TypeVar, Generic, Callable, Iterable, Sequence, Union
+
+
+# Type for on_duplicate behavior in QrelsSpec
+OnDuplicate = Literal["error", "keep_max", "keep_last"]
 
 from trec_auto_judge.utils import format_preview
 
@@ -28,10 +32,9 @@ class QrelRow:
 @dataclass(frozen=True)
 class QrelsSpec(Generic[R]):
     topic_id: Callable[[R], str]
-    doc_id: Callable[[R], str]   
+    doc_id: Callable[[R], str]
     grade: Callable[[R], int]
-    # todo this should be an enum
-    on_duplicate: str = "error"    # "error" | "keep_max" | "keep_last"
+    on_duplicate: OnDuplicate = "error"
 
 @dataclass(frozen=True)
 class Qrels:
