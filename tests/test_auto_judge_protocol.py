@@ -46,8 +46,8 @@ class TestAutoJudgeProtocoll(unittest.TestCase):
         runner = CliRunner()
 
         with TemporaryDirectory() as tmp_dir:
-            target_file = Path(tmp_dir) / "leaderboard.trec"
-            result = runner.invoke(cmd, ["--rag-responses", TREC_25_DATA / "spot-check-dataset" / "runs", "--output", str(target_file)])
+            target_file = Path(tmp_dir) / "judgment.json"
+            result = runner.invoke(cmd, ["judge", "--rag-responses", TREC_25_DATA / "spot-check-dataset" / "runs", "--output", str(target_file)])
 
             print(result.output)
             print(result.exception)

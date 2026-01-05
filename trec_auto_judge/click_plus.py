@@ -446,6 +446,8 @@ def auto_judge_to_click_command(auto_judge: AutoJudge, cmd_name: str):
             nugget_output_path=store_nuggets,
             do_create_nuggets=True,
             do_judge=False,
+        )
+
     @click.option("--output", type=Path, help="The output file.", required=True)
     def run(rag_topics:Iterable[Request], rag_responses:Iterable[Report], output:Path):
         leaderboard, qrels = auto_judge.judge(rag_responses, rag_topics)
