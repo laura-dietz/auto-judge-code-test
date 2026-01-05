@@ -129,7 +129,6 @@ class TolerantChatAdapter(ChatAdapter):
 dspy.settings.configure(adapter=TolerantChatAdapter())
 
 
-
 # ==============
 
 def _resolve_dspy_base_lm() -> Type[Any]:
@@ -521,84 +520,84 @@ async def run_dspy_batch(
         backend = OpenAIMinimaLlm.from_env()
 
     lm = MinimaLlmDSPyLM(backend)
-    dspy.configure(lm=lm)
+    with dspy.context(lm=lm):
 
-    predictor = predictor_class(signature_class)
+        predictor = predictor_class(signature_class)
 
-    # Get input field names from signature
-    input_fields = _get_input_field_names(signature_class)
+        # Get input field names from signature
+        input_fields = _get_input_field_names(signature_class)
 
-    # Code errors that should propagate immediately (not retry)
-    CODE_ERRORS = (NameError, TypeError, AttributeError, SyntaxError, ImportError)
+        # Code errors that should propagate immediately (not retry)
+        CODE_ERRORS = (NameError, TypeError, AttributeError, SyntaxError, ImportError)
 
-    # max_attempts controls HTTP retries in generate().
-    # For parse-error retries here, use a reasonable default if max_attempts=0 (infinite HTTP retries).
-    # This separates concerns: generate() handles server errors, process_one() handles parse errors.
-    http_max_attempts = backend.cfg.max_attempts
-    parse_retry_limit = 3 if http_max_attempts == 0 else http_max_attempts
+        # max_attempts controls HTTP retries in generate().
+        # For parse-error retries here, use a reasonable default if max_attempts=0 (infinite HTTP retries).
+        # This separates concerns: generate() handles server errors, process_one() handles parse errors.
+        http_max_attempts = backend.cfg.max_attempts
+        parse_retry_limit = 3 if http_max_attempts == 0 else http_max_attempts
 
-    # Process each annotation
-    async def process_one(obj: BaseModel) -> BaseModel:
-        # Extract input kwargs from annotation object
-        kwargs = obj.model_dump(include=set(input_fields))
+        # Process each annotation
+        async def process_one(obj: BaseModel) -> BaseModel:
+            # Extract input kwargs from annotation object
+            kwargs = obj.model_dump(include=set(input_fields))
 
-        last_error: Optional[Exception] = None
-        force_refresh_token: Optional[contextvars.Token[bool]] = None
+            last_error: Optional[Exception] = None
+            force_refresh_token: Optional[contextvars.Token[bool]] = None
 
-        for attempt in range(parse_retry_limit):
-            try:
-                # On retry, force refresh to bypass cached response that caused error
-                if attempt > 0:
-                    force_refresh_token = set_force_refresh(True)
+            for attempt in range(parse_retry_limit):
+                try:
+                    # On retry, force refresh to bypass cached response that caused error
+                    if attempt > 0:
+                        force_refresh_token = set_force_refresh(True)
 
-                # Run prediction
-                result = await predictor.acall(**kwargs)
+                    # Run prediction
+                    result = await predictor.acall(**kwargs)
 
-                # Update annotation with results
-                output_converter(result, obj)
+                    # Update annotation with results
+                    output_converter(result, obj)
 
-                return obj
+                    return obj
 
-            except CODE_ERRORS:
-                # Code errors propagate immediately
-                raise
-            except AdapterParseError as e:
-                # Parse error - retry
-                last_error = e
-                continue
-            except Exception as e:
-                # Other errors (e.g., from output_converter) - retry
-                last_error = e
-                continue
-            finally:
-                if force_refresh_token is not None:
-                    reset_force_refresh(force_refresh_token)
-                    force_refresh_token = None
+                except CODE_ERRORS:
+                    # Code errors propagate immediately
+                    raise
+                except AdapterParseError as e:
+                    # Parse error - retry
+                    last_error = e
+                    continue
+                except Exception as e:
+                    # Other errors (e.g., from output_converter) - retry
+                    last_error = e
+                    continue
+                finally:
+                    if force_refresh_token is not None:
+                        reset_force_refresh(force_refresh_token)
+                        force_refresh_token = None
 
-        # All retries exhausted
-        raise last_error  # type: ignore[misc]
+            # All retries exhausted
+            raise last_error  # type: ignore[misc]
 
-    # Execute batch - returns List[Union[BaseModel, MinimaLlmFailure]]
-    results = await backend.run_batched_callable(annotation_objs, process_one)
+        # Execute batch - returns List[Union[BaseModel, MinimaLlmFailure]]
+        results = await backend.run_batched_callable(annotation_objs, process_one)
 
-    # Check for failures - fail fast, don't silently drop data
-    failures = [r for r in results if isinstance(r, MinimaLlmFailure)]
-    if failures:
-        # Cleanup before raising
+        # Check for failures - fail fast, don't silently drop data
+        failures = [r for r in results if isinstance(r, MinimaLlmFailure)]
+        if failures:
+            # Cleanup before raising
+            if owns_backend:
+                await backend.aclose()
+            # Report failures
+            msgs = [f"{f.request_id}: {f.error_type}: {f.message}" for f in failures[:5]]
+            raise RuntimeError(
+                f"{len(failures)} DSPy predictions failed:\n  " + "\n  ".join(msgs)
+            )
+
+        # Cleanup
         if owns_backend:
             await backend.aclose()
-        # Report failures
-        msgs = [f"{f.request_id}: {f.error_type}: {f.message}" for f in failures[:5]]
-        raise RuntimeError(
-            f"{len(failures)} DSPy predictions failed:\n  " + "\n  ".join(msgs)
-        )
 
-    # Cleanup
-    if owns_backend:
-        await backend.aclose()
-
-    # All results are BaseModel (failures already raised)
-    return cast(List[BaseModel], results)
+        # All results are BaseModel (failures already raised)
+        return cast(List[BaseModel], results)
 
 
 
