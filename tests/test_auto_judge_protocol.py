@@ -1,13 +1,28 @@
 import unittest
-from trec_auto_judge import AutoJudge, Sequence, Report, Request, Leaderboard, Optional, Qrels, MeasureSpec, LeaderboardSpec, LeaderboardBuilder
+from typing import Type
+from trec_auto_judge import AutoJudge, Sequence, Report, Request, Leaderboard, Optional, Qrels, MeasureSpec, LeaderboardSpec, LeaderboardBuilder, NuggetBanks
 from trec_auto_judge import auto_judge_to_click_command, mean_of_floats
+from trec_auto_judge.nugget_data import NuggetBanksProtocol
+from trec_auto_judge.llm import MinimaLlmConfig
 from click.testing import CliRunner
 from . import TREC_25_DATA
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
 class NaiveJudge(AutoJudge):
-    def judge(self, rag_responses: Sequence["Report"], rag_topics: Sequence["Request"]) -> tuple["Leaderboard", Optional["Qrels"]]:
+    """A simple judge that uses NuggetBanks format."""
+    nugget_banks_type: Type[NuggetBanksProtocol] = NuggetBanks
+
+    def create_nuggets(
+        self,
+        rag_topics: Sequence["Request"],
+        llm_config: MinimaLlmConfig,
+        nugget_banks: Optional["NuggetBanks"] = None,
+        **kwargs
+    ) -> Optional["NuggetBanks"]:
+        return None
+
+    def judge(self, rag_responses: Sequence["Report"], rag_topics: Sequence["Request"],  llm_config: MinimaLlmConfig, nugget_banks: Optional[NuggetBanks] = None, **kwargs) -> tuple["Leaderboard", Optional["Qrels"]]:
         ret = LeaderboardBuilder(self.leaderboard_spec())
 
         for r in rag_responses:
@@ -31,8 +46,8 @@ class TestAutoJudgeProtocoll(unittest.TestCase):
         runner = CliRunner()
 
         with TemporaryDirectory() as tmp_dir:
-            target_file = Path(tmp_dir) / "leaderboard.trec"
-            result = runner.invoke(cmd, ["--rag-responses", TREC_25_DATA / "spot-check-dataset" / "runs", "--output", str(target_file)])
+            target_file = Path(tmp_dir) / "judgment.json"
+            result = runner.invoke(cmd, ["judge", "--rag-responses", TREC_25_DATA / "spot-check-dataset" / "runs", "--output", str(target_file)])
 
             print(result.output)
             print(result.exception)

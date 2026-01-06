@@ -1,0 +1,35 @@
+name: Unit Tests without DSPY
+
+on:
+  push: {}
+  workflow_dispatch: {}
+  pull_request: {}
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install treg-auto-judge from the repo
+        working-directory: ${{github.workspace}}
+        run: |
+          pip3 install .[test]
+          pip3 install --no-deps ir_datasets
+          pip3 uninstall -y dspy
+      - name: Run unit tests
+        working-directory: ${{github.workspace}}/
+        env:
+          OPENAI_BASE_URL: ${{ secrets.OPENAI_BASE_URL }}
+          OPENAI_MODEL: ${{ secrets.OPENAI_MODEL }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: |
+          python3 -m pytest --cov-report term --cov=trec_auto_judge tests
