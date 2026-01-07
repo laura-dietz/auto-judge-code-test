@@ -23,6 +23,11 @@ from .leaderboard.leaderboard import Leaderboard
 from .llm.minima_llm import MinimaLlmConfig
 from .report import Report
 from .request import Request
+from .workflow.paths import (
+    resolve_nugget_file_path,
+    resolve_judgment_file_paths,
+    resolve_config_file_path,
+)
 
 
 @dataclass
@@ -40,43 +45,6 @@ FRAMEWORK_SETTINGS = frozenset({"llm_model"})
 def _strip_framework_settings(settings: dict[str, Any]) -> dict[str, Any]:
     """Remove framework-consumed settings before passing to AutoJudge."""
     return {k: v for k, v in settings.items() if k not in FRAMEWORK_SETTINGS}
-
-
-def _resolve_nugget_file_path(filebase: Path) -> Path:
-    """
-    Resolve nugget file path from filebase.
-
-    If filebase already has a recognized extension (.jsonl, .json), use as-is.
-    Otherwise, append .nuggets.jsonl extension.
-    """
-    if filebase.suffix in (".jsonl", ".json"):
-        return filebase
-    return filebase.parent / f"{filebase.name}.nuggets.jsonl"
-
-
-def _resolve_judgment_file_paths(filebase: Path) -> tuple[Path, Path]:
-    """
-    Resolve leaderboard and qrels file paths from filebase.
-
-    Returns:
-        Tuple of (leaderboard_path, qrels_path):
-        - {filebase}.judgment.json
-        - {filebase}.judgment.qrels
-    """
-    if filebase.suffix in (".json",):
-        # Already has extension, derive qrels from it
-        return filebase, filebase.with_suffix(".qrels")
-    return (
-        filebase.parent / f"{filebase.name}.judgment.json",
-        filebase.parent / f"{filebase.name}.judgment.qrels",
-    )
-
-
-def _resolve_config_file_path(filebase: Path) -> Path:
-    """Resolve config file path: {filebase}.config.yml"""
-    if filebase.suffix in (".yml", ".yaml"):
-        return filebase
-    return filebase.parent / f"{filebase.name}.config.yml"
 
 
 def run_judge(
@@ -138,7 +106,7 @@ def run_judge(
     qrels = None
 
     # Resolve nugget file path (add .nuggets.jsonl extension if needed)
-    nugget_file_path = _resolve_nugget_file_path(nugget_output_path) if nugget_output_path else None
+    nugget_file_path = resolve_nugget_file_path(nugget_output_path) if nugget_output_path else None
 
     # Step 1: Resolve nuggets (auto-load or create)
     if do_create_nuggets:
@@ -243,7 +211,7 @@ def _write_outputs(
     topic_ids = [t.request_id for t in rag_topics]
 
     # Resolve output paths from filebase
-    leaderboard_path, qrels_path = _resolve_judgment_file_paths(judge_output_path)
+    leaderboard_path, qrels_path = resolve_judgment_file_paths(judge_output_path)
     leaderboard.verify(expected_topic_ids=topic_ids, on_missing="fix_aggregate")  # Reconsider setting this to "fix_aggregate" if want to ensure all run/topic combinations have values.
     leaderboard.write(leaderboard_path)
     print(f"[judge_runner] Leaderboard saved to: {leaderboard_path}", file=sys.stderr)
@@ -273,7 +241,7 @@ def _write_run_config(
     - Git info (commit, dirty, remote)
     - Timestamp
     """
-    config_path = _resolve_config_file_path(judge_output_path)
+    config_path = resolve_config_file_path(judge_output_path)
 
     config: dict[str, Any] = {
         "name": config_name,

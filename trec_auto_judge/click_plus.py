@@ -4,7 +4,15 @@ from .io import load_runs_failsave
 from .request import load_requests_from_irds, load_requests_from_file
 from .llm import MinimaLlmConfig
 from .llm_resolver import ModelPreferences, ModelResolver, ModelResolutionError
-from .workflow import load_workflow, resolve_default, resolve_variant, resolve_sweep
+from .workflow import (
+    load_workflow,
+    resolve_default,
+    resolve_variant,
+    resolve_sweep,
+    KeyValueType,
+    create_cli_default_workflow,
+    apply_cli_overrides,
+)
 from .judge_runner import run_judge
 from .cli_default_group import DefaultGroup
 import click
@@ -468,6 +476,16 @@ def auto_judge_to_click_command(auto_judge: AutoJudge, cmd_name: str):
     @click.option("--force-recreate-nuggets", is_flag=True, help="Recreate nuggets even if file exists.")
     @click.option("--create-nuggets/--no-create-nuggets", default=None, help="Override workflow create_nuggets flag.")
     @click.option("--judge/--no-judge", "do_judge", default=None, help="Override workflow judge flag.")
+    @click.option("--set", "-S", "settings_overrides", multiple=True, type=KeyValueType(),
+                  help="Override shared settings: --set key=value")
+    @click.option("--nset", "-N", "nugget_settings_overrides", multiple=True, type=KeyValueType(),
+                  help="Override nugget settings: --nset key=value")
+    @click.option("--jset", "-J", "judge_settings_overrides", multiple=True, type=KeyValueType(),
+                  help="Override judge settings: --jset key=value")
+    @click.option("--nugget-depends-on-responses/--no-nugget-depends-on-responses",
+                  default=None, help="Override nugget_depends_on_responses lifecycle flag.")
+    @click.option("--nugget-judge/--no-nugget-judge", "judge_uses_nuggets",
+                  default=None, help="Judge uses nuggets (REQUIRED when --workflow omitted).")
     def run_cmd(
         workflow: Optional[Path],
         rag_responses: Iterable[Report],
@@ -483,20 +501,38 @@ def auto_judge_to_click_command(auto_judge: AutoJudge, cmd_name: str):
         force_recreate_nuggets: bool,
         create_nuggets: Optional[bool],
         do_judge: Optional[bool],
+        settings_overrides: tuple,
+        nugget_settings_overrides: tuple,
+        judge_settings_overrides: tuple,
+        nugget_depends_on_responses: Optional[bool],
+        judge_uses_nuggets: Optional[bool],
     ):
         """Run judge according to workflow.yml (default command)."""
-        # Load workflow
+        # Load workflow or create default based on CLI flags
         if workflow:
             wf = load_workflow(workflow)
             click.echo(f"Loaded workflow: create_nuggets={wf.create_nuggets}, judge={wf.judge}", err=True)
         else:
-            raise click.UsageError(
-                "No --workflow file provided.\n\n"
-                "The 'run' command requires a workflow.yml file to configure the judge pipeline.\n\n"
-                "Usage:\n"
-                f"  {cmd_name} run --workflow workflow.yml ...\n\n"
-                "Alternatively, use explicit subcommands."
-            )
+            # No workflow file - require --nugget-judge flag
+            if judge_uses_nuggets is None:
+                raise click.UsageError(
+                    "No --workflow file provided.\n\n"
+                    "When running without workflow.yml, you must specify:\n"
+                    "  --nugget-judge     (creates nuggets, then judges with them)\n"
+                    "  --no-nugget-judge  (judge only, no nugget creation)\n"
+                )
+            wf = create_cli_default_workflow(judge_uses_nuggets)
+            click.echo(f"Using CLI defaults: create_nuggets={wf.create_nuggets}, judge={wf.judge}", err=True)
+
+        # Apply CLI overrides to workflow
+        apply_cli_overrides(
+            wf,
+            settings_overrides,
+            nugget_settings_overrides,
+            judge_settings_overrides,
+            nugget_depends_on_responses,
+            judge_uses_nuggets,
+        )
 
         # Validate mutually exclusive options
         options_set = sum([bool(variant), bool(sweep), all_variants])
