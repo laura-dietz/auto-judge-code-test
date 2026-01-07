@@ -66,12 +66,40 @@ This code will handle obtaining data sets (akin to `ir_datasets`), input/output 
 Initial code is in the [trec_auto_judge](trec_auto_judge) directory (**attention: this is in the very early brain storming phase**).
 
 
-## Installation 
+## Installation
 
-You can install the early prototype via:
+### Using uv (recommended)
 
+```bash
+# Install uv if you don't have it
+pip install uv
+
+# Option 1: Install directly
+uv pip install git+https://github.com/trec-auto-judge/auto-judge-code.git
+
+# Option 2: Development install with virtual environment
+git clone https://github.com/trec-auto-judge/auto-judge-code.git
+cd auto-judge-code
+
+# Create and activate virtual environment
+uv venv
+source .venv/bin/activate  # Linux/macOS
+# .venv\Scripts\activate   # Windows
+
+# Install with test dependencies
+uv pip install -e ".[test]"
 ```
-pip3 install git+https://github.com/trec-auto-judge/auto-judge-code.git
+
+### Using pip (alternative)
+
+```bash
+# Optional: Create virtual environment first
+python3 -m venv .venv
+source .venv/bin/activate  # Linux/macOS
+# .venv\Scripts\activate   # Windows
+
+# Install
+pip install git+https://github.com/trec-auto-judge/auto-judge-code.git
 ```
 
 ## Rationale
