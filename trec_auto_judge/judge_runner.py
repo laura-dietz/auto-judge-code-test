@@ -38,15 +38,6 @@ class JudgeResult:
     nuggets: Optional[NuggetBanksProtocol]
 
 
-# Framework-consumed settings (extracted before passing to AutoJudge)
-FRAMEWORK_SETTINGS = frozenset({"llm_model"})
-
-
-def _strip_framework_settings(settings: dict[str, Any]) -> dict[str, Any]:
-    """Remove framework-consumed settings before passing to AutoJudge."""
-    return {k: v for k, v in settings.items() if k not in FRAMEWORK_SETTINGS}
-
-
 def run_judge(
     auto_judge,
     rag_responses: Iterable[Report],
@@ -92,12 +83,6 @@ def run_judge(
     Returns:
         JudgeResult with leaderboard, qrels, and final nuggets
     """
-    # Extract framework-consumed settings
-    effective_llm_config = llm_config
-    if settings and "llm_model" in settings:
-        effective_llm_config = llm_config.with_model(settings["llm_model"])
-        print(f"[judge_runner] Model override from settings: {effective_llm_config.model}", file=sys.stderr)
-
     # Get nugget_banks_type from auto_judge (required for loading/saving nuggets)
     nugget_banks_type = getattr(auto_judge, "nugget_banks_type", None)
 
@@ -134,7 +119,7 @@ def run_judge(
             current_nuggets = load_nugget_banks_from_path(nugget_file_path, nugget_banks_type)
         else:
             # Create nuggets
-            nugget_kwargs = _strip_framework_settings(nugget_settings or settings or {})
+            nugget_kwargs = nugget_settings or settings or {}
             if nugget_kwargs:
                 print(f"[judge_runner] create_nuggets settings: {nugget_kwargs}", file=sys.stderr)
 
@@ -144,7 +129,7 @@ def run_judge(
             current_nuggets = auto_judge.create_nuggets(
                 rag_responses=responses_for_nuggets,
                 rag_topics=rag_topics,
-                llm_config=effective_llm_config,
+                llm_config=llm_config,
                 nugget_banks=input_nuggets,
                 **nugget_kwargs,
             )
@@ -159,7 +144,7 @@ def run_judge(
 
     # Step 2: Judge if requested
     if do_judge:
-        judge_kwargs = _strip_framework_settings(judge_settings or settings or {})
+        judge_kwargs = judge_settings or settings or {}
         if judge_kwargs:
             print(f"[judge_runner] judge settings: {judge_kwargs}", file=sys.stderr)
 
@@ -169,7 +154,7 @@ def run_judge(
         leaderboard, qrels = auto_judge.judge(
             rag_responses=rag_responses,
             rag_topics=rag_topics,
-            llm_config=effective_llm_config,
+            llm_config=llm_config,
             nugget_banks=nuggets_for_judge,
             **judge_kwargs,
         )
@@ -187,7 +172,7 @@ def run_judge(
                 config_name=config_name,
                 do_create_nuggets=do_create_nuggets,
                 do_judge=do_judge,
-                llm_model=effective_llm_config.model,
+                llm_model=llm_config.model,
                 settings=settings,
                 nugget_settings=nugget_settings,
                 judge_settings=judge_settings,

@@ -297,57 +297,63 @@ def _resolve_llm_config(llm_config_path: Optional[Path], submission: bool = Fals
     return MinimaLlmConfig.from_env()
 
 
-def _validate_llm_model_for_submission(
+def _apply_llm_model_override(
+    llm_config: MinimaLlmConfig,
     settings: dict,
     submission: bool,
-) -> dict:
+) -> tuple[MinimaLlmConfig, dict]:
     """
-    Validate llm_model setting against available models in submission mode.
+    Apply llm_model from settings to llm_config and strip it from settings.
 
-    In submission mode, if llm_model is set but not available in the organizer's
-    configuration, it is removed with a warning.
+    Steps:
+    1. Extract llm_model from settings
+    2. Apply it to llm_config via with_model()
+    3. In submission mode, validate the model is allowed by organizer
+    4. Strip llm_model from settings before passing to AutoJudge
 
     Args:
+        llm_config: Base LLM configuration
         settings: Settings dict (may contain 'llm_model')
         submission: Whether we're in submission mode
 
     Returns:
-        Settings dict, possibly with llm_model removed
+        Tuple of (updated_llm_config, settings_without_llm_model)
     """
-    if not submission:
-        return settings
-
     llm_model = settings.get("llm_model")
+    stripped_settings = {k: v for k, v in settings.items() if k != "llm_model"}
+
     if not llm_model:
-        return settings
+        return llm_config, stripped_settings
 
-    # Get available models from organizer configuration
-    try:
-        resolver = ModelResolver.from_env()
-        available = resolver.available
-        enabled_models = available.get_enabled_models()
+    # In submission mode, validate the model is allowed
+    if submission:
+        try:
+            resolver = ModelResolver.from_env()
+            available = resolver.available
+            enabled_models = available.get_enabled_models()
 
-        # Check if model is available (directly or via alias)
-        canonical = available.resolve_alias(llm_model)
-        if canonical in available.models:
-            return settings  # Model is available, keep it
+            # Check if model is available (directly or via alias)
+            canonical = available.resolve_alias(llm_model)
+            if canonical not in available.models:
+                click.echo(
+                    f"Warning: llm_model '{llm_model}' is not available in submission mode. "
+                    f"Available models: {enabled_models}. Ignoring llm_model setting.",
+                    err=True,
+                )
+                return llm_config, stripped_settings
 
-        # Model not available - warn and remove
-        click.echo(
-            f"Warning: llm_model '{llm_model}' is not available in submission mode. "
-            f"Available models: {enabled_models}. Ignoring llm_model setting.",
-            err=True,
-        )
-        # Return settings without llm_model
-        return {k: v for k, v in settings.items() if k != "llm_model"}
+        except Exception as e:
+            click.echo(
+                f"Warning: Could not validate llm_model against available models: {e}. "
+                f"Ignoring llm_model setting.",
+                err=True,
+            )
+            return llm_config, stripped_settings
 
-    except Exception as e:
-        click.echo(
-            f"Warning: Could not validate llm_model against available models: {e}. "
-            f"Ignoring llm_model setting.",
-            err=True,
-        )
-        return {k: v for k, v in settings.items() if k != "llm_model"}
+    # Apply the model override
+    updated_config = llm_config.with_model(llm_model)
+    click.echo(f"Model override from settings: {llm_model}", err=True)
+    return updated_config, stripped_settings
 
 
 def auto_judge_to_click_command(auto_judge: AutoJudge, cmd_name: str):
@@ -507,17 +513,15 @@ def auto_judge_to_click_command(auto_judge: AutoJudge, cmd_name: str):
             judge_uses_nuggets,
         )
 
-        # Validate mutually exclusive options
-        options_set = sum([bool(variant), bool(sweep), all_variants])
-        if options_set > 1:
-            raise click.UsageError("--variant, --sweep, and --all-variants are mutually exclusive.")
-
-        resolved_llm_config = _resolve_llm_config(llm_config, submission)
-
         # CLI --filebase overrides workflow settings.filebase
         if filebase:
             wf.settings["filebase"] = filebase
             click.echo(f"Filebase override: {filebase}", err=True)
+
+        # Validate mutually exclusive options
+        options_set = sum([bool(variant), bool(sweep), all_variants])
+        if options_set > 1:
+            raise click.UsageError("--variant, --sweep, and --all-variants are mutually exclusive.")
 
         # Resolve configurations based on CLI options
         if variant:
@@ -531,6 +535,10 @@ def auto_judge_to_click_command(auto_judge: AutoJudge, cmd_name: str):
         else:
             configs = [resolve_default(wf)]
 
+
+        # Step 1: Load base LLM config from file/env
+        base_llm_config = _resolve_llm_config(llm_config, submission)
+
         # Convert rag_topics to list once (it's an iterable)
         topics_list = list(rag_topics)
 
@@ -538,8 +546,10 @@ def auto_judge_to_click_command(auto_judge: AutoJudge, cmd_name: str):
         for config in configs:
             click.echo(f"\n=== Running configuration: {config.name} ===", err=True)
 
-            # Validate llm_model against available models in submission mode
-            validated_settings = _validate_llm_model_for_submission(config.settings, submission)
+            # Step 2-4: Apply llm_model from settings, validate in submission mode, strip from settings
+            effective_llm_config, clean_settings = _apply_llm_model_override(
+                base_llm_config, config.settings, submission
+            )
 
             # Determine output paths: --store-nuggets overrides, otherwise use resolved config
             # (--filebase was already injected into wf.settings before resolution)
@@ -559,13 +569,13 @@ def auto_judge_to_click_command(auto_judge: AutoJudge, cmd_name: str):
                 auto_judge=auto_judge,
                 rag_responses=rag_responses,
                 rag_topics=topics_list,
-                llm_config=resolved_llm_config,
+                llm_config=effective_llm_config,
                 nugget_banks_path=nugget_banks,
                 judge_output_path=judge_output_path,
                 nugget_output_path=nugget_output_path,
                 do_create_nuggets=effective_create_nuggets,
                 do_judge=effective_do_judge,
-                settings=validated_settings,
+                settings=clean_settings,
                 nugget_settings=config.nugget_settings,
                 judge_settings=config.judge_settings,
                 # Lifecycle flags
