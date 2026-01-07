@@ -16,7 +16,6 @@ from .utils import get_git_info
 from .nugget_data import (
     NuggetBanksProtocol,
     write_nugget_banks_generic,
-    load_nugget_banks_generic,
 )
 from .qrels.qrels import Qrels, write_qrel_file
 from .leaderboard.leaderboard import Leaderboard
@@ -27,6 +26,7 @@ from .workflow.paths import (
     resolve_nugget_file_path,
     resolve_judgment_file_paths,
     resolve_config_file_path,
+    load_nugget_banks_from_path,
 )
 
 
@@ -52,7 +52,7 @@ def run_judge(
     rag_responses: Iterable[Report],
     rag_topics: Sequence[Request],
     llm_config: MinimaLlmConfig,
-    nugget_banks: Optional[NuggetBanksProtocol] = None,
+    nugget_banks_path: Optional[Path] = None,
     judge_output_path: Optional[Path] = None,
     nugget_output_path: Optional[Path] = None,
     do_create_nuggets: bool = False,
@@ -65,8 +65,6 @@ def run_judge(
     force_recreate_nuggets: bool = False,
     nugget_depends_on_responses: bool = True,
     judge_uses_nuggets: bool = True,
-    # NuggetBanks type for loading (dotted import path)
-    nugget_banks_type: Optional[str] = None,
     # Configuration name for reproducibility tracking
     config_name: str = "default",
 ) -> JudgeResult:
@@ -78,7 +76,7 @@ def run_judge(
         rag_responses: RAG responses to evaluate
         rag_topics: Topics/queries to evaluate
         llm_config: LLM configuration
-        nugget_banks: Input nugget banks (any NuggetBanksProtocol implementation)
+        nugget_banks_path: Path to input nugget banks (file or directory)
         judge_output_path: Leaderboard/qrels output path
         nugget_output_path: Path to store created/refined nuggets
         do_create_nuggets: If True, call create_nuggets()
@@ -89,7 +87,6 @@ def run_judge(
         force_recreate_nuggets: If True, recreate even if file exists
         nugget_depends_on_responses: If True, pass responses to create_nuggets()
         judge_uses_nuggets: If True, pass nuggets to judge()
-        nugget_banks_type: Dotted import path for NuggetBanks class (for loading)
         config_name: Variant/sweep name for reproducibility tracking (default: "default")
 
     Returns:
@@ -101,31 +98,40 @@ def run_judge(
         effective_llm_config = llm_config.with_model(settings["llm_model"])
         print(f"[judge_runner] Model override from settings: {effective_llm_config.model}", file=sys.stderr)
 
-    current_nuggets = nugget_banks
+    # Get nugget_banks_type from auto_judge (required for loading/saving nuggets)
+    nugget_banks_type = getattr(auto_judge, "nugget_banks_type", None)
+
+    # Resolve nugget output file path (add .nuggets.jsonl extension if needed)
+    nugget_file_path = resolve_nugget_file_path(nugget_output_path) if nugget_output_path else None
+
+    # Validate nugget_banks_type is available when needed for loading or saving
+    needs_nugget_type = (
+        (nugget_banks_path and nugget_banks_path.exists()) or  # Loading from input path
+        (nugget_file_path and nugget_file_path.exists() and not force_recreate_nuggets) or  # Loading from output
+        (do_create_nuggets and nugget_output_path)  # Will save nuggets (need type for future loading)
+    )
+    if needs_nugget_type and not nugget_banks_type:
+        raise ValueError(
+            "Cannot load/save nuggets: auto_judge does not define nugget_banks_type. "
+            "Add nugget_banks_type class attribute to your AutoJudge implementation."
+        )
+
+    # Load input nuggets from path if provided
+    input_nuggets: Optional[NuggetBanksProtocol] = None
+    if nugget_banks_path and nugget_banks_path.exists() and nugget_banks_type:
+        print(f"[judge_runner] Loading input nuggets: {nugget_banks_path}", file=sys.stderr)
+        input_nuggets = load_nugget_banks_from_path(nugget_banks_path, nugget_banks_type)
+
+    current_nuggets = input_nuggets
     leaderboard = None
     qrels = None
 
-    # Resolve nugget file path (add .nuggets.jsonl extension if needed)
-    nugget_file_path = resolve_nugget_file_path(nugget_output_path) if nugget_output_path else None
-
-    # Step 1: Resolve nuggets (auto-load or create)
+    # Step 1: Create or load nuggets
     if do_create_nuggets:
-        # Check if we can auto-load existing nuggets
+        # Check if output file exists and we can skip creation
         if nugget_file_path and nugget_file_path.exists() and not force_recreate_nuggets:
-            # Auto-load existing nuggets
-            print(f"[judge_runner] Loading existing nuggets: {nugget_file_path}", file=sys.stderr)
-            if nugget_banks_type:
-                current_nuggets = load_nugget_banks_generic(nugget_file_path, nugget_banks_type)
-            else:
-                # Try to get type from auto_judge
-                nbt = getattr(auto_judge, "nugget_banks_type", None)
-                if nbt:
-                    current_nuggets = load_nugget_banks_generic(nugget_file_path, nbt)
-                else:
-                    raise ValueError(
-                        f"Cannot load nuggets: no nugget_banks_type specified. "
-                        f"Provide nugget_banks_type or use --force-recreate-nuggets."
-                    )
+            print(f"[judge_runner] Loading existing nuggets (skipping creation): {nugget_file_path}", file=sys.stderr)
+            current_nuggets = load_nugget_banks_from_path(nugget_file_path, nugget_banks_type)
         else:
             # Create nuggets
             nugget_kwargs = _strip_framework_settings(nugget_settings or settings or {})
@@ -139,7 +145,7 @@ def run_judge(
                 rag_responses=responses_for_nuggets,
                 rag_topics=rag_topics,
                 llm_config=effective_llm_config,
-                nugget_banks=nugget_banks,
+                nugget_banks=input_nuggets,
                 **nugget_kwargs,
             )
             # Verify created nuggets
@@ -150,13 +156,6 @@ def run_judge(
                 if nugget_file_path:
                     write_nugget_banks_generic(current_nuggets, nugget_file_path)
                     print(f"[judge_runner] Nuggets saved to: {nugget_file_path}", file=sys.stderr)
-    elif not do_create_nuggets and nugget_file_path and nugget_file_path.exists():
-        # do_create_nuggets=False but file exists - load it
-        print(f"[judge_runner] Loading nuggets (create_nuggets=false): {nugget_file_path}", file=sys.stderr)
-        nbt = nugget_banks_type or getattr(auto_judge, "nugget_banks_type", None)
-        if nbt:
-            current_nuggets = load_nugget_banks_generic(nugget_file_path, nbt)
-        # If no type available and no nugget_banks passed, current_nuggets stays as nugget_banks
 
     # Step 2: Judge if requested
     if do_judge:

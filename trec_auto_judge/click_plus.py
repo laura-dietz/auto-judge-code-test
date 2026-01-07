@@ -204,61 +204,34 @@ def option_submission():
     return decorator
 
 
-class ClickNuggetBanks(click.ParamType):
-    """Click parameter type for loading nugget banks from file or directory."""
+class ClickNuggetBanksPath(click.ParamType):
+    """Click parameter type for nugget banks path (file or directory)."""
     name = "file-or-dir"
-
-    def _get_nugget_banks_type(self, ctx):
-        """Get NuggetBanks type from auto_judge in context, or None if not defined."""
-        if ctx and hasattr(ctx, "obj") and ctx.obj and "auto_judge" in ctx.obj:
-            auto_judge = ctx.obj["auto_judge"]
-            if hasattr(auto_judge, "nugget_banks_type"):
-                return auto_judge.nugget_banks_type
-        return None  # Judge doesn't use nuggets
 
     def convert(self, value, param, ctx):
         if value is None:
             return None
 
-        from .nugget_data.io import (
-            load_nugget_banks_generic,
-            load_nugget_banks_from_directory_generic,
-        )
-
-        nugget_banks_type = self._get_nugget_banks_type(ctx)
-        if nugget_banks_type is None:
-            self.fail(
-                "This judge does not define nugget_banks_type. "
-                "Cannot load nugget banks for a judge that doesn't use nuggets.",
-                param, ctx
-            )
-
         path = Path(value)
 
-        if path.is_file():
-            try:
-                return load_nugget_banks_generic(path, nugget_banks_type)
-            except Exception as e:
-                self.fail(f"Could not load nugget banks from {value}: {e}", param, ctx)
+        if not path.exists():
+            self.fail(f"Path {value} does not exist", param, ctx)
 
-        if path.is_dir():
-            try:
-                return load_nugget_banks_from_directory_generic(path, nugget_banks_type)
-            except Exception as e:
-                self.fail(f"Could not load nugget banks from directory {value}: {e}", param, ctx)
+        if not path.is_file() and not path.is_dir():
+            self.fail(f"Path {value} is neither a file nor directory", param, ctx)
 
-        self.fail(f"Path {value} is neither a file nor directory", param, ctx)
+        return path
 
 
 def option_nugget_banks():
-    """Optional nugget banks CLI option."""
+    """Optional nugget banks path CLI option (file or directory)."""
     def decorator(func):
         func = click.option(
             "--nugget-banks",
-            type=ClickNuggetBanks(),
+            type=ClickNuggetBanksPath(),
             required=False,
             default=None,
-            help="Nugget banks file (JSON/JSONL) or directory. Optional input for judges that use nuggets."
+            help="Path to nugget banks file (JSON/JSONL) or directory."
         )(func)
         return func
     return decorator
@@ -420,7 +393,7 @@ def auto_judge_to_click_command(auto_judge: AutoJudge, cmd_name: str):
             rag_responses=rag_responses,
             rag_topics=list(rag_topics),
             llm_config=resolved_config,
-            nugget_banks=nugget_banks,
+            nugget_banks_path=nugget_banks,
             judge_output_path=output,
             do_create_nuggets=False,
             do_judge=True,
@@ -449,7 +422,7 @@ def auto_judge_to_click_command(auto_judge: AutoJudge, cmd_name: str):
             rag_responses=rag_responses,
             rag_topics=list(rag_topics),
             llm_config=resolved_config,
-            nugget_banks=nugget_banks,
+            nugget_banks_path=nugget_banks,
             judge_output_path=None,
             nugget_output_path=store_nuggets,
             do_create_nuggets=True,
@@ -578,24 +551,6 @@ def auto_judge_to_click_command(auto_judge: AutoJudge, cmd_name: str):
             if judge_output_path:
                 click.echo(f"Judge output: {judge_output_path}", err=True)
 
-            # Determine nugget_banks_type: CLI workflow takes precedence, then auto_judge attribute
-            nugget_banks_type = wf.nugget_banks_type
-            if not nugget_banks_type or nugget_banks_type == "trec_auto_judge.nugget_data.NuggetBanks":
-                # Check auto_judge for a more specific type
-                auto_judge_type = getattr(auto_judge, "nugget_banks_type", None)
-                if auto_judge_type:
-                    nugget_banks_type = auto_judge_type
-
-            # Resolve nugget banks: CLI --nugget-banks, then workflow nugget_input
-            effective_nugget_banks = nugget_banks
-            if effective_nugget_banks is None and config.nugget_input_path:
-                from .nugget_data.io import load_nugget_banks_generic
-                if config.nugget_input_path.exists():
-                    click.echo(f"Loading nuggets from workflow nugget_input: {config.nugget_input_path}", err=True)
-                    effective_nugget_banks = load_nugget_banks_generic(
-                        config.nugget_input_path, nugget_banks_type
-                    )
-
             # CLI flags override workflow settings (None means use workflow default)
             effective_create_nuggets = create_nuggets if create_nuggets is not None else wf.create_nuggets
             effective_do_judge = do_judge if do_judge is not None else wf.judge
@@ -605,7 +560,7 @@ def auto_judge_to_click_command(auto_judge: AutoJudge, cmd_name: str):
                 rag_responses=rag_responses,
                 rag_topics=topics_list,
                 llm_config=resolved_llm_config,
-                nugget_banks=effective_nugget_banks,
+                nugget_banks_path=nugget_banks,
                 judge_output_path=judge_output_path,
                 nugget_output_path=nugget_output_path,
                 do_create_nuggets=effective_create_nuggets,
@@ -617,7 +572,6 @@ def auto_judge_to_click_command(auto_judge: AutoJudge, cmd_name: str):
                 force_recreate_nuggets=force_recreate_nuggets or wf.force_recreate_nuggets,
                 nugget_depends_on_responses=wf.nugget_depends_on_responses,
                 judge_uses_nuggets=wf.judge_uses_nuggets,
-                nugget_banks_type=nugget_banks_type,
                 config_name=config.name,
             )
 

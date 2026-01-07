@@ -45,3 +45,30 @@ def resolve_config_file_path(filebase: Path) -> Path:
     if filebase.suffix in (".yml", ".yaml"):
         return filebase
     return filebase.parent / f"{filebase.name}.config.yml"
+
+
+def load_nugget_banks_from_path(path: Path, nugget_banks_type: type):
+    """
+    Load nugget banks from file or directory.
+
+    Args:
+        path: Path to nugget banks file (.jsonl/.json) or directory
+        nugget_banks_type: NuggetBanks container class (e.g., NuggetBanks, NuggetizerNuggetBanks)
+
+    Returns:
+        Loaded NuggetBanks instance
+
+    Raises:
+        ValueError: If path is neither file nor directory
+    """
+    from ..nugget_data.io import (
+        load_nugget_banks_generic,
+        load_nugget_banks_from_directory_generic,
+    )
+
+    if path.is_file():
+        return load_nugget_banks_generic(path, nugget_banks_type)
+    elif path.is_dir():
+        return load_nugget_banks_from_directory_generic(path, nugget_banks_type)
+    else:
+        raise ValueError(f"Path {path} is neither a file nor directory")

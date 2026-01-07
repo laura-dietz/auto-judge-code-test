@@ -20,6 +20,7 @@ from .paths import (
     resolve_nugget_file_path,
     resolve_judgment_file_paths,
     resolve_config_file_path,
+    load_nugget_banks_from_path,
 )
 
 from .settings import (
