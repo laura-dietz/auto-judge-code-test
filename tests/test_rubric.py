@@ -175,6 +175,7 @@ class TestRubricJudgeVerification:
     @pytest.fixture
     def rubric_judge(self):
         """Create RubricJudge instance."""
+        dspy = pytest.importorskip("dspy")
         from trec25.judges.rubric.rubric_autojudge import RubricJudge
         return RubricJudge()
 
