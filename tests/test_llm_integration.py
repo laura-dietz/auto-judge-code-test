@@ -22,10 +22,7 @@ from trec_auto_judge.llm import (
 
 SKIP_LLM_ENDPOINT_TESTS = os.getenv("SKIP_LLM_ENDPOINT_TESTS", "true").lower() in {"1", "true", "yes"}
 
-@pytest.mark.skipif(
-    SKIP_LLM_ENDPOINT_TESTS,
-    reason="Skipping LLM endpoint tests (SKIP_LLM_ENDPOINT_TESTS set)"
-)
+
 @pytest.fixture(autouse=True)
 def _prep_env(monkeypatch, tmp_path):
     monkeypatch.setenv("BATCH_NUM_WORKERS", "16")
