@@ -11,7 +11,36 @@ import re
 
 import dspy
 from dspy.adapters.chat_adapter import ChatAdapter
-from dspy.utils.exceptions import AdapterParseError
+
+def _import_adapter_parse_error():
+    """Locate AdapterParseError across DSPy versions.
+    0.1.3 - 0.1.6 (pre-refactor)
+    0.1.7 -  0.1.9 (adapter split)
+    early 0.2.x nightlies (exceptions module split)
+    """
+    paths = [
+        "dspy.adapters.exceptions",
+        "dspy.adapters.base",
+        "dspy.adapters",
+        "dspy.primitives.exceptions",
+        "dspy.exceptions",
+        "dspy.utils.exceptions",
+    ]
+
+    for path in paths:
+        try:
+            module = __import__(path, fromlist=["AdapterParseError"])
+            return module.AdapterParseError
+        except (ImportError, AttributeError):
+            continue
+
+    raise ImportError(
+        "Could not locate AdapterParseError in any known DSPy location. "
+        "DSPy version may have changed its adapter exception layout again."
+    )
+
+
+AdapterParseError = _import_adapter_parse_error()
 
 from pydantic import BaseModel
 
