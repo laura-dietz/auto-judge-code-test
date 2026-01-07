@@ -20,7 +20,7 @@ from trec_auto_judge.llm import (
     OpenAIMinimaLlm,
 )
 
-SKIP_LLM_ENDPOINT_TESTS = os.getenv("SKIP_LLM_ENDPOINT_TESTS", "false").lower() in {"1", "true", "yes"}
+SKIP_LLM_ENDPOINT_TESTS = os.getenv("SKIP_LLM_ENDPOINT_TESTS", "true").lower() in {"1", "true", "yes"}
 
 @pytest.mark.skipif(
     SKIP_LLM_ENDPOINT_TESTS,
