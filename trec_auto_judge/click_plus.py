@@ -447,7 +447,8 @@ def auto_judge_to_click_command(auto_judge: AutoJudge, cmd_name: str):
     @option_nugget_banks()
     @option_llm_config()
     @option_submission()
-    @click.option("--filebase", type=str, help="Override workflow filebase (e.g., 'output/my-run').", required=False)
+    @click.option("--out-dir", type=Path, help="Parent directory for all output files.", required=False)
+    @click.option("--filebase", type=str, help="Override workflow filebase (e.g., 'my-run').", required=False)
     @click.option("--store-nuggets", type=Path, help="Override nugget output path.", required=False)
     @click.option("--variant", type=str, help="Run a named variant from workflow.yml (e.g., --variant $name).", required=False)
     @click.option("--sweep", type=str, help="Run a parameter sweep from workflow.yml (e.g., --sweep $name).", required=False)
@@ -472,6 +473,7 @@ def auto_judge_to_click_command(auto_judge: AutoJudge, cmd_name: str):
         nugget_banks,
         llm_config: Optional[Path],
         submission: bool,
+        out_dir: Optional[Path],
         filebase: Optional[str],
         store_nuggets: Optional[Path],
         variant: Optional[str],
@@ -555,6 +557,14 @@ def auto_judge_to_click_command(auto_judge: AutoJudge, cmd_name: str):
             # (--filebase was already injected into wf.settings before resolution)
             nugget_output_path = store_nuggets or config.nugget_output_path
             judge_output_path = config.judge_output_path
+
+            # Apply --out-dir prefix to output paths
+            if out_dir:
+                out_dir.mkdir(parents=True, exist_ok=True)
+                if nugget_output_path:
+                    nugget_output_path = out_dir / nugget_output_path
+                if judge_output_path:
+                    judge_output_path = out_dir / judge_output_path
 
             if nugget_output_path:
                 click.echo(f"Nugget output: {nugget_output_path}", err=True)
