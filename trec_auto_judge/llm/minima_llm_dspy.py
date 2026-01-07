@@ -580,20 +580,21 @@ async def run_dspy_batch(
     with dspy.context(lm=lm):
         predictor = predictor_class(signature_class)
 
+        async def _maybe_await(result):
+            """Await if awaitable, otherwise return value directly."""
+            if inspect.isawaitable(result):
+                return await result
+            return result
+
         async def invoke_predictor(pred, **kw):
             """Invoke predictor with version-tolerant async/sync handling."""
             import functools
-            import inspect
 
             # Try async methods first: acall, aforward
             for method_name in ("acall", "aforward"):
                 method = getattr(pred, method_name, None)
                 if callable(method):
-                    result = method(**kw)
-                    # Await if coroutine, otherwise return value directly
-                    if inspect.isawaitable(result):
-                        return await result
-                    return result
+                    return await _maybe_await(method(**kw))
 
             # Sync fallback: __call__ via run_in_executor to not block event loop
             loop = asyncio.get_running_loop()
