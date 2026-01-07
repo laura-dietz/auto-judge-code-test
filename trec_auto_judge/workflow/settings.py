@@ -76,7 +76,7 @@ def create_cli_default_workflow(judge_uses_nuggets: bool) -> Workflow:
         )
 
 
-def apply_cli_overrides(
+def apply_cli_workflow_overrides(
     wf: Workflow,
     settings_overrides: Iterable[tuple[str, Any]],
     nugget_settings_overrides: Iterable[tuple[str, Any]],

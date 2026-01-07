@@ -26,5 +26,5 @@ from .paths import (
 from .settings import (
     KeyValueType,
     create_cli_default_workflow,
-    apply_cli_overrides,
+    apply_cli_workflow_overrides,
 )

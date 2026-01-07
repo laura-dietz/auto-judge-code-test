@@ -135,6 +135,14 @@ def run_judge(
             )
             # Verify created nuggets
             if current_nuggets is not None:
+                # Verify type matches what auto_judge declared
+                if nugget_banks_type and not isinstance(current_nuggets, nugget_banks_type):
+                    print(
+                        f"create_nuggets() returned {type(current_nuggets).__name__}, "
+                        f"but auto_judge declares nugget_banks_type={nugget_banks_type.__name__}. "
+                        f"Ensure create_nuggets() returns the declared type to avoid problems in nugget loading."
+                        , sys.stderr
+                    )
                 topic_ids = [t.request_id for t in rag_topics]
                 current_nuggets.verify(topic_ids)
                 # Save immediately for crash recovery

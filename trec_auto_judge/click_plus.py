@@ -11,7 +11,7 @@ from .workflow import (
     resolve_sweep,
     KeyValueType,
     create_cli_default_workflow,
-    apply_cli_overrides,
+    apply_cli_workflow_overrides,
 )
 from .judge_runner import run_judge
 from .cli_default_group import DefaultGroup
@@ -504,7 +504,7 @@ def auto_judge_to_click_command(auto_judge: AutoJudge, cmd_name: str):
             click.echo(f"Using CLI defaults: create_nuggets={wf.create_nuggets}, judge={wf.judge}", err=True)
 
         # Apply CLI overrides to workflow
-        apply_cli_overrides(
+        apply_cli_workflow_overrides(
             wf,
             settings_overrides,
             nugget_settings_overrides,
@@ -565,6 +565,7 @@ def auto_judge_to_click_command(auto_judge: AutoJudge, cmd_name: str):
             effective_create_nuggets = create_nuggets if create_nuggets is not None else wf.create_nuggets
             effective_do_judge = do_judge if do_judge is not None else wf.judge
 
+            # each returns a JudgeResult object to contain Leaderboard, Qrels, Nuggets for meta-evaluation
             run_judge(
                 auto_judge=auto_judge,
                 rag_responses=rag_responses,

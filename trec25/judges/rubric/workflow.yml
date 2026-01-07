@@ -1,15 +1,15 @@
 # Rubric judge creates nuggets first, then judges using them
 judge_uses_nuggets: true   
 nugget_depends_on_responses: false
-# judge: true   # implied
-# create_nuggets: true  # implied
+judge: true   # implied
+create_nuggets: true  # implied
 # force_recreate_nuggets: false  # default
 
-judge_uses_nuggets: false   
-# nugget_depends_on_responses: false #  implied
-# judge: true   # implied
-# create_nuggets: false  # implied
-# force_recreate_nuggets: false  # default
+# judge_uses_nuggets: false   
+# # nugget_depends_on_responses: false #  implied
+# # judge: true   # implied
+# # create_nuggets: false  # implied
+# # force_recreate_nuggets: false  # default
 
 
 settings:
