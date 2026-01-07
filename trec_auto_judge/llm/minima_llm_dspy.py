@@ -521,9 +521,6 @@ async def run_dspy_batch(
         backend = OpenAIMinimaLlm.from_env()
 
     lm = MinimaLlmDSPyLM(backend)
-    dspy.configure(lm=lm)
-
-    predictor = predictor_class(signature_class)
 
     # Get input field names from signature
     input_fields = _get_input_field_names(signature_class)
@@ -537,49 +534,55 @@ async def run_dspy_batch(
     http_max_attempts = backend.cfg.max_attempts
     parse_retry_limit = 3 if http_max_attempts == 0 else http_max_attempts
 
-    # Process each annotation
-    async def process_one(obj: BaseModel) -> BaseModel:
-        # Extract input kwargs from annotation object
-        kwargs = obj.model_dump(include=set(input_fields))
+    # Use dspy.context() instead of dspy.configure() to support multiple asyncio.run() calls.
+    # dspy.configure() binds to the async task that first called it, causing errors when
+    # reused across separate event loops. dspy.context() is task-local and safe for reuse.
+    with dspy.context(lm=lm):
+        predictor = predictor_class(signature_class)
 
-        last_error: Optional[Exception] = None
-        force_refresh_token: Optional[contextvars.Token[bool]] = None
+        # Process each annotation
+        async def process_one(obj: BaseModel) -> BaseModel:
+            # Extract input kwargs from annotation object
+            kwargs = obj.model_dump(include=set(input_fields))
 
-        for attempt in range(parse_retry_limit):
-            try:
-                # On retry, force refresh to bypass cached response that caused error
-                if attempt > 0:
-                    force_refresh_token = set_force_refresh(True)
+            last_error: Optional[Exception] = None
+            force_refresh_token: Optional[contextvars.Token[bool]] = None
 
-                # Run prediction
-                result = await predictor.acall(**kwargs)
+            for attempt in range(parse_retry_limit):
+                try:
+                    # On retry, force refresh to bypass cached response that caused error
+                    if attempt > 0:
+                        force_refresh_token = set_force_refresh(True)
 
-                # Update annotation with results
-                output_converter(result, obj)
+                    # Run prediction
+                    result = await predictor.acall(**kwargs)
 
-                return obj
+                    # Update annotation with results
+                    output_converter(result, obj)
 
-            except CODE_ERRORS:
-                # Code errors propagate immediately
-                raise
-            except AdapterParseError as e:
-                # Parse error - retry
-                last_error = e
-                continue
-            except Exception as e:
-                # Other errors (e.g., from output_converter) - retry
-                last_error = e
-                continue
-            finally:
-                if force_refresh_token is not None:
-                    reset_force_refresh(force_refresh_token)
-                    force_refresh_token = None
+                    return obj
 
-        # All retries exhausted
-        raise last_error  # type: ignore[misc]
+                except CODE_ERRORS:
+                    # Code errors propagate immediately
+                    raise
+                except AdapterParseError as e:
+                    # Parse error - retry
+                    last_error = e
+                    continue
+                except Exception as e:
+                    # Other errors (e.g., from output_converter) - retry
+                    last_error = e
+                    continue
+                finally:
+                    if force_refresh_token is not None:
+                        reset_force_refresh(force_refresh_token)
+                        force_refresh_token = None
 
-    # Execute batch - returns List[Union[BaseModel, MinimaLlmFailure]]
-    results = await backend.run_batched_callable(annotation_objs, process_one)
+            # All retries exhausted
+            raise last_error  # type: ignore[misc]
+
+        # Execute batch - returns List[Union[BaseModel, MinimaLlmFailure]]
+        results = await backend.run_batched_callable(annotation_objs, process_one)
 
     # Check for failures - fail fast, don't silently drop data
     failures = [r for r in results if isinstance(r, MinimaLlmFailure)]
