@@ -53,8 +53,8 @@ class TestAutoJudgeProtocoll(unittest.TestCase):
             print(result.exception)
             self.assertIsNone(result.exception)
             self.assertEqual(result.exit_code, 0)
-            # Output file gets .judgment.json suffix added by resolve_judgment_file_paths()
-            leaderboard_file = filebase.parent / f"{filebase.name}.judgment.json"
+            # Output file gets .judgment.eval suffix added by resolve_judgment_file_paths()
+            leaderboard_file = filebase.parent / f"{filebase.name}.judgment.eval"
             self.assertTrue(leaderboard_file.is_file())
             actual_leaderboard = leaderboard_file.read_text()
             self.assertIn("measure-01\t28\t1", actual_leaderboard)
