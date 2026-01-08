@@ -6,14 +6,13 @@ Prefernece-based AutoJudge that:
 3. Computes the transitive closure + Borda count to obtain ranking
 This judge does not use nuggets.
 """
-import random
+from math import gcd
 from textwrap import dedent
 from trec_auto_judge import *
 
 import dspy
 import asyncio
 import re
-import json
 from typing import *
 from pydantic import BaseModel
 from itertools import groupby
@@ -102,6 +101,32 @@ class PrefJudgeData(BaseModel):
     reasoning:Optional[str] = None
     
 
+        
+    def _swap(self, better_passage:Optional[int])-> Optional[int]:
+        '''for reversing passage 1<->2 '''
+        if better_passage is None:
+            return None
+        if better_passage == 1:
+            return 2
+        if better_passage == 2:
+            return 1
+        else:
+            return better_passage
+                
+    def flip(self):
+        return PrefJudgeData (run_id = self.run_id2
+                         , run_id2 = self.run_id
+                         , query_id = self.query_id
+                         , query_title = self.query_title
+                         , query_problem = self.query_problem
+                         , query_background = self.query_background
+                         , passage_1 = self.passage_2
+                         , passage_2 = self.passage_1
+                         , better_passage = self._swap(self.better_passage)
+                         , confidence = self.confidence
+                         , reasoning = self.reasoning
+                         )
+
 # =============================================================================
 # Leaderboard & Qrels Specs
 # =============================================================================
@@ -110,6 +135,73 @@ PREF_SPEC = LeaderboardSpec(measures=(
     MeasureSpec("BORDA_COUNT", aggregate=mean_of_floats, cast=float, default=0.0),
 ))
 
+
+
+# =============================================================================
+# Sampling Functions
+# =============================================================================
+
+def check_sampling_coprimality(
+    num_responses: int,
+    num_pivot: int,
+    num_others: int,
+) -> None:
+    """
+    Warn if sampling parameters may cause symmetric pair generation.
+
+    For non-pivot responses, the rotated list excludes self, so its length
+    is (num_responses - num_pivot - 1). If stride and this length share a
+    common factor, the sampling pattern may generate both (A,B) and (B,A).
+    """
+    non_pivot_count = num_responses - num_pivot - 1
+    if non_pivot_count <= 0:
+        return
+
+    stride = max(1, non_pivot_count // num_others)
+
+    if gcd(stride, non_pivot_count) != 1:
+        print(
+            f"Warning: stride {stride} and non-pivot count {non_pivot_count} "
+            f"are not coprime (gcd={gcd(stride, non_pivot_count)}). "
+            f"This may cause duplicate pairings."
+        )
+
+
+def select_comparison_samples(
+    responses: List[Report],
+    idx: int,
+    num_pivot: int,
+    num_others: int,
+) -> List[Report]:
+    """
+    Select responses to compare against for pairwise preference judging.
+
+    Returns a list containing:
+    - Pivot responses: always responses[0:num_pivot]
+    - Strided samples: from non-pivot responses, rotated around idx
+
+    Args:
+        responses: All responses for a topic
+        idx: Index of current response being processed
+        num_pivot: Number of pivot responses (compared against all)
+        num_others: Max number of non-pivot comparisons to sample
+    """
+    pivots = responses[0:num_pivot]
+    non_pivots = responses[num_pivot:]
+
+    if not non_pivots:
+        return list(pivots)
+
+    # Rotate non_pivots around current idx (skip self if in non_pivots)
+    if idx < num_pivot:
+        rotated = non_pivots
+    else:
+        adj_idx = idx - num_pivot
+        rotated = non_pivots[adj_idx+1:] + non_pivots[:adj_idx]
+
+    stride = max(1, len(rotated) // num_others) if rotated else 1
+
+    return list(pivots) + rotated[::stride][:num_others]
 
 
 # =============================================================================
@@ -154,9 +246,12 @@ class PrefJudge(AutoJudge):
         rag_topics: Sequence[Request],
         llm_config: MinimaLlmConfig,
         num_others: int,
+        num_pivot: int,
         **kwargs
     ) -> tuple[Leaderboard, Optional[Qrels]]:
-        
+
+        check_sampling_coprimality(len(rag_responses), num_pivot, num_others)
+
         for resp in rag_responses:
             if resp.metadata.topic_id is None:
                 print(f"Invalid reponse: {resp.metadata.run_id}")
@@ -181,24 +276,16 @@ class PrefJudge(AutoJudge):
         print(f"rag_response_by_topic: {len(rag_response_by_topic)} entries, keys: {rag_response_by_topic.keys()}")
         
         grade_data: List[PrefJudgeData] = []
-        response_nugget_map: Dict[str, List[PrefJudgeData]] = {}  # run_id:topic_id -> data list
         self.expected_topic_ids=[t.request_id for t in rag_topics]
-        
+
         for topic_id, responses in rag_response_by_topic.items():
             request = rag_topic_dict[topic_id]
             for idx, response in enumerate(responses):
-                metadata = response.metadata
-                run_id = metadata.run_id
+                run_id = response.metadata.run_id
                 text = response.get_report_text()
 
-                response_key = f"{run_id}:{topic_id}"
-                response_nugget_map[response_key] = []
-
-                # Create pref data for random other passages
-                # stride = max(1, len(responses) // num_others)      
-                rotated = responses[idx+1:] + responses[:idx]  # skip self, wrap around
-                stride = max(1, len(rotated) // num_others)
-                for response_other in responses[0:2] + rotated[::stride][:num_others]:
+                # Select comparison samples (pivots + strided non-pivots)
+                for response_other in select_comparison_samples(responses, idx, num_pivot, num_others):
                     run_id_other = response_other.metadata.run_id
                     if run_id_other != run_id:  # skip self
                         data = PrefJudgeData(
@@ -213,7 +300,6 @@ class PrefJudge(AutoJudge):
                                 query_background = request.background or "",
                         )
                         grade_data.append(data)
-                        response_nugget_map[response_key].append(data)
 
 
 
@@ -225,7 +311,7 @@ class PrefJudge(AutoJudge):
 
 
         # Run LLM grading
-        print(f"Rubric: Grading responses...")
+        print(f"PrefJudge: Grading responses...")
         if grade_data:
             grade_data = asyncio.run(run_dspy_batch(
                 PrefJudgment,
@@ -242,6 +328,10 @@ class PrefJudge(AutoJudge):
         # todo add passage_1 <-> passage_2  flipped
             
         # Update Report.evaldata
+        
+        # Include pairs also in reverse (p1 <-> p2)
+        grade_data = grade_data + [data.flip() for data in grade_data]
+        
         data_by_key =  {k: list(g) for k, g in groupby(sorted(grade_data, key=lambda data: f"{data.run_id}:{data.query_id}")
                               , key=lambda data: f"{data.run_id}:{data.query_id}")}
         
@@ -263,153 +353,6 @@ class PrefJudge(AutoJudge):
         leaderboard = b.build(expected_topic_ids=self.expected_topic_ids, on_missing = self.on_missing_evals)
         leaderboard.verify(expected_topic_ids=self.expected_topic_ids, warn=False, on_missing = self.on_missing_evals)
         return (leaderboard, None)
-
-
-# def main(rag_responses: list[dict], rag_topics: List[Request], output: Path):
-#     """
-#     A naive rag response assessor that just orders each response by its length.
-#     """
-#     sample_k = 2
-#     topic_dict = {request.request_id: request for request in rag_topics}
-
-#     def prepare_prompts()->List[PrefJudgAnnotation]:
-#         alignment_input_list = list()
-        
-        
-#         responses_per_topic = defaultdict(list)
-#         for rag_response in rag_responses:
-#             metadata = rag_response["metadata"]
-#             topic_id = metadata["narrative_id"]
-
-#             responses_per_topic[topic_id].append(rag_response)
-        
-#         for responses in responses_per_topic.values():
-
-#             metadata = rag_response["metadata"]
-#             run_id = metadata["run_id"]
-#             topic_id = metadata["narrative_id"]
-                        
-#             topic = topic_dict[topic_id]
-#             if topic is None:
-#                 raise RuntimeError("Could not identify request object for topic {topic_id}")
-            
-#             if (topic.title is None) or (topic.background is None) or  (topic.problem_statement is None):
-#                 raise RuntimeError(f"Missing fields in report request: title {topic.title}, background:{topic.background}, problem_statement: {topic.problem_statement}.")
-            
-#             passage2list = np.random.choice(np.array(responses), size=sample_k+1, replace=False)
-#             passage2list=[p for p in passage2list if p["metadata"]["run_id"] is not run_id][0:2] # do not draw this passage
-            
-            
-#             text_1 = " ".join([i["text"] for i in rag_response["answer"]])
-            
-#             for response_2 in passage2list:
-                
-#                 text_2 = " ".join([i["text"] for i in rag_response["answer"]])
-#                 prompt_objs = PrefJudgAnnotation(query_id = topic_id
-#                                                     , run_id = run_id
-#                                                     , run_id2 = response_2["metadata"]["run_id"]
-#                                                     ,passage_1 = text_1
-#                                                     ,passage_2 = text_2
-#                                                     ,metadata= metadata
-#                                                     ,title_query = topic.title
-#                                                     ,background = topic.background
-#                                                     ,problem_statement =  topic.problem_statement
-#                                                     )
-#                 alignment_input_list.append(prompt_objs)
-#                 prompt_objs_rev = PrefJudgAnnotation(query_id = topic_id
-#                                                     , run_id = response_2["metadata"]["run_id"]
-#                                                     , run_id2 = run_id
-#                                                     ,passage_1 = text_2
-#                                                     ,passage_2 = text_1
-#                                                     ,metadata= metadata
-#                                                     ,title_query = topic.title
-#                                                     ,background = topic.background
-#                                                     ,problem_statement =  topic.problem_statement
-#                                                     )
-#                 alignment_input_list.append(prompt_objs_rev)
-#         return alignment_input_list
-
-#     def topo_sort(topic:str, prompt_output:List[PrefJudgment]):
-#         is_directly_above=defaultdict(set) # lists a set of run_ids that are above the key.
-#         is_directly_below=defaultdict(set) # lists a set of run_ids that are above the key.
-        
-#         # build directed graph
-#         for prompt in prompt_output:
-#             if prompt.run_id != prompt.run_id2: # Todo we should not be adding self-references
-#                 if prompt.better_passage == 1:
-#                     is_directly_above[prompt.run_id2].add(prompt.run_id)
-#                     is_directly_below[prompt.run_id].add(prompt.run_id2)
-#                 elif prompt.better_passage == 2:
-#                     is_directly_above[prompt.run_id].add(prompt.run_id2)
-#                     is_directly_below[prompt.run_id2].add(prompt.run_id)
-
-
-#         # transitive closure
-#         is_indirectly_above = defaultdict(set)
-#         count = 100
-#         for k in list(is_directly_below.keys()):
-#             count -=1
-#             vs = is_directly_below[k]
-#             below = set(vs)
-#             if count>0: print(f"topic: {topic} key: {k} below{below}")
-            
-#             # we will walk down all nodes that are below v,
-#             # keep adding those children to the below list,
-#             # and make sure to track that k is above them all
-            
-#             while len(below)>0: # will be false if empty
-#                 v = below.pop()
-#                 if count>0: print(f"     pop {v}")
-                
-#                 is_indirectly_above[v].add(k)
-#                 # below.update(is_directly_below[v])  # endless loop
-#                 for vv in is_directly_below[v]:
-#                     if k in is_indirectly_above[vv]:
-#                         pass
-#                     else:
-#                         below.add(vv)
-#                 if count>0: print(f"     below={below}")
-
-#         # borda count
-#         borda_count = [(k, len(vs)) for k, vs in is_indirectly_above.items()]
-#         borda_count = sorted(borda_count, key=lambda t: t[1])
-#         return borda_count
-            
-
-#     # TOD: we are missing at least one run_id (probably the lowest one)
-#     def write_results(prompt_output:List[PrefJudgAnnotation]):
-#         ret = []
-#         avg_grades = defaultdict(list)
-
-#         output_by_topic = defaultdict(list)
-#         for out in prompt_output:
-#             output_by_topic[out.query_id].append(out)
-            
-#         for topic_id,res_list in output_by_topic.items():
-
-#             borda_count = topo_sort(topic=topic_id, prompt_output=res_list)
-#             num_runs = len(borda_count)
-
-#             for (run_id, num_above) in borda_count:
-#                 system_score = float(num_runs-num_above)
-#                 ret.append(f"{run_id} PREF {topic_id} {system_score}")
-#                 avg_grades[run_id].append(system_score)
-            
-#         ret.append(f"{run_id} PREF all {mean([float(g) for g in avg_grades[run_id]])}")
-
-#         output.parent.mkdir(exist_ok=True, parents=True)
-#         output.write_text("\n".join(ret))
-
-#     prompt_input = prepare_prompts()
-#     print("Debug in", "\n".join(str(p) for p in prompt_input[0:4]))
-    
-#     prompt_output =  evaluator_run(prompt=PrefJudgment, output_converter=PrefJudgment.convert_output,alignment_input_list=prompt_input)
-#     print("Debug out", "\n".join(str(p) for p in prompt_input[0:4]))
-
-#     write_results(prompt_output=prompt_output)
-
-# if __name__ == '__main__':
-#     main()
 
 
 if __name__ == '__main__':

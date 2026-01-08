@@ -18,3 +18,4 @@ settings:
 
 judge_settings:
    num_others: 8
+   num_pivot: 0
