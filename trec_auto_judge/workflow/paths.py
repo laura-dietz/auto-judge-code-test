@@ -28,14 +28,14 @@ def resolve_judgment_file_paths(filebase: Path) -> tuple[Path, Path]:
 
     Returns:
         Tuple of (leaderboard_path, qrels_path):
-        - {filebase}.judgment.json
+        - {filebase}.judgment.eval
         - {filebase}.judgment.qrels
     """
     if filebase.suffix in (".json",):
         # Already has extension, derive qrels from it
         return filebase, filebase.with_suffix(".qrels")
     return (
-        filebase.parent / f"{filebase.name}.judgment.json",
+        filebase.parent / f"{filebase.name}.judgment.eval",
         filebase.parent / f"{filebase.name}.judgment.qrels",
     )
 
