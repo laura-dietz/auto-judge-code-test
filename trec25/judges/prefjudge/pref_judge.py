@@ -22,67 +22,6 @@ from trec_auto_judge import MinimaLlmConfig, OpenAIMinimaLlm
 from trec_auto_judge.leaderboard.leaderboard import OnMissing
 
 
-
-
-# =============================================================================
-# DSPy Signatures
-# =============================================================================
-
-
-class PrefJudgment(dspy.Signature):
-    '''
-    Pairwise preference judgments.
-    Mostly following Prompt of Arabzadeh & Clarke, except asking for query instead of question.
-    Source: https://github.com/Narabzad/llm-relevance-judgement-comparison/blob/main/Pref/judge.py
-    '''
-    dedent(
-        """
-You are a highly experienced and accurate assessor for TREC.
-
-Select the passage that answers the query better. Just answer 1 or 2, without any explanation or extra verbiage.
-If both passages are similar, select the simplest and clearest.
-        """
-    )
-
-    query_title: str = dspy.InputField(desc="Query title")
-    query_background: str = dspy.InputField(desc="Background context for the query")
-    query_problem: str = dspy.InputField(desc="Problem statement to be addressed")
-
-
-    passage_1:str = dspy.InputField(des="passage 1")
-    passage_2:str = dspy.InputField(des="passage 2")
-    
-    better_passage: Literal[ "1", "2"] = dspy.OutputField(
-        desc="which is the better passage?"
-    )
-
-#     confidence : Optional[float] = dspy.OutputField(
-#         required=False,          # header may be omitted
-#         default=None,
-#         transform=_num_or_none   # runs *before* ChatAdapter hands to float()
-#     )
-#     reasoning: Optional[str] = dspy.OutputField(desc="reasoning", default=None, required=False)
-
-   
-    @classmethod
-    def convert_output(cls,prediction: dspy.Prediction, alignment: BaseModel)->None:
-        
-        def parse_1_to_2(s: str) -> int:
-            m = re.search(r'\b([1-2])\b', s)
-            if not m:
-                raise ValueError(f"No integer 1–2 found in response: {s!r}")
-            return int(m.group(1))
-
-        alignment.confidence = (prediction.confidence) or 0.0
-        alignment.reasoning = prediction.reasoning
-        alignment.better_passage = int(parse_1_to_2(prediction.better_passage))
-
-        # alignment.is_match = (alignment.answerability>=2)
-        # alignment.match_score = float(alignment.answerability)
-
-        return
-
-
 # =============================================================================
 # Data Models (combined input/output)
 # =============================================================================
@@ -126,6 +65,60 @@ class PrefJudgeData(BaseModel):
                          , confidence = self.confidence
                          , reasoning = self.reasoning
                          )
+
+
+
+# =============================================================================
+# DSPy Signatures and Output Conversion
+# =============================================================================
+
+def _parse_better(s: str) -> int:
+    """Extract passage 1-2 from string."""
+    m = re.search(r'\b([1-2])\b', s)
+    if not m:
+        return 0  # Default to 0 if no valid preference is found
+    return int(m.group(1))
+
+
+
+
+class PrefJudgment(dspy.Signature):
+    '''
+    Pairwise preference judgments.
+    Mostly following Prompt of Arabzadeh & Clarke, except asking for query instead of question.
+    Source: https://github.com/Narabzad/llm-relevance-judgement-comparison/blob/main/Pref/judge.py
+    '''
+    dedent(
+        """
+You are a highly experienced and accurate assessor for TREC.
+
+Select the passage that answers the query better. Just answer 1 or 2, without any explanation or extra verbiage.
+If both passages are similar, select the simplest and clearest.
+        """
+    )
+
+    query_title: str = dspy.InputField(desc="Query title")
+    query_background: str = dspy.InputField(desc="Background context for the query")
+    query_problem: str = dspy.InputField(desc="Problem statement to be addressed")
+
+
+    passage_1:str = dspy.InputField(des="passage 1")
+    passage_2:str = dspy.InputField(des="passage 2")
+    
+    better_passage: Literal[ "1", "2"] = dspy.OutputField(
+        desc="which is the better passage?"
+    )
+
+    @classmethod
+    def convert_prompt_output(cls, prediction: dspy.Prediction, data: PrefJudgeData) -> None:
+        '''Convert Prompt output to PrefJudgeData'''
+        data.better_passage = _parse_better(prediction.better_passage)
+        data.confidence = prediction.confidence or 0.0  if hasattr(prediction, "confidence") else 0.0
+        data.reasoning = prediction.reasoning or "" if hasattr(prediction, "reasoning") else ""
+        
+        return
+
+
 
 # =============================================================================
 # Leaderboard & Qrels Specs
@@ -202,19 +195,6 @@ def select_comparison_samples(
     stride = max(1, len(rotated) // num_others) if rotated else 1
 
     return list(pivots) + rotated[::stride][:num_others]
-
-
-# =============================================================================
-# Conversion Functions
-# =============================================================================
-
-def _parse_better(s: str) -> int:
-    """Extract passage 1-2 from string."""
-    m = re.search(r'\b([1-2])\b', s)
-    if not m:
-        return 0  # Default to 0 if no valid preference is found
-    return int(m.group(1))
-
 
 
 
@@ -303,12 +283,6 @@ class PrefJudge(AutoJudge):
 
 
 
-        # Convert output handler
-        def convert_grade_output(prediction: dspy.Prediction, data: PrefJudgeData) -> None:
-            data.better_passage = _parse_better(prediction.better_passage)
-            data.reasoning = getattr(prediction, 'reasoning', None)
-            data.confidence = getattr(prediction, 'confidence', None)
-
 
         # Run LLM grading
         print(f"PrefJudge: Grading responses...")
@@ -316,7 +290,7 @@ class PrefJudge(AutoJudge):
             grade_data = asyncio.run(run_dspy_batch(
                 PrefJudgment,
                 grade_data,
-                convert_grade_output,
+                PrefJudgment.convert_prompt_output,
                 backend=OpenAIMinimaLlm(llm_config)
             ))
         print(f"PrefJudge: Finished grading")
