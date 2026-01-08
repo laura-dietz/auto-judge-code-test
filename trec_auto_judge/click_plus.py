@@ -477,6 +477,8 @@ def auto_judge_to_click_command(auto_judge: AutoJudge, cmd_name: str):
                   default=None, help="Override nugget_depends_on_responses lifecycle flag.")
     @click.option("--nugget-judge/--no-nugget-judge", "judge_uses_nuggets",
                   default=None, help="Judge uses nuggets (REQUIRED when --workflow omitted).")
+    @click.option("--augment-report/--no-augment-report", "augment_report",
+                  default=None, help="Save modified Report.evaldata to {filebase}.responses.jsonl.")
     def run_cmd(
         workflow: Optional[Path],
         rag_responses: Iterable[Report],
@@ -498,6 +500,7 @@ def auto_judge_to_click_command(auto_judge: AutoJudge, cmd_name: str):
         judge_settings_overrides: tuple,
         nugget_depends_on_responses: Optional[bool],
         judge_uses_nuggets: Optional[bool],
+        augment_report: Optional[bool],
     ):
         """Run judge according to workflow.yml (default command)."""
         # Load workflow or create default based on CLI flags
@@ -604,6 +607,7 @@ def auto_judge_to_click_command(auto_judge: AutoJudge, cmd_name: str):
                 force_recreate_nuggets=force_recreate_nuggets or wf.force_recreate_nuggets,
                 nugget_depends_on_responses=wf.nugget_depends_on_responses,
                 judge_uses_nuggets=wf.judge_uses_nuggets,
+                augment_report=augment_report if augment_report is not None else wf.augment_report,
                 config_name=config.name,
             )
 

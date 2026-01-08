@@ -100,6 +100,9 @@ class Workflow(BaseModel):
     force_recreate_nuggets: bool = False
     """If True, recreate nuggets even if file exists. CLI can override."""
 
+    augment_report: bool = False
+    """If True, judge modifies Report.evaldata; save to {filebase}.responses.jsonl."""
+
 
 @dataclass
 class ResolvedConfiguration:

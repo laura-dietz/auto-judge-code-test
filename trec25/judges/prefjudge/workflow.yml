@@ -3,6 +3,7 @@ judge_uses_nuggets: false
 nugget_depends_on_responses: false
 judge: true   # implied
 create_nuggets: false  # implied
+augment_report: true  # judge modifies Report.evaldata, save to {filebase}.responses.jsonl
 
 settings:
   filebase: "{_name}"
@@ -23,3 +24,9 @@ variants:
     judge_settings:
       num_others: 4
       num_pivot: 3
+
+  zerotwo:
+    judge_settings:
+      num_others: 0
+      num_pivot: 2
+  

@@ -195,18 +195,22 @@ def select_comparison_samples(
         # Well actually only need to consider preceding pivots, because we consider pairs both ways in flip
         return pivots[:idx]
     else:
-        adj_idx = idx - num_pivot
-        rotated = non_pivots[adj_idx+1:] + non_pivots[:adj_idx]
+        if num_others <=0:
+            # only compare to pivots
+            return list(pivots)
+        else:
+            adj_idx = idx - num_pivot
+            rotated = non_pivots[adj_idx+1:] + non_pivots[:adj_idx]
 
-        # Stride = len/num_others to get ~num_others evenly-spaced samples
-        # max(1, ...) ensures we never skip zero elements
-        stride = max(1, len(rotated) // num_others) if rotated else 1
+            # Stride = len/num_others to get ~num_others evenly-spaced samples
+            # max(1, ...) ensures we never skip zero elements
+            stride = max(1, len(rotated) // num_others) if rotated else 1
 
-        # Phase offset ensures different responses sample different positions
-        # when stride and len(rotated) share a common factor
-        phase = idx % gcd(stride, len(rotated)) if rotated else 0
+            # Phase offset ensures different responses sample different positions
+            # when stride and len(rotated) share a common factor
+            phase = idx % gcd(stride, len(rotated)) if rotated else 0
 
-        return list(pivots) + rotated[phase::stride][:num_others]
+            return list(pivots) + rotated[phase::stride][:num_others]
 
 
 
@@ -218,6 +222,8 @@ def prepare_prompts(rag_topic_dict: Dict[str, Request], rag_response_by_topic: D
     """Create pairwise comparison prompts for all responses."""
     prompts: List[PrefJudgeData] = []
     for topic_id, responses in rag_response_by_topic.items():
+        if num_pivot: 
+            print("pivots: ",[r.metadata.run_id for r in responses[0:num_pivot]])
         request = rag_topic_dict[topic_id]
         for idx, response in enumerate(responses):
             run_id = response.metadata.run_id

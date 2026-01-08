@@ -1,3 +1,4 @@
 # Umbrela judge: no nuggets (passage-level relevance only)
 create_nuggets: false
 judge: true
+augment_report: false

@@ -6,7 +6,7 @@ from typing import Any, Dict, Iterable, List, Optional, Set, TextIO, Union, Type
 from io import StringIO
 from pathlib import Path
 import json
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 class TaskType(str, Enum):
     """Ragtime tasks"""
@@ -109,7 +109,7 @@ class Report(BaseModel):
     evaldata: Optional[Dict[str,Any]] = None
     responses:Optional[List[NeuclirReportSentence]|List[RagtimeReportSentence]|List[Rag24ReportSentence]]=None
     answer:Optional[List[NeuclirReportSentence]|List[RagtimeReportSentence]|List[Rag24ReportSentence]]=None
-    path:Optional[Path]=None
+    path:Optional[Path]=Field(default=None, exclude=True)
     references:Optional[List[str]]=None
     
     def model_post_init(self, __context__: dict | None = None) -> None:
@@ -262,12 +262,12 @@ def write_pydantic_json_list(objs: List[BaseModel], out: Union[str, Path, TextIO
         open_fn = gzip.open if str(out).endswith(".gz") else open
         with open_fn(out, mode="wt", encoding="utf-8") as f:
             for obj in objs:
-                line = json.dumps(obj.model_dump(exclude_none=True), separators=(",", ":"), indent=None)
+                line = json.dumps(obj.model_dump(mode="json", exclude_none=True), separators=(",", ":"), indent=None)
                 f.write(line + "\n")
     else:
         # Assume it's already a valid TextIO stream
         for obj in objs:
-            line = json.dumps(obj.model_dump(exclude_none=True), separators=(",", ":"), indent=None)
+            line = json.dumps(obj.model_dump(mode="json", exclude_none=True), separators=(",", ":"), indent=None)
             out.write(line + "\n")
 
 
@@ -317,7 +317,7 @@ class JsonlWriter:
     def write(self, obj: BaseModel) -> None:
         """Write ONE Pydantic object as a JSONL line and flush."""
         line: str = json.dumps(
-            obj.model_dump(exclude_none=True),
+            obj.model_dump(mode="json", exclude_none=True),
             separators=(",", ":")
         )
         self._f.write(line + "\n")

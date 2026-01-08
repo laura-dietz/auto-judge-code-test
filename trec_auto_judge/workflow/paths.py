@@ -47,6 +47,13 @@ def resolve_config_file_path(filebase: Path) -> Path:
     return filebase.parent / f"{filebase.name}.config.yml"
 
 
+def resolve_responses_file_path(filebase: Path) -> Path:
+    """Resolve augmented responses file path: {filebase}.responses.jsonl"""
+    if filebase.suffix in (".jsonl",):
+        return filebase
+    return filebase.parent / f"{filebase.name}.responses.jsonl"
+
+
 def load_nugget_banks_from_path(path: Path, nugget_banks_type: type):
     """
     Load nugget banks from file or directory.

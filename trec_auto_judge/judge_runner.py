@@ -26,6 +26,7 @@ from .workflow.paths import (
     resolve_nugget_file_path,
     resolve_judgment_file_paths,
     resolve_config_file_path,
+    resolve_responses_file_path,
     load_nugget_banks_from_path,
 )
 
@@ -56,6 +57,7 @@ def run_judge(
     force_recreate_nuggets: bool = False,
     nugget_depends_on_responses: bool = True,
     judge_uses_nuggets: bool = True,
+    augment_report: bool = False,
     # Configuration name for reproducibility tracking
     config_name: str = "default",
 ) -> JudgeResult:
@@ -78,6 +80,7 @@ def run_judge(
         force_recreate_nuggets: If True, recreate even if file exists
         nugget_depends_on_responses: If True, pass responses to create_nuggets()
         judge_uses_nuggets: If True, pass nuggets to judge()
+        augment_report: If True, save modified Report.evaldata to {filebase}.responses.jsonl
         config_name: Variant/sweep name for reproducibility tracking (default: "default")
 
     Returns:
@@ -186,6 +189,13 @@ def run_judge(
                 judge_settings=judge_settings,
             )
 
+            # Step 4: Save augmented responses if flag is set
+            if augment_report:
+                _write_augmented_responses(
+                    rag_responses=rag_responses,
+                    judge_output_path=judge_output_path,
+                )
+
     return JudgeResult(
         leaderboard=leaderboard,
         qrels=qrels,
@@ -256,3 +266,16 @@ def _write_run_config(
         yaml.safe_dump(config, f, default_flow_style=False, sort_keys=False)
 
     print(f"[judge_runner] Config saved to: {config_path}", file=sys.stderr)
+
+
+def _write_augmented_responses(
+    rag_responses: Iterable[Report],
+    judge_output_path: Path,
+) -> None:
+    """Write augmented responses (with evaldata) to {filebase}.responses.jsonl."""
+    from .report import JsonlWriter
+
+    responses_path = resolve_responses_file_path(judge_output_path)
+    with JsonlWriter(responses_path) as writer:
+        writer.write_many(rag_responses)
+    print(f"[judge_runner] Augmented responses saved to: {responses_path}", file=sys.stderr)
