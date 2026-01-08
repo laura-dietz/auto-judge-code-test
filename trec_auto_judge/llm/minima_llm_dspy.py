@@ -573,86 +573,61 @@ async def run_dspy_batch(
     # Code errors that should propagate immediately (not retry)
     CODE_ERRORS = (NameError, TypeError, AttributeError, SyntaxError, ImportError)
 
-    # max_attempts controls HTTP retries in generate().
-    # For parse-error retries here, use a reasonable default if max_attempts=0 (infinite HTTP retries).
-    # This separates concerns: generate() handles server errors, process_one() handles parse errors.
+    # Parse retry limit (separate from HTTP retries in generate())
     http_max_attempts = backend.cfg.max_attempts
     parse_retry_limit = 3 if http_max_attempts == 0 else http_max_attempts
 
-    # Create adapter and predictor outside of context - they'll be used inside process_one.
-    # We use dspy.context() inside each worker call to ensure proper adapter propagation
-    # to async worker tasks spawned by run_batched_callable.
-    adapter = TolerantChatAdapter()
-    predictor = predictor_class(signature_class)
+    # Use dspy.context() to support multiple asyncio.run() calls (unlike dspy.settings.configure)
+    with dspy.context(lm=lm, adapter=TolerantChatAdapter()):
+        predictor = predictor_class(signature_class)
 
-    async def _maybe_await(result):
-        """Await if awaitable, otherwise return value directly."""
-        if inspect.isawaitable(result):
-            return await result
-        return result
+        async def _maybe_await(result):
+            """Await if awaitable, otherwise return value directly."""
+            if inspect.isawaitable(result):
+                return await result
+            return result
 
-    async def invoke_predictor(pred, **kw):
-        """Invoke predictor with version-tolerant async/sync handling."""
-        import functools
+        async def invoke_predictor(pred, **kw):
+            """Invoke predictor with version-tolerant async/sync handling."""
+            import functools
 
-        # Try async methods first: acall, aforward
-        for method_name in ("acall", "aforward"):
-            method = getattr(pred, method_name, None)
-            if callable(method):
-                return await _maybe_await(method(**kw))
+            for method_name in ("acall", "aforward"):
+                method = getattr(pred, method_name, None)
+                if callable(method):
+                    return await _maybe_await(method(**kw))
 
-        # Sync fallback: __call__ via run_in_executor to not block event loop
-        loop = asyncio.get_running_loop()
-        return await loop.run_in_executor(None, functools.partial(pred, **kw))
+            loop = asyncio.get_running_loop()
+            return await loop.run_in_executor(None, functools.partial(pred, **kw))
 
-    # Process each annotation
-    async def process_one(obj: BaseModel) -> BaseModel:
-        # Extract input kwargs from annotation object
-        kw = obj.model_dump(include=set(input_fields))
+        async def process_one(obj: BaseModel) -> BaseModel:
+            kw = obj.model_dump(include=set(input_fields))
+            last_error: Optional[Exception] = None
 
-        last_error: Optional[Exception] = None
+            for attempt in range(parse_retry_limit):
+                force_refresh_token: Optional[contextvars.Token[bool]] = None
+                try:
+                    if attempt > 0:
+                        force_refresh_token = set_force_refresh(True)
 
-        for attempt in range(parse_retry_limit):
-            # Per-attempt force_refresh token (scoped to this attempt)
-            force_refresh_token: Optional[contextvars.Token[bool]] = None
-            try:
-                # On retry, force refresh to bypass cached response that caused error
-                if attempt > 0:
-                    force_refresh_token = set_force_refresh(True)
-
-                # Use dspy.context() inside each worker to ensure adapter propagates
-                # to async tasks spawned by run_batched_callable. Using dspy.context()
-                # (not dspy.settings.configure) supports multiple asyncio.run() calls.
-                with dspy.context(lm=lm, adapter=adapter):
-                    # Run prediction
                     result = await invoke_predictor(predictor, **kw)
+                    output_converter(result, obj)
+                    return obj
 
-                # Update annotation with results
-                output_converter(result, obj)
+                except CODE_ERRORS:
+                    raise
+                except AdapterParseError as e:
+                    last_error = e
+                    continue
+                except Exception as e:
+                    last_error = e
+                    continue
+                finally:
+                    if force_refresh_token is not None:
+                        reset_force_refresh(force_refresh_token)
 
-                return obj
+            raise last_error  # type: ignore[misc]
 
-            except CODE_ERRORS:
-                # Code errors propagate immediately
-                raise
-            except AdapterParseError as e:
-                # Parse error - retry
-                last_error = e
-                continue
-            except Exception as e:
-                # Other errors (e.g., from output_converter) - retry
-                last_error = e
-                continue
-            finally:
-                # Always reset force_refresh token if set
-                if force_refresh_token is not None:
-                    reset_force_refresh(force_refresh_token)
-
-        # All retries exhausted
-        raise last_error  # type: ignore[misc]
-
-    # Execute batch - returns List[Union[BaseModel, MinimaLlmFailure]]
-    results = await backend.run_batched_callable(annotation_objs, process_one)
+        results = await backend.run_batched_callable(annotation_objs, process_one)
 
     # Check for failures - fail fast, don't silently drop data
     failures = [r for r in results if isinstance(r, MinimaLlmFailure)]
