@@ -3,19 +3,23 @@ judge_uses_nuggets: false
 nugget_depends_on_responses: false
 judge: true   # implied
 create_nuggets: false  # implied
-# force_recreate_nuggets: false  # default
-
-# judge_uses_nuggets: false   
-# # nugget_depends_on_responses: false #  implied
-# # judge: true   # implied
-# # create_nuggets: false  # implied
-# # force_recreate_nuggets: false  # default
-
 
 settings:
   filebase: "{_name}"
+  on_missing_evals: "fix_aggregate"
 
 
 judge_settings:
    num_others: 8
    num_pivot: 0
+
+variants:
+  eightzero:
+    judge_settings:
+      num_others: 8
+      num_pivot: 0
+
+  fourthree:
+    judge_settings:
+      num_others: 4
+      num_pivot: 3

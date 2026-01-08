@@ -7,6 +7,7 @@ Prefernece-based AutoJudge that:
 This judge does not use nuggets.
 """
 from math import gcd
+import sys
 from textwrap import dedent
 from trec_auto_judge import *
 
@@ -125,39 +126,42 @@ If both passages are similar, select the simplest and clearest.
 # =============================================================================
 
 PREF_SPEC = LeaderboardSpec(measures=(
-    MeasureSpec("BORDA_COUNT", aggregate=mean_of_floats, cast=float, default=0.0),
+    MeasureSpec("BORDA_COUNT", aggregate=mean_of_ints, cast=float, default=0.0),
+    MeasureSpec("WIN_FRAC", aggregate=mean_of_floats, cast=float, default=0.0),
 ))
 
 
 
 # =============================================================================
-# Sampling Functions
+# Pair-formation
 # =============================================================================
 
-def check_sampling_coprimality(
-    num_responses: int,
-    num_pivot: int,
-    num_others: int,
-) -> None:
-    """
-    Warn if sampling parameters may cause symmetric pair generation.
+# def check_sampling_coprimality(
+#     num_responses: int,
+#     num_pivot: int,
+#     num_others: int,
+# ) -> None:
+#     """
+#     Warn if sampling parameters may cause symmetric pair generation.
 
-    For non-pivot responses, the rotated list excludes self, so its length
-    is (num_responses - num_pivot - 1). If stride and this length share a
-    common factor, the sampling pattern may generate both (A,B) and (B,A).
-    """
-    non_pivot_count = num_responses - num_pivot - 1
-    if non_pivot_count <= 0:
-        return
+#     For non-pivot responses, the rotated list excludes self, so its length
+#     is (num_responses - num_pivot - 1). If stride and this length share a
+#     common factor, the sampling pattern may generate both (A,B) and (B,A).
+#     """
+#     non_pivot_count = num_responses - num_pivot - 1
+#     if non_pivot_count <= 0:
+#         return
 
-    stride = max(1, non_pivot_count // num_others)
+#     stride = max(1, non_pivot_count // num_others)
 
-    if gcd(stride, non_pivot_count) != 1:
-        print(
-            f"Warning: stride {stride} and non-pivot count {non_pivot_count} "
-            f"are not coprime (gcd={gcd(stride, non_pivot_count)}). "
-            f"This may cause duplicate pairings."
-        )
+#     gcd_ = gcd(stride, non_pivot_count) 
+#     if True or gcd_ != 1 and gcd_ != stride:
+#         print(
+#             f"Warning: stride {stride} and non-pivot count {non_pivot_count} "
+#             f"are not coprime (gcd={gcd(stride, non_pivot_count)}). "
+#             f"This may cause non-random pairings."
+#             , sys.stderr
+#         )
 
 
 def select_comparison_samples(
@@ -185,16 +189,24 @@ def select_comparison_samples(
     if not non_pivots:
         return list(pivots)
 
-    # Rotate non_pivots around current idx (skip self if in non_pivots)
     if idx < num_pivot:
-        rotated = non_pivots
+        # this is a pivot, it will be automatically selected for all other.
+        # We only need to return other pivots.
+        # Well actually only need to consider preceding pivots, because we consider pairs both ways in flip
+        return pivots[:idx]
     else:
         adj_idx = idx - num_pivot
         rotated = non_pivots[adj_idx+1:] + non_pivots[:adj_idx]
 
-    stride = max(1, len(rotated) // num_others) if rotated else 1
+        # Stride = len/num_others to get ~num_others evenly-spaced samples
+        # max(1, ...) ensures we never skip zero elements
+        stride = max(1, len(rotated) // num_others) if rotated else 1
 
-    return list(pivots) + rotated[::stride][:num_others]
+        # Phase offset ensures different responses sample different positions
+        # when stride and len(rotated) share a common factor
+        phase = idx % gcd(stride, len(rotated)) if rotated else 0
+
+        return list(pivots) + rotated[phase::stride][:num_others]
 
 
 
@@ -202,7 +214,59 @@ def select_comparison_samples(
 # PrefJudge Implementation
 # =============================================================================
 
+def prepare_prompts(rag_topic_dict: Dict[str, Request], rag_response_by_topic: Dict[str, List[Report]], num_pivot:int, num_others:int ) -> List[PrefJudgeData]:
+    """Create pairwise comparison prompts for all responses."""
+    prompts: List[PrefJudgeData] = []
+    for topic_id, responses in rag_response_by_topic.items():
+        request = rag_topic_dict[topic_id]
+        for idx, response in enumerate(responses):
+            run_id = response.metadata.run_id
+            text = response.get_report_text()
 
+            # Select comparison samples (pivots + strided non-pivots)
+            for response_other in select_comparison_samples(responses, idx, num_pivot, num_others):
+                run_id_other = response_other.metadata.run_id
+                if run_id_other != run_id:  # skip self
+                    prompts.append(PrefJudgeData(
+                        run_id=run_id,
+                        query_id=topic_id,
+                        passage_1=text,
+                        run_id2=run_id_other,
+                        passage_2=response_other.get_report_text(),
+                        query_title=request.title or "",
+                        query_problem=request.problem_statement or "",
+                        query_background=request.background or "",
+                    ))
+    return prompts
+
+def read_results(rag_response_by_topic:Dict[str, List[Report]], grade_data:List[PrefJudgeData])-> LeaderboardBuilder:
+    b = LeaderboardBuilder(PREF_SPEC)
+    data_by_key =  {k: list(g) for k, g in groupby(sorted(grade_data, key=lambda data: f"{data.run_id}:{data.query_id}")
+                        , key=lambda data: f"{data.run_id}:{data.query_id}")}
+    
+    for topic_id, responses in rag_response_by_topic.items():
+        for response in responses:
+            response_key = f"{response.metadata.run_id}:{response.metadata.topic_id}"
+            if response_key in data_by_key:
+                pref_data_list  = data_by_key[response_key]
+                borda_score = sum(1 if data.better_passage ==1 else -1 for data in pref_data_list) # #wins - #losses
+                win_frac = float(borda_score) / float(len(pref_data_list))
+                
+                b.add(
+                    run_id=response.metadata.run_id,
+                    topic_id=topic_id,
+                    values={
+                        "BORDA_COUNT": borda_score
+                        , "WIN_FRAC": win_frac
+                    }
+                )
+                
+                response.evaldata = {"BORDA_COUNT": borda_score
+                                    ,"WIN_FRAC": win_frac 
+                                    ,"better_than": [data.run_id2  for data in pref_data_list if data.better_passage ==1] 
+                                    ,"worse_than": [data.run_id2  for data in pref_data_list if data.better_passage ==2] 
+                                    }
+    return b
 class PrefJudge(AutoJudge):
     """
     Preference-based judge that:
@@ -214,8 +278,8 @@ class PrefJudge(AutoJudge):
     nugget_banks_type: Type[NuggetBanksProtocol] = NuggetBanks  # Does not matter
     
     def __init__(self):
-        self.expected_topic_ids:Sequence[str] = []
-        self.on_missing_evals: OnMissing = "fix_aggregate"
+        # self.on_missing_evals: OnMissing = "fix_aggregate"
+        pass
 
     def create_nuggets(self, **args) -> Optional[NuggetBanks]:
         return None   # We are not using nuggets
@@ -227,23 +291,18 @@ class PrefJudge(AutoJudge):
         llm_config: MinimaLlmConfig,
         num_others: int,
         num_pivot: int,
+        on_missing_evals: str,
         **kwargs
     ) -> tuple[Leaderboard, Optional[Qrels]]:
-
-        check_sampling_coprimality(len(rag_responses), num_pivot, num_others)
+        num_runs = len({r.metadata.run_id for r in rag_responses})
+        expected_topic_ids = [t.request_id for t in rag_topics]
 
         for resp in rag_responses:
             if resp.metadata.topic_id is None:
                 print(f"Invalid reponse: {resp.metadata.run_id}")
         
-        rag_topic_dict:Dict[str,Request] = {r.request_id:r  for r in rag_topics}
-        # first group rag_responses by topic.
-        # rag_response_by_topic:Dict[str,List[Report]] = {topic: responses 
-        #                                                     for topic, responses 
-        #                                                     in  groupby(sorted(rag_responses, key=lambda r: r.metadata.topic_id)
-        #                                                                 , key=lambda r: r.metadata.topic_id)
-        #                                                 }
-
+        # Hash topics
+        rag_topic_dict: Dict[str, Request] = {r.request_id: r for r in rag_topics}
         rag_response_by_topic: Dict[str, List[Report]] = {
             topic: list(responses)
             for topic, responses in groupby(
@@ -251,38 +310,13 @@ class PrefJudge(AutoJudge):
                 key=lambda r: r.metadata.topic_id
             )
         }
-        
-        
+
         print(f"rag_response_by_topic: {len(rag_response_by_topic)} entries, keys: {rag_response_by_topic.keys()}")
-        
-        grade_data: List[PrefJudgeData] = []
-        self.expected_topic_ids=[t.request_id for t in rag_topics]
 
-        for topic_id, responses in rag_response_by_topic.items():
-            request = rag_topic_dict[topic_id]
-            for idx, response in enumerate(responses):
-                run_id = response.metadata.run_id
-                text = response.get_report_text()
-
-                # Select comparison samples (pivots + strided non-pivots)
-                for response_other in select_comparison_samples(responses, idx, num_pivot, num_others):
-                    run_id_other = response_other.metadata.run_id
-                    if run_id_other != run_id:  # skip self
-                        data = PrefJudgeData(
-                                run_id=run_id,
-                                query_id=topic_id,
-                                passage_1=text,
-                                run_id2=run_id_other,
-                                passage_2=response_other.get_report_text(),
-                                #
-                                query_title = request.title or "",
-                                query_problem = request.problem_statement or "",
-                                query_background = request.background or "",
-                        )
-                        grade_data.append(data)
-
-
-
+        grade_data = prepare_prompts(rag_topic_dict=rag_topic_dict
+                                     , rag_response_by_topic=rag_response_by_topic
+                                     , num_pivot=num_pivot
+                                     , num_others=num_others)
 
         # Run LLM grading
         print(f"PrefJudge: Grading responses...")
@@ -295,37 +329,15 @@ class PrefJudge(AutoJudge):
             ))
         print(f"PrefJudge: Finished grading")
 
-
-
-        b = LeaderboardBuilder(PREF_SPEC)
-
-        # todo add passage_1 <-> passage_2  flipped
-            
-        # Update Report.evaldata
-        
         # Include pairs also in reverse (p1 <-> p2)
         grade_data = grade_data + [data.flip() for data in grade_data]
         
-        data_by_key =  {k: list(g) for k, g in groupby(sorted(grade_data, key=lambda data: f"{data.run_id}:{data.query_id}")
-                              , key=lambda data: f"{data.run_id}:{data.query_id}")}
+        # this changed reports
+        b = read_results(rag_response_by_topic=rag_response_by_topic
+                                        , grade_data=grade_data)
         
-        
-        for topic_id, responses in rag_response_by_topic.items():
-            for response in responses:
-                response_key = f"{response.metadata.run_id}:{response.metadata.topic_id}"
-                if response_key in data_by_key:
-                    pref_data_list  = data_by_key[response_key]
-                    borda_score = sum(1 if data.better_passage ==1 else -1 for data in pref_data_list) # wins - losses
-                    
-                    b.add(
-                        run_id=response.metadata.run_id,
-                        topic_id=topic_id,
-                        values={
-                            "BORDA_COUNT": borda_score
-                        }
-                    )
-        leaderboard = b.build(expected_topic_ids=self.expected_topic_ids, on_missing = self.on_missing_evals)
-        leaderboard.verify(expected_topic_ids=self.expected_topic_ids, warn=False, on_missing = self.on_missing_evals)
+        leaderboard = b.build(expected_topic_ids=expected_topic_ids, on_missing = on_missing_evals)
+        leaderboard.verify(expected_topic_ids=expected_topic_ids, warn=False, on_missing = on_missing_evals)
         return (leaderboard, None)
 
 

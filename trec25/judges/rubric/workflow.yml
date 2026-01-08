@@ -3,6 +3,7 @@ judge_uses_nuggets: true
 nugget_depends_on_responses: false
 judge: true   # implied
 create_nuggets: true  # implied
+# augment_report: true
 # force_recreate_nuggets: false  # default
 
 # judge_uses_nuggets: false   
