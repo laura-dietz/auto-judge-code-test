@@ -9,8 +9,13 @@ import contextvars
 import inspect
 import re
 
-import dspy
-from dspy.adapters.chat_adapter import ChatAdapter
+try:
+    import dspy
+    from dspy.adapters.chat_adapter import ChatAdapter
+except ImportError as e:
+    raise ImportError(
+        "This module requires DSPy. Install with: pip install trec_auto_judge[dspy]"
+    ) from e
 
 def _import_adapter_parse_error():
     """Locate AdapterParseError across DSPy versions.
@@ -110,10 +115,10 @@ class TolerantChatAdapter(ChatAdapter):
             if txt:
                 current_lines.append(txt)
 
-        for raw_line in completion.splitlines():
-            line = raw_line.strip()
-            if not line:
-                continue
+            for raw_line in completion.splitlines():
+                line = raw_line.strip()
+                if not line:
+                    continue
 
             last_end = 0
             for m in self._HEADER_RE.finditer(line):
