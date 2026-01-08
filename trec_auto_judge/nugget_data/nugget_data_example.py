@@ -1,4 +1,4 @@
-from argue_eval.validation.nugget_data import (
+from .nugget_data import (
     Answer,
     NuggetBank,
     NuggetQuestion,
