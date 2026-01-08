@@ -292,6 +292,25 @@ force_recreate_nuggets: false       # Recreate even if file exists (default: fal
 | `nugget_depends_on_responses` | `true` | If false, `create_nuggets()` receives `rag_responses=None` |
 | `judge_uses_nuggets` | `true` | If false, `judge()` receives `nugget_banks=None` |
 | `force_recreate_nuggets` | `false` | If true, recreate nuggets even if output file exists |
+| `augment_report` | `false` | If true, save modified `Report.evaldata` to `{filebase}.responses.jsonl` |
+
+### Augmented Responses
+
+Some judges annotate `Report.evaldata` during judging (e.g., storing per-response scores, explanations, or intermediate results). Set `augment_report: true` to save these annotations:
+
+```yaml
+create_nuggets: false
+judge: true
+augment_report: true  # Save Report.evaldata to {filebase}.responses.jsonl
+```
+
+The judge modifies `Report.evaldata` in-place during `judge()`, then the framework writes all responses to `{filebase}.responses.jsonl`.
+
+CLI flag overrides workflow setting:
+```bash
+./judge.py run --workflow workflow.yml --augment-report ...
+./judge.py run --workflow workflow.yml --no-augment-report ...
+```
 
 ### Auto-Load Behavior
 
@@ -362,12 +381,13 @@ model_preferences:
 
 Given a `filebase` setting (e.g., `filebase: "rubric"`), the framework generates:
 
-| Output | Filename |
-|--------|----------|
-| Nugget banks | `{filebase}.nuggets.jsonl` |
-| Leaderboard | `{filebase}.judgment.json` |
-| Qrels | `{filebase}.judgment.qrels` |
-| Run config | `{filebase}.config.yml` |
+| Output | Filename | Condition |
+|--------|----------|-----------|
+| Nugget banks | `{filebase}.nuggets.jsonl` | `create_nuggets: true` |
+| Leaderboard | `{filebase}.judgment.json` | `judge: true` |
+| Qrels | `{filebase}.judgment.qrels` | `judge: true` |
+| Run config | `{filebase}.config.yml` | `judge: true` |
+| Augmented responses | `{filebase}.responses.jsonl` | `augment_report: true` |
 
 Example with `filebase: "rubric"`:
 ```
