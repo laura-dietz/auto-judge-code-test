@@ -115,10 +115,10 @@ class TolerantChatAdapter(ChatAdapter):
             if txt:
                 current_lines.append(txt)
 
-            for raw_line in completion.splitlines():
-                line = raw_line.strip()
-                if not line:
-                    continue
+        for raw_line in completion.splitlines():
+            line = raw_line.strip()
+            if not line:
+                continue
 
             last_end = 0
             for m in self._HEADER_RE.finditer(line):
@@ -579,76 +579,80 @@ async def run_dspy_batch(
     http_max_attempts = backend.cfg.max_attempts
     parse_retry_limit = 3 if http_max_attempts == 0 else http_max_attempts
 
-    # Use dspy.context() instead of dspy.configure() to support multiple asyncio.run() calls.
-    # dspy.configure() binds to the async task that first called it, causing errors when
-    # reused across separate event loops. dspy.context() is task-local and safe for reuse.
-    with dspy.context(lm=lm):
-        predictor = predictor_class(signature_class)
+    # Create adapter and predictor outside of context - they'll be used inside process_one.
+    # We use dspy.context() inside each worker call to ensure proper adapter propagation
+    # to async worker tasks spawned by run_batched_callable.
+    adapter = TolerantChatAdapter()
+    predictor = predictor_class(signature_class)
 
-        async def _maybe_await(result):
-            """Await if awaitable, otherwise return value directly."""
-            if inspect.isawaitable(result):
-                return await result
-            return result
+    async def _maybe_await(result):
+        """Await if awaitable, otherwise return value directly."""
+        if inspect.isawaitable(result):
+            return await result
+        return result
 
-        async def invoke_predictor(pred, **kw):
-            """Invoke predictor with version-tolerant async/sync handling."""
-            import functools
+    async def invoke_predictor(pred, **kw):
+        """Invoke predictor with version-tolerant async/sync handling."""
+        import functools
 
-            # Try async methods first: acall, aforward
-            for method_name in ("acall", "aforward"):
-                method = getattr(pred, method_name, None)
-                if callable(method):
-                    return await _maybe_await(method(**kw))
+        # Try async methods first: acall, aforward
+        for method_name in ("acall", "aforward"):
+            method = getattr(pred, method_name, None)
+            if callable(method):
+                return await _maybe_await(method(**kw))
 
-            # Sync fallback: __call__ via run_in_executor to not block event loop
-            loop = asyncio.get_running_loop()
-            return await loop.run_in_executor(None, functools.partial(pred, **kw))
+        # Sync fallback: __call__ via run_in_executor to not block event loop
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(None, functools.partial(pred, **kw))
 
-        # Process each annotation
-        async def process_one(obj: BaseModel) -> BaseModel:
-            # Extract input kwargs from annotation object
-            kw = obj.model_dump(include=set(input_fields))
+    # Process each annotation
+    async def process_one(obj: BaseModel) -> BaseModel:
+        # Extract input kwargs from annotation object
+        kw = obj.model_dump(include=set(input_fields))
 
-            last_error: Optional[Exception] = None
+        last_error: Optional[Exception] = None
 
-            for attempt in range(parse_retry_limit):
-                # Per-attempt force_refresh token (scoped to this attempt)
-                force_refresh_token: Optional[contextvars.Token[bool]] = None
-                try:
-                    # On retry, force refresh to bypass cached response that caused error
-                    if attempt > 0:
-                        force_refresh_token = set_force_refresh(True)
+        for attempt in range(parse_retry_limit):
+            # Per-attempt force_refresh token (scoped to this attempt)
+            force_refresh_token: Optional[contextvars.Token[bool]] = None
+            try:
+                # On retry, force refresh to bypass cached response that caused error
+                if attempt > 0:
+                    force_refresh_token = set_force_refresh(True)
 
+                # Use dspy.context() inside each worker to ensure adapter propagates
+                # to async tasks spawned by run_batched_callable. Using dspy.context()
+                # (not dspy.settings.configure) supports multiple asyncio.run() calls.
+                with dspy.context(lm=lm, adapter=adapter):
                     # Run prediction
                     result = await invoke_predictor(predictor, **kw)
 
-                    # Update annotation with results
-                    output_converter(result, obj)
+                # Update annotation with results
+                output_converter(result, obj)
 
-                    return obj
+                return obj
 
-                except CODE_ERRORS:
-                    # Code errors propagate immediately
-                    raise
-                except AdapterParseError as e:
-                    # Parse error - retry
-                    last_error = e
-                    continue
-                except Exception as e:
-                    # Other errors (e.g., from output_converter) - retry
-                    last_error = e
-                    continue
-                finally:
-                    # Always reset force_refresh token if set
-                    if force_refresh_token is not None:
-                        reset_force_refresh(force_refresh_token)
+            except CODE_ERRORS:
+                # Code errors propagate immediately
+                raise
+            except AdapterParseError as e:
+                # Parse error - retry
+                last_error = e
+                continue
+            except Exception as e:
+                # Other errors (e.g., from output_converter) - retry
+                last_error = e
+                continue
+            finally:
+                # Always reset force_refresh token if set
+                if force_refresh_token is not None:
+                    reset_force_refresh(force_refresh_token)
 
-            # All retries exhausted
-            raise last_error  # type: ignore[misc]
+        # All retries exhausted
+        raise last_error  # type: ignore[misc]
 
-        # Execute batch - returns List[Union[BaseModel, MinimaLlmFailure]]
-        results = await backend.run_batched_callable(annotation_objs, process_one)
+    # Execute batch - returns List[Union[BaseModel, MinimaLlmFailure]]
+    results = await backend.run_batched_callable(annotation_objs, process_one)
 
     # Check for failures - fail fast, don't silently drop data
     failures = [r for r in results if isinstance(r, MinimaLlmFailure)]

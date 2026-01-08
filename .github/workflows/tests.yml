@@ -22,7 +22,7 @@ jobs:
       - name: Install treg-auto-judge from the repo
         working-directory: ${{github.workspace}}
         run: |
-          pip3 install .[test]
+          pip3 install ".[test,dspy]"
           pip3 install --no-deps ir_datasets
       - name: Run unit tests
         working-directory: ${{github.workspace}}/
