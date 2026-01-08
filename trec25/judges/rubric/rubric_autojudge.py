@@ -104,6 +104,7 @@ class NuggetGradeData(BaseModel):
     # Output fields (populated by LLM)
     grade: int = 0
     reasoning: Optional[str] = None
+    confidence: Optional[float] = None
 
 
 # =============================================================================
@@ -153,10 +154,6 @@ class RubricJudge(AutoJudge):
     nugget_banks_type: Type[NuggetBanksProtocol] = NuggetBanks
     
     def __init__(self):
-        """
-        Args:
-            grade_threshold: Minimum grade to consider a nugget "covered" (default: 3)
-        """
         self.expected_topic_ids:Sequence[str] = []
         self.on_missing_evals: OnMissing = "fix_aggregate"
         
@@ -241,6 +238,10 @@ class RubricJudge(AutoJudge):
 
         return NuggetBanks.from_banks_list(banks)
 
+
+    
+    
+    
     def judge(
         self,
         rag_responses: Sequence[Report],
@@ -271,7 +272,7 @@ class RubricJudge(AutoJudge):
         # Prepare grading data (one per response-nugget pair)
         grade_data: List[NuggetGradeData] = []
         response_nugget_map: Dict[str, List[NuggetGradeData]] = {}  # run_id:topic_id -> data list
-        self.expected_topic_ids=[t.request_id for t in rag_topics]
+        self.expected_topic_ids=[t.request_id for t in rag_topics]  # Todo not necessary to be a member variable, unless passed in during construction
         
         for response in rag_responses:
             metadata = response.metadata
@@ -304,6 +305,8 @@ class RubricJudge(AutoJudge):
         def convert_grade_output(prediction: dspy.Prediction, data: NuggetGradeData) -> None:
             data.grade = _parse_grade(prediction.grade)
             data.reasoning = getattr(prediction, 'reasoning', None)
+            data.confidence = getattr(prediction, 'confidence', None)
+
 
         # Run LLM grading
         print(f"Rubric: Grading responses...")

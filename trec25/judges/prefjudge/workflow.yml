@@ -1,0 +1,20 @@
+# Preferecnce judge does not use nuggets
+judge_uses_nuggets: false
+nugget_depends_on_responses: false
+judge: true   # implied
+create_nuggets: false  # implied
+# force_recreate_nuggets: false  # default
+
+# judge_uses_nuggets: false   
+# # nugget_depends_on_responses: false #  implied
+# # judge: true   # implied
+# # create_nuggets: false  # implied
+# # force_recreate_nuggets: false  # default
+
+
+settings:
+  filebase: "{_name}"
+
+
+judge_settings:
+   num_others: 8
