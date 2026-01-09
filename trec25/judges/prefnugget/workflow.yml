@@ -1,0 +1,16 @@
+# PrefNuggetJudge: Extract differentiating nuggets from preference comparisons
+# Requires responses with PrefJudge evaldata (run PrefJudge with --augment-report first)
+
+judge_uses_nuggets: false
+nugget_depends_on_responses: true  # Need evaldata from PrefJudge
+judge: false                       # No leaderboard output
+create_nuggets: true               # Primary purpose: create nuggets
+augment_report: false
+
+settings:
+  filebase: "{_name}"
+  num_others: 8
+  num_pivot: 0
+
+nugget_settings:
+  max_questions_per_pair: 5
