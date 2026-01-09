@@ -5,22 +5,15 @@ Provides:
 - NuggetGradeData: Data model for nugget grading
 - GradeNuggetAnswer: DSPy signature for grading passages against questions
 - Grade aggregation and coverage computation
-- DSPy batch runner wrapper
 """
 
-import asyncio
 import re
-from typing import Any, Callable, Dict, List, Literal, Optional, Sequence, Type
+from typing import Any, Dict, List, Literal, Optional, Sequence
 
 import dspy
 from pydantic import BaseModel
 
-from trec_auto_judge import (
-    MinimaLlmConfig,
-    OpenAIMinimaLlm,
-    Report,
-)
-from trec_auto_judge.llm.minima_llm_dspy import run_dspy_batch
+from trec_auto_judge import Report
 from trec_auto_judge.nugget_data import NuggetBanks, NuggetQuestion
 
 
@@ -232,42 +225,3 @@ def compute_nugget_aggregates(
             )
 
     return aggregates
-
-
-# =============================================================================
-# DSPy Batch Runner
-# =============================================================================
-
-
-def run_nugget_grading_batch(
-    grade_data: List[NuggetGradeData],
-    llm_config: MinimaLlmConfig,
-    signature: Type[dspy.Signature] = GradeNuggetAnswer,
-    converter: Callable[[dspy.Prediction, NuggetGradeData], None] = None,
-) -> List[NuggetGradeData]:
-    """
-    Run DSPy batch for nugget grading.
-
-    Args:
-        grade_data: List of nugget-response pairs to grade
-        llm_config: LLM configuration
-        signature: DSPy signature class (default: GradeNuggetAnswer)
-        converter: Output converter function (default: signature.convert_prompt_output)
-
-    Returns:
-        Updated grade_data with grades filled in
-    """
-    if not grade_data:
-        return grade_data
-
-    if converter is None:
-        converter = signature.convert_prompt_output
-
-    return asyncio.run(
-        run_dspy_batch(
-            signature,
-            grade_data,
-            converter,
-            backend=OpenAIMinimaLlm(llm_config),
-        )
-    )

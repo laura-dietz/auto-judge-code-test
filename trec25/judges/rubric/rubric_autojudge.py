@@ -12,23 +12,19 @@ from trec_auto_judge.nugget_data import (
 )
 
 import dspy
-import asyncio
 import json
 import re
 from typing import *
 from pydantic import BaseModel
 
-from trec_auto_judge.llm.minima_llm_dspy import run_dspy_batch
-from trec_auto_judge import MinimaLlmConfig, OpenAIMinimaLlm
+from trec_auto_judge import MinimaLlmConfig
 from trec_auto_judge.leaderboard.leaderboard import OnMissing
 
-# Import shared rubric utilities
+# Import shared utilities
+from trec_auto_judge.llm.minima_llm_dspy import run_dspy_batch_generic
 from trec25.judges.shared.rubric_common import (
     NuggetGradeData,
     GradeNuggetAnswer,
-    prepare_nugget_grade_data,
-    run_nugget_grading_batch,
-    compute_nugget_aggregates,
 )
 
 
@@ -296,13 +292,12 @@ class RubricJudge(AutoJudge):
         else:
             raise RuntimeError(f"Prompt not defined: {prompt}")    
         
-        gen_data = asyncio.run(run_dspy_batch(
-            prompt_sig,
+        gen_data = run_dspy_batch_generic(
             gen_data,
+            prompt_sig,
             convert_gen_output,
-            backend=OpenAIMinimaLlm(llm_config)
-            
-        ))
+            llm_config,
+        )
         print(f"Rubric: Finished gnerating questions")
 
         # Build NuggetBanks from generated questions
@@ -408,12 +403,12 @@ class RubricJudge(AutoJudge):
         # Run LLM grading
         print(f"Rubric: Grading responses...")
         if grade_data:
-            grade_data = asyncio.run(run_dspy_batch(
-                GradeNuggetAnswer,
+            grade_data = run_dspy_batch_generic(
                 grade_data,
+                GradeNuggetAnswer,
                 convert_grade_output,
-                backend=OpenAIMinimaLlm(llm_config)
-            ))
+                llm_config,
+            )
         print(f"Rubric: Finished grading")
 
 

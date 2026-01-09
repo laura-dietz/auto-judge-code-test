@@ -24,8 +24,6 @@ from trec_auto_judge import (
     OpenAIMinimaLlm,
     Report,
     Request,
-    mean_of_floats,
-    mean_of_ints,
 )
 from trec_auto_judge.llm.minima_llm_dspy import run_dspy_batch
 

@@ -7,7 +7,6 @@ objects explaining WHY the better response won.
 
 This judge is primarily a nugget creator - judge() returns (None, None).
 """
-import asyncio
 import json
 from itertools import groupby
 from typing import Any, Dict, List, Optional, Sequence, Set, Type
@@ -15,26 +14,24 @@ from typing import Any, Dict, List, Optional, Sequence, Set, Type
 import dspy
 from pydantic import BaseModel
 
-from trec_auto_judge.llm.minima_llm_dspy import run_dspy_batch
-from trec_auto_judge import MinimaLlmConfig, OpenAIMinimaLlm
+from trec_auto_judge import MinimaLlmConfig
 
 from trec_auto_judge import *
 from trec_auto_judge.nugget_data import (
     NuggetBank, NuggetBanks, NuggetQuestion
 )
 
-# Import shared preference utilities for running pairwise comparisons
+# Import shared utilities
+from trec_auto_judge.llm.minima_llm_dspy import run_dspy_batch_generic
 from trec25.judges.shared.pref_common import (
     compute_pref_aggregates,
     prepare_prompts,
     run_pref_judgment_batch,
 )
-
-# Import shared rubric utilities for nugget grading
 from trec25.judges.shared.rubric_common import (
     NuggetGradeData,
+    GradeNuggetAnswer,
     prepare_nugget_grade_data,
-    run_nugget_grading_batch,
     compute_nugget_aggregates,
 )
 
@@ -256,13 +253,11 @@ class PrefNuggetJudge(AutoJudge):
             data.differentiating_questions = questions[:max_questions_per_pair]
 
         # Run LLM extraction
-        extraction_data = asyncio.run(
-            run_dspy_batch(
-                ExtractDifferentiatingNuggets,
-                extraction_data,
-                convert_output,
-                backend=OpenAIMinimaLlm(llm_config),
-            )
+        extraction_data = run_dspy_batch_generic(
+            extraction_data,
+            ExtractDifferentiatingNuggets,
+            convert_output,
+            llm_config,
         )
         print("PrefNuggetJudge: Finished extracting nuggets")
 
@@ -349,7 +344,12 @@ class PrefNuggetJudge(AutoJudge):
 
         # Run LLM grading using shared utility
         print("PrefNuggetJudge: Grading responses...")
-        grade_data = run_nugget_grading_batch(grade_data, llm_config)
+        grade_data = run_dspy_batch_generic(
+            grade_data,
+            GradeNuggetAnswer,
+            GradeNuggetAnswer.convert_prompt_output,
+            llm_config,
+        )
         print("PrefNuggetJudge: Finished grading")
 
         # Aggregate grades using shared utility

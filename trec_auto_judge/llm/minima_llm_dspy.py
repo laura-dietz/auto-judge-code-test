@@ -651,6 +651,45 @@ async def run_dspy_batch(
 
 
 
+T = typing.TypeVar("T", bound=BaseModel)
+
+
+def run_dspy_batch_generic(
+    data: List[T],
+    signature: Type[dspy.Signature],
+    converter: Callable[[dspy.Prediction, T], None],
+    llm_config: "MinimaLlmConfig",
+) -> List[T]:
+    """
+    Run DSPy batch for any data model and signature.
+
+    Convenience wrapper around run_dspy_batch that handles asyncio
+    and backend setup.
+
+    Args:
+        data: List of Pydantic models to process
+        signature: DSPy signature class (required)
+        converter: Output converter function to populate data from prediction
+        llm_config: LLM configuration
+
+    Returns:
+        Updated data with outputs filled in by converter
+    """
+    from .minima_llm import MinimaLlmConfig  # Import here to avoid circular
+
+    if not data:
+        return data
+
+    return asyncio.run(
+        run_dspy_batch(
+            signature,
+            data,
+            converter,
+            backend=OpenAIMinimaLlm(llm_config),
+        )
+    )
+
+
 def print_dspy_prompt(sig:dspy.Signature, inputs:Dict[str,Any]):
     predict = dspy.Predict(sig)
 
