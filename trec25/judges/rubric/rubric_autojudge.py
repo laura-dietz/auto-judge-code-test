@@ -108,6 +108,126 @@ class NuggetGradeData(BaseModel):
 
 
 # =============================================================================
+# Talmudir Export Models
+# =============================================================================
+
+class TalmudirCommentary(BaseModel):
+    """Single commentary entry for Talmudir export."""
+    id: str
+    comment: str
+    grade: str  # Numeric grade as string ("0"-"5")
+
+
+class TalmudirSample(BaseModel):
+    """Talmudir export format for a single sample."""
+    sample_id: str
+    query: str
+    answer: str
+    snippets: Dict[str, List[Dict[str, str]]] = {}
+    commentary: List[TalmudirCommentary] = []
+    mockAnswers: Dict[str, str] = {}
+    automated_metrics: Dict[str, float] = {}
+
+
+def write_talmudir_export(
+    rag_responses: Sequence["Report"],
+    rag_topics: Sequence["Request"],
+    grade_data: List[NuggetGradeData],
+    response_grades: Dict[str, Dict[str, Any]],
+    filebase: str,
+    grade_threshold: int = 4,
+) -> None:
+    """
+    Export judged results to Talmudir format.
+
+    Args:
+        rag_responses: RAG responses that were judged
+        rag_topics: Topics/queries
+        grade_data: Per-nugget grading results
+        response_grades: Aggregated grades per response (response_key -> evaldata)
+        filebase: Output file base path (writes to {filebase}.talmudir.jsonl)
+        grade_threshold: Only include commentary for nuggets with grade >= threshold
+    """
+    from pathlib import Path
+
+    # Build request lookup by topic_id
+    request_by_topic: Dict[str, "Request"] = {
+        t.request_id: t for t in rag_topics
+    }
+
+    # Build grade_data lookup by response_key
+    grades_by_response: Dict[str, List[NuggetGradeData]] = {}
+    for data in grade_data:
+        response_key = f"{data.run_id}:{data.query_id}"
+        if response_key not in grades_by_response:
+            grades_by_response[response_key] = []
+        grades_by_response[response_key].append(data)
+
+    # Build Talmudir samples
+    samples: List[TalmudirSample] = []
+
+    for response in rag_responses:
+        topic_id = response.metadata.topic_id
+        run_id = response.metadata.run_id
+        response_key = f"{run_id}:{topic_id}"
+
+        # Get request for query text
+        request = request_by_topic.get(topic_id)
+        if request is None:
+            continue
+
+        # Build query string
+        query_parts = []
+        if request.title:
+            query_parts.append(request.title)
+        if request.problem_statement:
+            query_parts.append(request.problem_statement)
+        query = " ".join(query_parts)
+
+        # Build commentary (only for grade >= threshold)
+        commentary: List[TalmudirCommentary] = []
+        response_grade_data = grades_by_response.get(response_key, [])
+        for gd in response_grade_data:
+            if gd.grade >= grade_threshold:
+                comment_parts = [gd.question]
+                if gd.reasoning:
+                    comment_parts.append(gd.reasoning)
+                commentary.append(TalmudirCommentary(
+                    id=gd.nugget_id,
+                    comment=" ".join(comment_parts),
+                    grade=str(gd.grade),
+                ))
+
+        # Get automated metrics from response_grades
+        evaldata = response_grades.get(response_key, {})
+        automated_metrics = {
+            "NUGGET_COVERAGE": evaldata.get("coverage_score", 0.0),
+            "AVG_GRADE": evaldata.get("avg_grade", 0.0),
+            "MAX_GRADE": float(evaldata.get("max_grade", 0)),
+            "COVERED_COUNT": float(evaldata.get("covered_count", 0)),
+        }
+
+        sample = TalmudirSample(
+            sample_id=f"{topic_id}-{run_id}",
+            query=query,
+            answer=response.get_report_text(),
+            snippets={},
+            commentary=commentary,
+            mockAnswers={},
+            automated_metrics=automated_metrics,
+        )
+        samples.append(sample)
+
+    # Write to file
+    output_path = Path(f"{filebase}.talmudir.jsonl")
+    with open(output_path, "w") as f:
+        for sample in samples:
+            f.write(sample.model_dump_json() + "\n")
+
+    print(f"Talmudir: Exported {len(samples)} samples to {output_path}")
+
+
+# =============================================================================
 # Leaderboard & Qrels Specs
 # =============================================================================
 
@@ -249,6 +369,7 @@ class RubricJudge(AutoJudge):
         llm_config: MinimaLlmConfig,
         nugget_banks: Optional[NuggetBanks] = None,
         grade_threshold: int = 3,
+        filebase: str = "rubric",
         **kwargs
     ) -> tuple[Leaderboard, Optional[Qrels]]:
         """
@@ -369,6 +490,16 @@ class RubricJudge(AutoJudge):
         # Build qrels from grade data
         qrels = build_qrels(records=grade_data, spec=RUBRIC_QRELS) if grade_data else None
         qrels.verify(warn=True, expected_topic_ids=self.expected_topic_ids)
+
+        # Export to Talmudir format
+        write_talmudir_export(
+            rag_responses=rag_responses,
+            rag_topics=rag_topics,
+            grade_data=grade_data,
+            response_grades=response_grades,
+            filebase=filebase,
+            grade_threshold=grade_threshold,  # Only include commentary for high-quality answers
+        )
 
         return (leaderboard, qrels)
 

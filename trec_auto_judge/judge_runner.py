@@ -155,7 +155,12 @@ def run_judge(
 
     # Step 2: Judge if requested
     if do_judge:
-        judge_kwargs = judge_settings or settings or {}
+        judge_kwargs = dict(judge_settings or settings or {})
+
+        # Inject resolved filebase from judge_output_path (replaces template like {_name})
+        if judge_output_path:
+            judge_kwargs["filebase"] = str(judge_output_path)
+
         if judge_kwargs:
             print(f"[judge_runner] judge settings: {judge_kwargs}", file=sys.stderr)
 
