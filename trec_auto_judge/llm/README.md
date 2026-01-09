@@ -251,13 +251,11 @@ def process_batch(annotations):
 
 ### Handling `list[str]` Outputs
 
-DSPy sometimes returns `list[str]` fields as JSON strings instead of Python lists. To handle this reliably:
+`TolerantChatAdapter` automatically parses `list[str]` output fields from JSON strings. If parsing fails, it raises `AdapterParseError`, triggering retry with cache bypass.
 
-1. **Request JSON format explicitly** in the `OutputField` description with an example
-2. **Raise `ValueError`** in your converter when parsing fails—this triggers retry with cache bypass
+**Best practice**: Request JSON format explicitly in the `OutputField` description with an example:
 
 ```python
-import json
 import dspy
 
 class ExtractItems(dspy.Signature):
@@ -268,21 +266,14 @@ class ExtractItems(dspy.Signature):
     )
 
 def convert_output(prediction, data):
-    raw = prediction.items
-    if isinstance(raw, str):
-        try:
-            parsed = json.loads(raw)
-            if isinstance(parsed, list):
-                data.items = [str(x).strip() for x in parsed if x]
-                return
-        except json.JSONDecodeError:
-            pass
-        # Raise to trigger retry with force_refresh=True
-        raise ValueError(f"Expected JSON array, got: {raw[:100]}")
-    data.items = list(raw) if raw else []
+    # Adapter already parsed JSON → prediction.items is a list
+    data.items = list(prediction.items) if prediction.items else []
 ```
 
-The `ValueError` is caught by `run_dspy_batch()`, which retries with `force_refresh=True` to bypass the cache and get a fresh LLM response.
+The adapter handles:
+1. Detecting `list[str]` annotations
+2. Parsing JSON array strings automatically
+3. Raising `AdapterParseError` on malformed JSON → triggers retry with `force_refresh=True`
 
 ## Configuration
 

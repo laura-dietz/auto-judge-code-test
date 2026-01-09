@@ -7,7 +7,6 @@ objects explaining WHY the better response won.
 
 This judge is primarily a nugget creator - judge() returns (None, None).
 """
-import json
 from itertools import groupby
 from typing import Any, Dict, List, Optional, Sequence, Set, Type
 
@@ -66,8 +65,10 @@ class ExtractDifferentiatingNuggets(dspy.Signature):
     For a query as title, problem statement, and user background, you are given Winner and Loser RAG responses. Generate brief, atomic questions
     that target query-essential information which the Winner answers well and the Loser omits or mishandles.
 
+
     Only include differences that change the answer to the query (correctness, completeness,
-    usefulness). Avoid generic quality questions.
+    usefulness). Prefer short questions such as "Capital of USA?" or "Process of steel cooking?".
+    Avoid generic quality questions.
     """
 
     query_title: str = dspy.InputField(desc="Query title")
@@ -231,26 +232,12 @@ class PrefNuggetJudge(AutoJudge):
             f"PrefNuggetJudge: Extracting nuggets from {len(extraction_data)} comparison pairs..."
         )
 
-        # Output converter - raises ValueError on parse failure to trigger retry
+        # Output converter (JSON parsing handled by TolerantChatAdapter)
         def convert_output(
             prediction: dspy.Prediction, data: PrefNuggetData
         ) -> None:
-            raw = (
-                prediction.differentiating_questions
-                if hasattr(prediction, "differentiating_questions")
-                else []
-            )
-            # DSPy may return list as JSON string - parse it
-            if isinstance(raw, str):
-                try:
-                    parsed = json.loads(raw)
-                    if isinstance(parsed, list):
-                        data.differentiating_questions = [str(q).strip() for q in parsed if q][:max_questions_per_pair]
-                        return
-                except json.JSONDecodeError:
-                    pass
-                raise ValueError(f"Expected JSON array, got: {raw[:100]}")
-            data.differentiating_questions = list(raw)[:max_questions_per_pair] if raw else []
+            questions = getattr(prediction, "differentiating_questions", [])
+            data.differentiating_questions = list(questions)[:max_questions_per_pair] if questions else []
 
         # Run LLM extraction
         extraction_data = run_dspy_batch_generic(

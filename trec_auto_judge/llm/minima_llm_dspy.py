@@ -102,6 +102,27 @@ class TolerantChatAdapter(ChatAdapter):
             return None
 
     @classmethod
+    def is_list_str(cls, ann):
+        """Return True if annotation is list[str] or List[str]."""
+        origin = getattr(ann, "__origin__", None)
+        if origin is list:
+            args = getattr(ann, "__args__", ())
+            return args == (str,)
+        return False
+
+    @classmethod
+    def try_parse_list_str(cls, val: str) -> list[str]:
+        """Parse JSON array string to list[str], or raise ValueError."""
+        import json
+        try:
+            parsed = json.loads(val)
+            if isinstance(parsed, list):
+                return [str(x).strip() for x in parsed if x]
+        except json.JSONDecodeError:
+            pass
+        raise ValueError(f"Expected JSON array, got: {val[:100]}")
+
+    @classmethod
     def _is_non_value(cls, s: str) -> bool:
         return s.strip().lower() in {"", "none", "null"}
 
@@ -148,7 +169,7 @@ class TolerantChatAdapter(ChatAdapter):
                     continue
                 parsed[k] = val  # last occurrence wins
 
-        # 3) Fill missing fields + coerce Optional[float].
+        # 3) Fill missing fields + coerce Optional[float] and list[str].
         for name, field in signature.output_fields.items():
             annotation = field.annotation
 
@@ -156,6 +177,17 @@ class TolerantChatAdapter(ChatAdapter):
                 val = parsed[name]
                 if self.is_optional_float(annotation):
                     parsed[name] = self.try_parse_float(val)
+                elif self.is_list_str(annotation) and isinstance(val, str):
+                    try:
+                        parsed[name] = self.try_parse_list_str(val)
+                    except ValueError as e:
+                        raise AdapterParseError(
+                            adapter_name="TolerantChatAdapter",
+                            signature=signature,
+                            lm_response=completion,
+                            parsed_result=parsed,
+                            message=str(e),
+                        )
             else:
                 if self.is_optional_type(annotation):
                     parsed[name] = None
