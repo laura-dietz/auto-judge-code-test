@@ -390,6 +390,12 @@ class RubricJudge(AutoJudge):
         if nugget_banks is None:
             raise ValueError("RubricJudge requires nugget_banks. Run create_nuggets first or provide --nugget-banks.")
 
+        # Pre-compute nugget counts per topic from the bank
+        nuggets_per_topic: Dict[str, int] = {
+            topic_id: len(bank.nuggets_as_list())
+            for topic_id, bank in nugget_banks.banks.items()
+        }
+
         # Prepare grading data (one per response-nugget pair)
         grade_data: List[NuggetGradeData] = []
         response_nugget_map: Dict[str, List[NuggetGradeData]] = {}  # run_id:topic_id -> data list
@@ -458,22 +464,27 @@ class RubricJudge(AutoJudge):
             }
             response_grades[response_key]["grades_list"].append(data.grade)
 
-        # Compute coverage scores
+        # Compute coverage scores using total nuggets in bank as denominator
         for response_key, evaldata in response_grades.items():
+            _, topic_id = response_key.split(":", 1)
+            total_in_bank = nuggets_per_topic.get(topic_id, 0)
             grades = evaldata["grades_list"]
-            if grades:
+
+            if total_in_bank > 0:
                 covered = sum(1 for g in grades if g >= grade_threshold)
-                evaldata["coverage_score"] = covered / len(grades)
-                evaldata["avg_grade"] = sum(grades) / len(grades)
-                evaldata["max_grade"] = max(grades)
+                evaldata["coverage_score"] = covered / total_in_bank
+                evaldata["avg_grade"] = sum(grades) / total_in_bank if grades else 0.0
+                evaldata["max_grade"] = max(grades) if grades else 0
                 evaldata["covered_count"] = covered
-                evaldata["total_nuggets"] = len(grades)
+                evaldata["total_nuggets"] = total_in_bank
+                evaldata["graded_nuggets"] = len(grades)  # Track how many were actually graded
             else:
                 evaldata["coverage_score"] = 0.0
                 evaldata["avg_grade"] = 0.0
                 evaldata["covered_count"] = 0
                 evaldata["max_grade"] = 0
                 evaldata["total_nuggets"] = 0
+                evaldata["graded_nuggets"] = 0
             del evaldata["grades_list"]  # Remove temporary field
 
         # Update Report.evaldata
