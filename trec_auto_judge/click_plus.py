@@ -479,6 +479,10 @@ def auto_judge_to_click_command(auto_judge: AutoJudge, cmd_name: str):
                   default=None, help="Judge uses nuggets (REQUIRED when --workflow omitted).")
     @click.option("--augment-report/--no-augment-report", "augment_report",
                   default=None, help="Save modified Report.evaldata to {filebase}.responses.jsonl.")
+    @click.option("--limit-topics", type=int, default=None,
+                  help="Limit to first N topics (for testing).")
+    @click.option("--limit-runs", type=int, default=None,
+                  help="Limit to first N run_ids (for testing).")
     def run_cmd(
         workflow: Optional[Path],
         rag_responses: Iterable[Report],
@@ -501,6 +505,8 @@ def auto_judge_to_click_command(auto_judge: AutoJudge, cmd_name: str):
         nugget_depends_on_responses: Optional[bool],
         judge_uses_nuggets: Optional[bool],
         augment_report: Optional[bool],
+        limit_topics: Optional[int],
+        limit_runs: Optional[int],
     ):
         """Run judge according to workflow.yml (default command)."""
         # Load workflow or create default based on CLI flags
@@ -533,6 +539,12 @@ def auto_judge_to_click_command(auto_judge: AutoJudge, cmd_name: str):
         if filebase:
             wf.settings["filebase"] = filebase
             click.echo(f"Filebase override: {filebase}", err=True)
+
+        # If --limit-topics is set, prefix filebase with "tmp-" for test runs
+        if limit_topics is not None and limit_topics > 0:
+            current_filebase = wf.settings.get("filebase", "{_name}")
+            wf.settings["filebase"] = f"tmp-{current_filebase}"
+            click.echo(f"Limited topics mode: filebase changed to {wf.settings['filebase']}", err=True)
 
         # Validate mutually exclusive options
         options_set = sum([bool(variant), bool(sweep), all_variants])
@@ -609,6 +621,8 @@ def auto_judge_to_click_command(auto_judge: AutoJudge, cmd_name: str):
                 judge_uses_nuggets=wf.judge_uses_nuggets,
                 augment_report=augment_report if augment_report is not None else wf.augment_report,
                 config_name=config.name,
+                limit_topics=limit_topics,
+                limit_runs=limit_runs,
             )
 
             click.echo(f"Done configuration: {config.name}", err=True)

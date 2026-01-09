@@ -60,6 +60,9 @@ def run_judge(
     augment_report: bool = False,
     # Configuration name for reproducibility tracking
     config_name: str = "default",
+    # Testing flags to limit scope
+    limit_topics: Optional[int] = None,
+    limit_runs: Optional[int] = None,
 ) -> JudgeResult:
     """
     Execute judge workflow with nugget lifecycle management.
@@ -82,10 +85,32 @@ def run_judge(
         judge_uses_nuggets: If True, pass nuggets to judge()
         augment_report: If True, save modified Report.evaldata to {filebase}.responses.jsonl
         config_name: Variant/sweep name for reproducibility tracking (default: "default")
+        limit_topics: If set, limit to first N topics (for testing)
+        limit_runs: If set, limit to first N run_ids (for testing)
 
     Returns:
         JudgeResult with leaderboard, qrels, and final nuggets
     """
+    # Apply topic limit if specified (for testing)
+    if limit_topics is not None and limit_topics > 0:
+        rag_topics = list(rag_topics)[:limit_topics]
+        limited_topic_ids = {t.request_id for t in rag_topics}
+        rag_responses = [r for r in rag_responses if r.metadata.topic_id in limited_topic_ids]
+        print(f"[judge_runner] Limited to first {limit_topics} topics: {sorted(limited_topic_ids)}", file=sys.stderr)
+
+    # Apply run limit if specified (for testing)
+    if limit_runs is not None and limit_runs > 0:
+        # Ensure rag_responses is a list for multiple iterations
+        rag_responses = list(rag_responses)
+        # Get unique run_ids in order of first appearance
+        seen_run_ids = []
+        for r in rag_responses:
+            if r.metadata.run_id not in seen_run_ids:
+                seen_run_ids.append(r.metadata.run_id)
+        limited_run_ids = set(seen_run_ids[:limit_runs])
+        rag_responses = [r for r in rag_responses if r.metadata.run_id in limited_run_ids]
+        print(f"[judge_runner] Limited to first {limit_runs} runs: {sorted(limited_run_ids)}", file=sys.stderr)
+
     # Get nugget_banks_type from auto_judge (required for loading/saving nuggets)
     nugget_banks_type = getattr(auto_judge, "nugget_banks_type", None)
 

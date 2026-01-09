@@ -3,7 +3,7 @@
 
 judge_uses_nuggets: true
 nugget_depends_on_responses: true  # Need evaldata from PrefJudge
-judge: false                       # No leaderboard output
+judge: true                       # No leaderboard output
 create_nuggets: true               # Primary purpose: create nuggets
 augment_report: false
 
