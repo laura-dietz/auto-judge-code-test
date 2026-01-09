@@ -12,7 +12,7 @@ settings:
 
 judge_settings:
    num_others: 8
-   num_pivot: 0
+   num_pivot: 2
 
 variants:
   eightzero:
@@ -29,4 +29,9 @@ variants:
     judge_settings:
       num_others: 0
       num_pivot: 2
+
+  twozero:
+    judge_settings:
+      num_others: 2
+      num_pivot: 0
   

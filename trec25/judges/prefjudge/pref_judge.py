@@ -120,6 +120,7 @@ class PrefJudge(AutoJudge):
         num_others: int,
         num_pivot: int,
         on_missing_evals: str,
+        no_dupes: bool = False,
         **kwargs
     ) -> tuple[Leaderboard, Optional[Qrels]]:
         num_runs = len({r.metadata.run_id for r in rag_responses})
@@ -144,7 +145,8 @@ class PrefJudge(AutoJudge):
         grade_data = prepare_prompts(rag_topic_dict=rag_topic_dict
                                      , rag_response_by_topic=rag_response_by_topic
                                      , num_pivot=num_pivot
-                                     , num_others=num_others)
+                                     , num_others=num_others
+                                     , no_dupes=no_dupes)
 
         # Run LLM grading
         print("PrefJudge: Grading responses...")

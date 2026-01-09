@@ -14,7 +14,7 @@ import re
 from itertools import groupby
 from math import gcd
 from textwrap import dedent
-from typing import Callable, Dict, List, Literal, Optional, Type
+from typing import Callable, Dict, List, Literal, Optional, Set, Tuple, Type
 
 import dspy
 from pydantic import BaseModel
@@ -191,6 +191,7 @@ def prepare_prompts(
     rag_response_by_topic: Dict[str, List[Report]],
     num_pivot: int,
     num_others: int,
+    no_dupes: bool = True,
 ) -> List[PrefJudgeData]:
     """Create pairwise comparison prompts for all responses."""
     prompts: List[PrefJudgeData] = []
@@ -198,6 +199,7 @@ def prepare_prompts(
         if num_pivot:
             print("pivots: ", [r.metadata.run_id for r in responses[0:num_pivot]])
         request = rag_topic_dict[topic_id]
+        seen: Set[Tuple[str, str]] = set()
         for idx, response in enumerate(responses):
             run_id = response.metadata.run_id
             text = response.get_report_text()
@@ -207,19 +209,25 @@ def prepare_prompts(
                 responses, idx, num_pivot, num_others
             ):
                 run_id_other = response_other.metadata.run_id
-                if run_id_other != run_id:  # skip self
-                    prompts.append(
-                        PrefJudgeData(
-                            run_id=run_id,
-                            query_id=topic_id,
-                            passage_1=text,
-                            run_id2=run_id_other,
-                            passage_2=response_other.get_report_text(),
-                            query_title=request.title or "",
-                            query_problem=request.problem_statement or "",
-                            query_background=request.background or "",
-                        )
+                if run_id_other == run_id:  # skip self
+                    continue
+                # Skip if we've already seen this pair (in either direction)
+                if no_dupes and (run_id, run_id_other) in seen:
+                    continue
+                seen.add((run_id, run_id_other))
+                seen.add((run_id_other, run_id))
+                prompts.append(
+                    PrefJudgeData(
+                        run_id=run_id,
+                        query_id=topic_id,
+                        passage_1=text,
+                        run_id2=run_id_other,
+                        passage_2=response_other.get_report_text(),
+                        query_title=request.title or "",
+                        query_problem=request.problem_statement or "",
+                        query_background=request.background or "",
                     )
+                )
     return prompts
 
 
