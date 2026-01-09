@@ -13,8 +13,8 @@ from trec_auto_judge.nugget_data import (
 
 import dspy
 import asyncio
-import re
 import json
+import re
 from typing import *
 from pydantic import BaseModel
 
@@ -22,9 +22,18 @@ from trec_auto_judge.llm.minima_llm_dspy import run_dspy_batch
 from trec_auto_judge import MinimaLlmConfig, OpenAIMinimaLlm
 from trec_auto_judge.leaderboard.leaderboard import OnMissing
 
+# Import shared rubric utilities
+from trec25.judges.shared.rubric_common import (
+    NuggetGradeData,
+    GradeNuggetAnswer,
+    prepare_nugget_grade_data,
+    run_nugget_grading_batch,
+    compute_nugget_aggregates,
+)
+
 
 # =============================================================================
-# DSPy Signatures
+# DSPy Signatures (for nugget generation - specific to RubricJudge)
 # =============================================================================
 
 class GenerateNuggetQuestionsMinimal(dspy.Signature):
@@ -53,33 +62,8 @@ class GenerateNuggetQuestionsWeb(dspy.Signature):
     )
 
 
-
-class GradeNuggetAnswer(dspy.Signature):
-    """
-    Grade how well a passage answers a specific question.
-
-    Can the question be answered based on the available context? Choose one:
-    - 5: The answer is highly relevant, complete, and accurate.
-    - 4: The answer is mostly relevant and complete but may have minor gaps or inaccuracies.
-    - 3: The answer is partially relevant and complete, with noticeable gaps or inaccuracies.
-    - 2: The answer has limited relevance and completeness, with significant gaps or inaccuracies.
-    - 1: The answer is minimally relevant or complete, with substantial shortcomings.
-    - 0: The answer is not relevant or complete at all.
-    """
-
-    question: str = dspy.InputField(desc="The question to be answered")
-    passage: str = dspy.InputField(desc="The passage that may contain the answer")
-
-    grade: Literal["0", "1", "2", "3", "4", "5"] = dspy.OutputField(
-        desc="Grade from 0-5 indicating how well the passage answers the question"
-    )
-    reasoning: Optional[str] = dspy.OutputField(
-        desc="Brief explanation of the grade", default=None, required=False
-    )
-
-
 # =============================================================================
-# Data Models (combined input/output)
+# Data Models (for nugget generation - specific to RubricJudge)
 # =============================================================================
 
 class NuggetGenerationData(BaseModel):
@@ -91,20 +75,6 @@ class NuggetGenerationData(BaseModel):
     query_problem: str
     # Output fields (populated by LLM)
     questions: List[str] = []
-
-
-class NuggetGradeData(BaseModel):
-    """Combined input/output for grading a nugget against a passage."""
-    # Input fields
-    run_id: str
-    query_id: str
-    nugget_id: str
-    question: str
-    passage: str
-    # Output fields (populated by LLM)
-    grade: int = 0
-    reasoning: Optional[str] = None
-    confidence: Optional[float] = None
 
 
 # =============================================================================

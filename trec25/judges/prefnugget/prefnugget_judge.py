@@ -9,52 +9,19 @@ This judge is primarily a nugget creator - judge() returns (None, None).
 """
 import asyncio
 import json
-import re
 from itertools import groupby
-from typing import Any, Dict, List, Literal, Optional, Sequence, Set, Type
+from typing import Any, Dict, List, Optional, Sequence, Set, Type
 
 import dspy
 from pydantic import BaseModel
 
 from trec_auto_judge.llm.minima_llm_dspy import run_dspy_batch
 from trec_auto_judge import MinimaLlmConfig, OpenAIMinimaLlm
-from trec_auto_judge.leaderboard.leaderboard import OnMissing
 
 from trec_auto_judge import *
 from trec_auto_judge.nugget_data import (
     NuggetBank, NuggetBanks, NuggetQuestion
 )
-
-RUBRIC_SPEC = LeaderboardSpec(measures=(
-    MeasureSpec("NUGGET_COVERAGE", aggregate=mean_of_floats, cast=float, default=0.0),
-    MeasureSpec("AVG_GRADE", aggregate=mean_of_floats, cast=float, default=0.0),
-    MeasureSpec("MAX_GRADE", aggregate=mean_of_floats, cast=float, default=0.0),
-    MeasureSpec("COVERED_COUNT", aggregate=mean_of_floats, cast=float, default=0.0),
-))
-
-
-RUBRIC_QRELS = QrelsSpec["NuggetGradeData"](
-    topic_id=lambda r: r.query_id,
-    doc_id=lambda r: doc_id_md5(r.passage),
-    grade=lambda r: float(r.grade),
-    on_duplicate="keep_max"
-)
-
-
-from trec_auto_judge import (
-    AutoJudge,
-    Leaderboard,
-    MinimaLlmConfig,
-    NuggetBanks,
-    NuggetBanksProtocol,
-    OpenAIMinimaLlm,
-    Qrels,
-    Report,
-    Request,
-    auto_judge_to_click_command,
-)
-from trec_auto_judge.llm.minima_llm_dspy import run_dspy_batch
-from trec_auto_judge.nugget_data import NuggetBank, NuggetQuestion
 
 # Import shared preference utilities for running pairwise comparisons
 from trec25.judges.shared.pref_common import (
@@ -63,18 +30,46 @@ from trec25.judges.shared.pref_common import (
     run_pref_judgment_batch,
 )
 
+# Import shared rubric utilities for nugget grading
+from trec25.judges.shared.rubric_common import (
+    NuggetGradeData,
+    prepare_nugget_grade_data,
+    run_nugget_grading_batch,
+    compute_nugget_aggregates,
+)
+
 
 # =============================================================================
-# DSPy Signature
+# Leaderboard & Qrels Specs (judge-specific)
+# =============================================================================
+
+PREFNUGGET_SPEC = LeaderboardSpec(measures=(
+    MeasureSpec("NUGGET_COVERAGE", aggregate=mean_of_floats, cast=float, default=0.0),
+    MeasureSpec("AVG_GRADE", aggregate=mean_of_floats, cast=float, default=0.0),
+    MeasureSpec("MAX_GRADE", aggregate=mean_of_floats, cast=float, default=0.0),
+    MeasureSpec("COVERED_COUNT", aggregate=mean_of_floats, cast=float, default=0.0),
+))
+
+
+PREFNUGGET_QRELS: QrelsSpec[NuggetGradeData] = QrelsSpec[NuggetGradeData](
+    topic_id=lambda r: r.query_id,
+    doc_id=lambda r: doc_id_md5(r.passage),
+    grade=lambda r: float(r.grade),
+    on_duplicate="keep_max"
+)
+
+
+# =============================================================================
+# DSPy Signature (for nugget extraction - specific to PrefNuggetJudge)
 # =============================================================================
 
 
 class ExtractDifferentiatingNuggets(dspy.Signature):
     """
-    For a query as title, problem statement, and user background, you are given Winner and Loser RAG responses. Generate brief, atomic questions 
+    For a query as title, problem statement, and user background, you are given Winner and Loser RAG responses. Generate brief, atomic questions
     that target query-essential information which the Winner answers well and the Loser omits or mishandles.
 
-    Only include differences that change the answer to the query (correctness, completeness, 
+    Only include differences that change the answer to the query (correctness, completeness,
     usefulness). Avoid generic quality questions.
     """
 
@@ -88,34 +83,8 @@ class ExtractDifferentiatingNuggets(dspy.Signature):
     )
 
 
-
-
-class GradeNuggetAnswer(dspy.Signature):
-    """
-    Grade how well a passage answers a specific question.
-
-    Can the question be answered based on the available context? Choose one:
-    - 5: The answer is highly relevant, complete, and accurate.
-    - 4: The answer is mostly relevant and complete but may have minor gaps or inaccuracies.
-    - 3: The answer is partially relevant and complete, with noticeable gaps or inaccuracies.
-    - 2: The answer has limited relevance and completeness, with significant gaps or inaccuracies.
-    - 1: The answer is minimally relevant or complete, with substantial shortcomings.
-    - 0: The answer is not relevant or complete at all.
-    """
-
-    question: str = dspy.InputField(desc="The question to be answered")
-    passage: str = dspy.InputField(desc="The passage that may contain the answer")
-
-    grade: Literal["0", "1", "2", "3", "4", "5"] = dspy.OutputField(
-        desc="Grade from 0-5 indicating how well the passage answers the question"
-    )
-    reasoning: Optional[str] = dspy.OutputField(
-        desc="Brief explanation of the grade", default=None, required=False
-    )
-
-
 # =============================================================================
-# Data Model
+# Data Model (for nugget extraction - specific to PrefNuggetJudge)
 # =============================================================================
 
 
@@ -133,34 +102,6 @@ class PrefNuggetData(BaseModel):
 
     # Output fields (populated by LLM)
     differentiating_questions: List[str] = []
-
-
-
-class NuggetGradeData(BaseModel):
-    """Combined input/output for grading a nugget against a passage."""
-    # Input fields
-    run_id: str
-    query_id: str
-    nugget_id: str
-    question: str
-    passage: str
-    # Output fields (populated by LLM)
-    grade: int = 0
-    reasoning: Optional[str] = None
-    confidence: Optional[float] = None
-
-
-
-# =============================================================================
-# Conversion Functions
-# =============================================================================
-
-def _parse_grade(s: str) -> int:
-    """Extract grade 0-5 from string."""
-    m = re.search(r'\b([0-5])\b', s)
-    if not m:
-        return 0  # Default to 0 if no valid grade found
-    return int(m.group(1))
 
 
 
@@ -389,160 +330,76 @@ class PrefNuggetJudge(AutoJudge):
         nugget_banks: Optional[NuggetBanks] = None,
         grade_threshold: int = 3,
         on_missing_evals: str = "fix_aggregate",
-        filebase: str = "rubric",
+        filebase: str = "prefnugget",
         **kwargs
     ) -> tuple[Leaderboard, Optional[Qrels]]:
         """
         Grade each response against all nuggets for its topic.
 
-        Stores per-nugget grades in Report.evaldata with format:
-        {
-            "nugget_grades": {
-                "<nugget_id>": {"grade": int, "reasoning": str},
-                ...
-            },
-            "coverage_score": float,
-            "avg_grade": float,
-            "covered_count": int,
-            "total_nuggets": int
-        }
+        Uses shared rubric utilities for grading and aggregation.
         """
         if nugget_banks is None:
-            raise ValueError("RubricJudge requires nugget_banks. Run create_nuggets first or provide --nugget-banks.")
+            raise ValueError("PrefNuggetJudge requires nugget_banks. Run create_nuggets first or provide --nugget-banks.")
 
-        # Prepare grading data (one per response-nugget pair)
-        grade_data: List[NuggetGradeData] = []
-        response_nugget_map: Dict[str, List[NuggetGradeData]] = {}  # run_id:topic_id -> data list
-        self.expected_topic_ids=[t.request_id for t in rag_topics]  # Todo not necessary to be a member variable, unless passed in during construction
-        
-        for response in rag_responses:
-            metadata = response.metadata
-            run_id = metadata.run_id
-            topic_id = metadata.topic_id
-            text = response.get_report_text()
+        self.expected_topic_ids = [t.request_id for t in rag_topics]
 
-            bank = nugget_banks.banks.get(topic_id)
-            if bank is None:
-                print(f"Warning: No nugget bank for topic {topic_id}, skipping")
-                continue
+        # Prepare grading data using shared utility
+        print("PrefNuggetJudge: Preparing grade data...")
+        grade_data, nuggets_per_topic = prepare_nugget_grade_data(rag_responses, nugget_banks)
 
-            response_key = f"{run_id}:{topic_id}"
-            response_nugget_map[response_key] = []
+        # Run LLM grading using shared utility
+        print("PrefNuggetJudge: Grading responses...")
+        grade_data = run_nugget_grading_batch(grade_data, llm_config)
+        print("PrefNuggetJudge: Finished grading")
 
-            # Create grade data for each nugget question
-            for nugget in bank.nuggets_as_list():
-                if isinstance(nugget, NuggetQuestion):
-                    data = NuggetGradeData(
-                        run_id=run_id,
-                        query_id=topic_id,
-                        nugget_id=nugget.question_id or nugget.question,
-                        question=nugget.question,
-                        passage=text
-                    )
-                    grade_data.append(data)
-                    response_nugget_map[response_key].append(data)
-
-        # Convert output handler
-        def convert_grade_output(prediction: dspy.Prediction, data: NuggetGradeData) -> None:
-            data.grade = _parse_grade(prediction.grade)
-            data.reasoning = getattr(prediction, 'reasoning', None)
-            data.confidence = getattr(prediction, 'confidence', None)
-
-
-        # Run LLM grading
-        print(f"Rubric: Grading responses...")
-        if grade_data:
-            grade_data = asyncio.run(run_dspy_batch(
-                GradeNuggetAnswer,
-                grade_data,
-                convert_grade_output,
-                backend=OpenAIMinimaLlm(llm_config)
-            ))
-        print(f"Rubric: Finished grading")
-
-
-        # Aggregate grades per response and store in evaldata
-        response_grades: Dict[str, Dict[str, Any]] = {}  # response_key -> evaldata
-
-        for data in grade_data:
-            response_key = f"{data.run_id}:{data.query_id}"
-            if response_key not in response_grades:
-                response_grades[response_key] = {
-                    "nugget_grades": {},
-                    "grades_list": []
-                }
-
-            response_grades[response_key]["nugget_grades"][data.nugget_id] = {
-                "grade": data.grade,
-                "reasoning": data.reasoning
-            }
-            response_grades[response_key]["grades_list"].append(data.grade)
-
-        # Compute coverage scores
-        for response_key, evaldata in response_grades.items():
-            grades = evaldata["grades_list"]
-            if grades:
-                covered = sum(1 for g in grades if g >= grade_threshold)
-                evaldata["coverage_score"] = covered / len(grades)
-                evaldata["avg_grade"] = sum(grades) / len(grades)
-                evaldata["max_grade"] = max(grades)
-                evaldata["covered_count"] = covered
-                evaldata["total_nuggets"] = len(grades)
-            else:
-                evaldata["coverage_score"] = 0.0
-                evaldata["avg_grade"] = 0.0
-                evaldata["covered_count"] = 0
-                evaldata["max_grade"] = 0
-                evaldata["total_nuggets"] = 0
-            del evaldata["grades_list"]  # Remove temporary field
+        # Aggregate grades using shared utility
+        aggregates = compute_nugget_aggregates(grade_data, nuggets_per_topic, grade_threshold)
 
         # Update Report.evaldata
         for response in rag_responses:
             response_key = f"{response.metadata.run_id}:{response.metadata.topic_id}"
-            if response_key in response_grades:
-                response.evaldata = response_grades[response_key]
-
+            if response_key in aggregates:
+                agg = aggregates[response_key]
+                response.evaldata = {
+                    "nugget_grades": agg.nugget_grades,
+                    "coverage_score": agg.coverage_score,
+                    "avg_grade": agg.avg_grade,
+                    "max_grade": agg.max_grade,
+                    "covered_count": agg.covered_count,
+                    "total_nuggets": agg.total_nuggets,
+                    "graded_nuggets": agg.graded_nuggets,
+                }
 
         # Build leaderboard
-        leaderboard = self._build_leaderboard(response_grades, on_missing_evals)
+        leaderboard = self._build_leaderboard(aggregates, on_missing_evals)
         leaderboard.verify(warn=True, expected_topic_ids=self.expected_topic_ids, on_missing=on_missing_evals)
 
         # Build qrels from grade data
-        qrels = build_qrels(records=grade_data, spec=RUBRIC_QRELS) if grade_data else None
+        qrels = build_qrels(records=grade_data, spec=PREFNUGGET_QRELS) if grade_data else None
         if qrels is not None:
             qrels.verify(warn=True, expected_topic_ids=self.expected_topic_ids)
 
-        # # Export to Talmudir format
-        # write_talmudir_export(
-        #     rag_responses=rag_responses,
-        #     rag_topics=rag_topics,
-        #     grade_data=grade_data,
-        #     response_grades=response_grades,
-        #     filebase=filebase,
-        #     grade_threshold=grade_threshold,  # Only include commentary for high-quality answers
-        # )
-
         return (leaderboard, qrels)
 
-    def _build_leaderboard(self, response_grades: Dict[str, Dict[str, Any]], on_missing_evals: str) -> Leaderboard:
+    def _build_leaderboard(self, aggregates: Dict[str, Any], on_missing_evals: str) -> Leaderboard:
         """Build leaderboard from aggregated response grades."""
-        b = LeaderboardBuilder(RUBRIC_SPEC)
+        b = LeaderboardBuilder(PREFNUGGET_SPEC)
 
-        for response_key, evaldata in response_grades.items():
+        for response_key, agg in aggregates.items():
             run_id, topic_id = response_key.split(":", 1)
             b.add(
                 run_id=run_id,
                 topic_id=topic_id,
                 values={
-                    "NUGGET_COVERAGE": evaldata["coverage_score"],
-                    "AVG_GRADE": evaldata["avg_grade"],
-                    "MAX_GRADE": evaldata["max_grade"],
-                    "COVERED_COUNT": float(evaldata["covered_count"]),
+                    "NUGGET_COVERAGE": agg.coverage_score,
+                    "AVG_GRADE": agg.avg_grade,
+                    "MAX_GRADE": agg.max_grade,
+                    "COVERED_COUNT": float(agg.covered_count),
                 }
             )
 
-        leaderboard = b.build(expected_topic_ids=self.expected_topic_ids, on_missing = on_missing_evals)
-        leaderboard.verify(expected_topic_ids=self.expected_topic_ids, warn=False, on_missing = on_missing_evals)
+        leaderboard = b.build(expected_topic_ids=self.expected_topic_ids, on_missing=on_missing_evals)
+        leaderboard.verify(expected_topic_ids=self.expected_topic_ids, warn=False, on_missing=on_missing_evals)
         return leaderboard
 
 
