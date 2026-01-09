@@ -13,6 +13,11 @@ settings:
   num_pivot: 0
   no_dupes: true
   on_missing_evals: "fix_aggregate"
+  # 
+  only_subtle_prefs: false
+  merge_nuggets_on_the_go: false
+
+
 
 nugget_settings:
   max_questions_per_pair: 5
@@ -34,3 +39,6 @@ variants:
     nugget_settings:
       num_others: 0
       num_pivot: 1
+
+  subtle:
+    noop: 2

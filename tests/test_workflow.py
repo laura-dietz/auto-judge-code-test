@@ -25,7 +25,7 @@ class TestWorkflowModel(unittest.TestCase):
         self.assertEqual(wf.sweeps, {})
         self.assertTrue(wf.nugget_depends_on_responses)
         self.assertTrue(wf.judge_uses_nuggets)
-        self.assertFalse(wf.force_recreate_nuggets)
+        self.assertIsNone(wf.force_recreate_nuggets)  # None = defaults to create_nuggets at runtime
 
     def test_settings_fields_parse(self):
         """Settings dicts should parse correctly."""

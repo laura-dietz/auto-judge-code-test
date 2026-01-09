@@ -62,7 +62,7 @@ def create_cli_default_workflow(judge_uses_nuggets: bool) -> Workflow:
             judge=True,
             nugget_depends_on_responses=False,
             judge_uses_nuggets=True,
-            force_recreate_nuggets=False,
+            # force_recreate_nuggets=None (default) → uses prompt cache
             settings={"filebase": "{_name}"},
         )
     else:
@@ -71,7 +71,7 @@ def create_cli_default_workflow(judge_uses_nuggets: bool) -> Workflow:
             judge=True,
             nugget_depends_on_responses=False,
             judge_uses_nuggets=False,
-            force_recreate_nuggets=False,
+            # force_recreate_nuggets=None (default) → uses prompt cache
             settings={"filebase": "{_name}"},
         )
 

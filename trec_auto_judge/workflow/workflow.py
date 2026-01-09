@@ -97,8 +97,8 @@ class Workflow(BaseModel):
     judge_uses_nuggets: bool = True
     """If True, pass nuggets to judge(). If False, pass None."""
 
-    force_recreate_nuggets: bool = False
-    """If True, recreate nuggets even if file exists. CLI can override."""
+    force_recreate_nuggets: Optional[bool] = None
+    """If True, recreate nuggets even if file exists. If None, defaults to create_nuggets value. CLI can override."""
 
     augment_report: bool = False
     """If True, judge modifies Report.evaldata; save to {filebase}.responses.jsonl."""

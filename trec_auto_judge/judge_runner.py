@@ -54,7 +54,7 @@ def run_judge(
     nugget_settings: Optional[dict[str, Any]] = None,
     judge_settings: Optional[dict[str, Any]] = None,
     # Lifecycle flags
-    force_recreate_nuggets: bool = False,
+    force_recreate_nuggets: Optional[bool] = None,
     nugget_depends_on_responses: bool = True,
     judge_uses_nuggets: bool = True,
     augment_report: bool = False,
@@ -80,7 +80,8 @@ def run_judge(
         settings: Shared settings dict passed to both phases (fallback)
         nugget_settings: Settings dict passed to create_nuggets() (overrides settings)
         judge_settings: Settings dict passed to judge() (overrides settings)
-        force_recreate_nuggets: If True, recreate even if file exists
+        force_recreate_nuggets: If True, recreate even if file exists. If None (default),
+            defaults to do_create_nuggets value (so fresh creation uses prompt cache, not stale files)
         nugget_depends_on_responses: If True, pass responses to create_nuggets()
         judge_uses_nuggets: If True, pass nuggets to judge()
         augment_report: If True, save modified Report.evaldata to {filebase}.responses.jsonl
@@ -111,6 +112,11 @@ def run_judge(
         rag_responses = [r for r in rag_responses if r.metadata.run_id in limited_run_ids]
         print(f"[judge_runner] Limited to first {limit_runs} runs: {sorted(limited_run_ids)}", file=sys.stderr)
 
+    # Default force_recreate_nuggets to do_create_nuggets if not explicitly set
+    # This ensures fresh nugget creation uses prompt cache, not stale nugget files
+    if force_recreate_nuggets is None:
+        force_recreate_nuggets = do_create_nuggets
+
     # Get nugget_banks_type from auto_judge (required for loading/saving nuggets)
     nugget_banks_type = getattr(auto_judge, "nugget_banks_type", None)
 
@@ -138,6 +144,18 @@ def run_judge(
     current_nuggets = input_nuggets
     leaderboard = None
     qrels = None
+    
+    _write_run_config(
+        judge_output_path=judge_output_path,
+        config_name=config_name,
+        do_create_nuggets=do_create_nuggets,
+        do_judge=do_judge,
+        llm_model=llm_config.model,
+        settings=settings,
+        nugget_settings=nugget_settings,
+        judge_settings=judge_settings,
+    )
+
 
     # Step 1: Create or load nuggets
     if do_create_nuggets:
@@ -207,16 +225,6 @@ def run_judge(
                 qrels=qrels,
                 rag_topics=rag_topics,
                 judge_output_path=judge_output_path,
-            )
-            _write_run_config(
-                judge_output_path=judge_output_path,
-                config_name=config_name,
-                do_create_nuggets=do_create_nuggets,
-                do_judge=do_judge,
-                llm_model=llm_config.model,
-                settings=settings,
-                nugget_settings=nugget_settings,
-                judge_settings=judge_settings,
             )
 
             # Step 4: Save augmented responses if flag is set

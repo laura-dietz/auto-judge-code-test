@@ -464,7 +464,8 @@ def auto_judge_to_click_command(auto_judge: AutoJudge, cmd_name: str):
     @click.option("--variant", type=str, help="Run a named variant from workflow.yml (e.g., --variant $name).", required=False)
     @click.option("--sweep", type=str, help="Run a parameter sweep from workflow.yml (e.g., --sweep $name).", required=False)
     @click.option("--all-variants", is_flag=True, help="Run all variants defined in workflow.yml.")
-    @click.option("--force-recreate-nuggets", is_flag=True, help="Recreate nuggets even if file exists.")
+    @click.option("--force-recreate-nuggets/--no-force-recreate-nuggets", default=None,
+                  help="Recreate nuggets even if file exists. Default: same as create_nuggets.")
     @click.option("--create-nuggets/--no-create-nuggets", default=None, help="Override workflow create_nuggets flag.")
     @click.option("--judge/--no-judge", "do_judge", default=None, help="Override workflow judge flag.")
     @click.option("--set", "-S", "settings_overrides", multiple=True, type=KeyValueType(),
@@ -496,7 +497,7 @@ def auto_judge_to_click_command(auto_judge: AutoJudge, cmd_name: str):
         variant: Optional[str],
         sweep: Optional[str],
         all_variants: bool,
-        force_recreate_nuggets: bool,
+        force_recreate_nuggets: Optional[bool],
         create_nuggets: Optional[bool],
         do_judge: Optional[bool],
         settings_overrides: tuple,
@@ -616,7 +617,7 @@ def auto_judge_to_click_command(auto_judge: AutoJudge, cmd_name: str):
                 nugget_settings=config.nugget_settings,
                 judge_settings=config.judge_settings,
                 # Lifecycle flags
-                force_recreate_nuggets=force_recreate_nuggets or wf.force_recreate_nuggets,
+                force_recreate_nuggets=force_recreate_nuggets if force_recreate_nuggets is not None else wf.force_recreate_nuggets,
                 nugget_depends_on_responses=wf.nugget_depends_on_responses,
                 judge_uses_nuggets=wf.judge_uses_nuggets,
                 augment_report=augment_report if augment_report is not None else wf.augment_report,
