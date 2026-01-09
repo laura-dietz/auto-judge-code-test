@@ -11,6 +11,8 @@ from typing import Dict, List, Optional, Sequence, Type
 
 from trec_auto_judge import (
     AutoJudge,
+    LeaderboardSpec,
+    MeasureSpec,
     Leaderboard,
     LeaderboardBuilder,
     MinimaLlmConfig,
@@ -20,11 +22,12 @@ from trec_auto_judge import (
     Report,
     Request,
     auto_judge_to_click_command,
+    mean_of_floats,
+    mean_of_ints,
 )
 
 # Import shared preference utilities
 from trec25.judges.shared.pref_common import (
-    PREF_SPEC,
     PrefAggregateResult,
     PrefJudgeData,
     compute_pref_aggregates,
@@ -36,6 +39,14 @@ from trec25.judges.shared.pref_common import (
 # =============================================================================
 # Leaderboard & Response Export (judge-specific)
 # =============================================================================
+
+
+PREF_SPEC = LeaderboardSpec(
+    measures=(
+        MeasureSpec("BORDA_COUNT", aggregate=mean_of_ints, cast=float, default=0.0),
+        MeasureSpec("WIN_FRAC", aggregate=mean_of_floats, cast=float, default=0.0),
+    )
+)
 
 
 def build_pref_leaderboard(

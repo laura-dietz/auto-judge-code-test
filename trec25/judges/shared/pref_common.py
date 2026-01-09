@@ -20,8 +20,6 @@ import dspy
 from pydantic import BaseModel
 
 from trec_auto_judge import (
-    LeaderboardSpec,
-    MeasureSpec,
     MinimaLlmConfig,
     OpenAIMinimaLlm,
     Report,
@@ -132,17 +130,6 @@ If both passages are similar, select the simplest and clearest.
             prediction.reasoning or "" if hasattr(prediction, "reasoning") else ""
         )
 
-
-# =============================================================================
-# Leaderboard Specification
-# =============================================================================
-
-PREF_SPEC = LeaderboardSpec(
-    measures=(
-        MeasureSpec("BORDA_COUNT", aggregate=mean_of_ints, cast=float, default=0.0),
-        MeasureSpec("WIN_FRAC", aggregate=mean_of_floats, cast=float, default=0.0),
-    )
-)
 
 
 # =============================================================================
