@@ -76,7 +76,7 @@ class ExtractDifferentiatingNuggets(dspy.Signature):
     loser_passage: str = dspy.InputField(desc="The passage that lost the comparison")
 
     differentiating_questions: list[str] = dspy.OutputField(
-        desc="List of atomic questions identifying what made the winner better and which must be answered to address the query."
+        desc='JSON array, e.g. ["Capital of USA?", "Process to cook steel?"]'
     )
 
 
@@ -231,26 +231,26 @@ class PrefNuggetJudge(AutoJudge):
             f"PrefNuggetJudge: Extracting nuggets from {len(extraction_data)} comparison pairs..."
         )
 
-        # Output converter
+        # Output converter - raises ValueError on parse failure to trigger retry
         def convert_output(
             prediction: dspy.Prediction, data: PrefNuggetData
         ) -> None:
-            questions = (
+            raw = (
                 prediction.differentiating_questions
                 if hasattr(prediction, "differentiating_questions")
                 else []
             )
             # DSPy may return list as JSON string - parse it
-            if isinstance(questions, str):
+            if isinstance(raw, str):
                 try:
-                    parsed = json.loads(questions)
+                    parsed = json.loads(raw)
                     if isinstance(parsed, list):
-                        questions = [str(q).strip() for q in parsed if q]
-                    else:
-                        questions = [q.strip() for q in questions.split("\n") if q.strip()]
+                        data.differentiating_questions = [str(q).strip() for q in parsed if q][:max_questions_per_pair]
+                        return
                 except json.JSONDecodeError:
-                    questions = [q.strip() for q in questions.split("\n") if q.strip()]
-            data.differentiating_questions = questions[:max_questions_per_pair]
+                    pass
+                raise ValueError(f"Expected JSON array, got: {raw[:100]}")
+            data.differentiating_questions = list(raw)[:max_questions_per_pair] if raw else []
 
         # Run LLM extraction
         extraction_data = run_dspy_batch_generic(

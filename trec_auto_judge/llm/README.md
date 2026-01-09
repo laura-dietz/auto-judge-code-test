@@ -249,6 +249,41 @@ def process_batch(annotations):
     ))
 ```
 
+### Handling `list[str]` Outputs
+
+DSPy sometimes returns `list[str]` fields as JSON strings instead of Python lists. To handle this reliably:
+
+1. **Request JSON format explicitly** in the `OutputField` description with an example
+2. **Raise `ValueError`** in your converter when parsing fails—this triggers retry with cache bypass
+
+```python
+import json
+import dspy
+
+class ExtractItems(dspy.Signature):
+    """Extract key items from the text."""
+    text: str = dspy.InputField()
+    items: list[str] = dspy.OutputField(
+        desc='JSON array, e.g. ["item one", "item two"]'
+    )
+
+def convert_output(prediction, data):
+    raw = prediction.items
+    if isinstance(raw, str):
+        try:
+            parsed = json.loads(raw)
+            if isinstance(parsed, list):
+                data.items = [str(x).strip() for x in parsed if x]
+                return
+        except json.JSONDecodeError:
+            pass
+        # Raise to trigger retry with force_refresh=True
+        raise ValueError(f"Expected JSON array, got: {raw[:100]}")
+    data.items = list(raw) if raw else []
+```
+
+The `ValueError` is caught by `run_dspy_batch()`, which retries with `force_refresh=True` to bypass the cache and get a fresh LLM response.
+
 ## Configuration
 
 ### LLM Configuration
