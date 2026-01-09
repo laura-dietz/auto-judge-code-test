@@ -285,6 +285,7 @@ judge: true
 nugget_depends_on_responses: true   # Pass responses to create_nuggets() (default: true)
 judge_uses_nuggets: true            # Pass nuggets to judge() (default: true)
 force_recreate_nuggets: false       # Recreate even if file exists (default: false)
+augment_report: false               # Save Report to file, when reports are modified (RAGE) or additional info is stored in `evaldata` (default: false)
 ```
 
 | Flag | Default | Description |
