@@ -215,6 +215,7 @@ class MinimaLlmConfig:
 
     # Cache
     cache_dir: Optional[str] = None  # None = disabled
+    force_refresh: bool = False  # If True, bypass cache lookup (still writes to cache)
 
     # ----------------------------
     # Config modification
@@ -318,6 +319,7 @@ class MinimaLlmConfig:
             compress_gzip=(_env_int("COMPRESS_GZIP", 0) != 0),
             # cache
             cache_dir=_env_str("CACHE_DIR"),
+            force_refresh=(_env_int("CACHE_FORCE_REFRESH", 0) != 0),
         )
 
     @classmethod
@@ -360,6 +362,8 @@ class MinimaLlmConfig:
             base_url=cls._normalize_base_url(data["base_url"]),
             model=data["model"],
             api_key=data.get("api_key", ""),
+            cache_dir=data.get("cache_dir"),
+            force_refresh=bool(data.get("force_refresh", False)),
         )
 
     # ----------------------------
@@ -434,5 +438,6 @@ class MinimaLlmConfig:
 
         add("Cache")
         kv("cache_dir", self.cache_dir if self.cache_dir else "<disabled>")
+        kv("force_refresh", self.force_refresh)
 
         return "\n".join(lines)

@@ -194,6 +194,8 @@ def prepare_prompts(
     """Create pairwise comparison prompts for all responses."""
     prompts: List[PrefJudgeData] = []
     for topic_id, responses in rag_response_by_topic.items():
+        # Sort responses by run_id for deterministic pair ordering
+        responses = sorted(responses, key=lambda r: r.metadata.run_id)
         if num_pivot:
             print("pivots: ", [r.metadata.run_id for r in responses[0:num_pivot]])
         request = rag_topic_dict[topic_id]

@@ -185,7 +185,8 @@ def option_llm_config():
             type=click.Path(exists=True, path_type=Path),
             required=False,
             default=None,
-            help="Path to llm-config.yml (dev: base_url+model, submission: model_preferences)"
+            help="Path to llm-config.yml (dev: base_url+model, submission: model_preferences). "
+                 "Tip: CACHE_FORCE_REFRESH=1 bypasses prompt cache."
         )(func)
         return func
     return decorator
@@ -251,7 +252,10 @@ def option_workflow():
     return decorator
 
 
-def _resolve_llm_config(llm_config_path: Optional[Path], submission: bool = False) -> MinimaLlmConfig:
+def _resolve_llm_config(
+    llm_config_path: Optional[Path],
+    submission: bool = False,
+) -> MinimaLlmConfig:
     """
     Resolve LLM config from llm-config.yml or environment.
 
@@ -260,6 +264,8 @@ def _resolve_llm_config(llm_config_path: Optional[Path], submission: bool = Fals
       For judge developers testing with their local LLM.
     - Submission mode (--submission): Resolve model_preferences against available
       models provided by the organizer.
+
+    Note: force_refresh is read from llm-config.yml or CACHE_FORCE_REFRESH env var.
 
     Args:
         llm_config_path: Path to llm-config.yml

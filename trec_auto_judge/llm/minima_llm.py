@@ -189,7 +189,7 @@ from dataclasses import dataclass
 from typing import Any, Awaitable, Callable, Dict, Iterable, List, Optional, Tuple, TypeVar, Union
 
 from .llm_config import BatchConfig, MinimaLlmConfig
-from .llm_protocol import AsyncMinimaLlmBackend, Json, MinimaLlmFailure, MinimaLlmRequest, MinimaLlmResponse
+from .llm_protocol import AsyncMinimaLlmBackend, Json, MinimaLlmFailure, MinimaLlmRequest, MinimaLlmResponse, MinimaLlmResult
 
 import contextvars
 # Task-local flag for cache bypass (safe for parallel async execution)
@@ -824,6 +824,7 @@ class OpenAIMinimaLlm(AsyncMinimaLlmBackend):
         force_refresh : bool
             If True, bypass cache lookup and make a fresh LLM call.
             The new response will still be written to cache.
+            (can also be set via `MinimaLlmConfig.force_refresh`)
 
         Returns MinimaLlmResponse on success, MinimaLlmFailure on error.
         Failures include full retry context: attempt count, timestamps, timeout.
@@ -837,7 +838,7 @@ class OpenAIMinimaLlm(AsyncMinimaLlmBackend):
         cache_key: Optional[str] = None
         if cache is not None:
             cache_key = self._make_cache_key(req)
-            if not force_refresh:
+            if not (force_refresh or self.cfg.force_refresh):
                 async with self._cache_lock:  # type: ignore[union-attr]
                     cached = cache.get(cache_key)
                 if cached is not None:

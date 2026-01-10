@@ -231,6 +231,9 @@ class PrefNuggetJudge(AutoJudge):
         print(
             f"PrefNuggetJudge: Extracting nuggets from {len(extraction_data)} comparison pairs..."
         )
+        # Debug: print extraction pairs for reproducibility debugging
+        for i, ed in enumerate(extraction_data[:20]):  # First 20
+            print(f"  [{i}] {ed.query_id}: {ed.winner_run_id} > {ed.loser_run_id}")
 
         # Output converter (JSON parsing handled by TolerantChatAdapter)
         def convert_output(
