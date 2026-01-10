@@ -103,8 +103,18 @@ class TolerantChatAdapter(ChatAdapter):
 
     @classmethod
     def is_list_str(cls, ann):
-        """Return True if annotation is list[str] or List[str]."""
+        """Return True if annotation is list[str], List[str], or Optional[list[str]]."""
+        from typing import Union
         origin = getattr(ann, "__origin__", None)
+
+        # Handle Optional[List[str]] -> Union[List[str], None]
+        if origin is Union:
+            args = getattr(ann, "__args__", ())
+            non_none = [a for a in args if a is not type(None)]
+            if len(non_none) == 1:
+                return cls.is_list_str(non_none[0])
+            return False
+
         if origin is list:
             args = getattr(ann, "__args__", ())
             return args == (str,)
