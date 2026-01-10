@@ -191,12 +191,57 @@ from typing import Any, Awaitable, Callable, Dict, Iterable, List, Optional, Tup
 from .llm_config import BatchConfig, MinimaLlmConfig
 from .llm_protocol import AsyncMinimaLlmBackend, Json, MinimaLlmFailure, MinimaLlmRequest, MinimaLlmResponse, MinimaLlmResult
 
+
+# ----------------------------
+# Backend Pulse (Diagnostics)
+# ----------------------------
+
+@dataclass
+class BackendPulse:
+    """Real-time diagnostics from backend operations.
+
+    Collects all stats that can be measured at the backend level:
+    - Request counts (cache hits, LLM calls)
+    - Token usage (input/output)
+    - Latency (min/max/avg)
+
+    Stats persist for the lifetime of the backend instance.
+    Call reset_pulse() to clear between batches if needed.
+
+    The heartbeat polls this for display, computing rates from deltas.
+    """
+    # Request counts
+    cache_hits: int = 0
+    llm_calls: int = 0
+
+    # Token usage
+    input_tokens: int = 0
+    output_tokens: int = 0
+
+    # Latency tracking (in seconds)
+    total_latency_s: float = 0.0
+    min_latency_s: float = float('inf')
+    max_latency_s: float = 0.0
+
+    @property
+    def done(self) -> int:
+        """Total completed requests (cache hits + LLM calls)."""
+        return self.cache_hits + self.llm_calls
+
+    @property
+    def avg_latency_s(self) -> float:
+        """Average latency per LLM call in seconds."""
+        return self.total_latency_s / self.llm_calls if self.llm_calls > 0 else 0.0
+
+
+# Backwards compatibility alias
+BackendStats = BackendPulse
+
+
 import contextvars
 # Task-local flags for cache bypass and telemetry (safe for parallel async execution)
 _force_refresh_ctx: contextvars.ContextVar[bool] = contextvars.ContextVar('force_refresh', default=False)
 _last_cached_ctx: contextvars.ContextVar[bool] = contextvars.ContextVar('last_cached', default=False)
-_last_input_tokens_ctx: contextvars.ContextVar[int] = contextvars.ContextVar('last_input_tokens', default=0)
-_last_output_tokens_ctx: contextvars.ContextVar[int] = contextvars.ContextVar('last_output_tokens', default=0)
 
 
 # Public API for adapter authors
@@ -212,21 +257,6 @@ def set_last_cached(cached: bool) -> None:
 def get_last_cached() -> bool:
     """Get cache status from most recent generate() in this async task."""
     return _last_cached_ctx.get()
-
-
-def set_last_tokens(input_tokens: int, output_tokens: int) -> None:
-    """Record token usage for heartbeat tracking.
-
-    Called automatically by generate(). Adapter authors can use this if they
-    need to manually track token usage from custom LLM calls.
-    """
-    _last_input_tokens_ctx.set(input_tokens)
-    _last_output_tokens_ctx.set(output_tokens)
-
-
-def get_last_tokens() -> tuple:
-    """Get token usage from most recent generate() in this async task."""
-    return (_last_input_tokens_ctx.get(), _last_output_tokens_ctx.get())
 
 def set_force_refresh(force_refresh: bool)->contextvars.Token[bool]:
     """Call in generate() to force re-issuing the prompt (e.g. when response parsing failed)
@@ -449,46 +479,51 @@ class _FailureCollector:
         return list(self._summaries)
 
 class _Heartbeat:
-    def __init__(self, *, interval_seconds: float, stall_timeout_seconds: float, num_workers: int = 0) -> None:
+    def __init__(
+        self,
+        *,
+        interval_seconds: float,
+        stall_timeout_seconds: float,
+        num_workers: int = 0,
+        pulse_provider: Optional[Callable[[], BackendPulse]] = None,
+    ) -> None:
         self._every_s = float(interval_seconds)
         self._stall_s = float(stall_timeout_seconds)
         self._num_workers = num_workers
         self._start = time.monotonic()
         self._last_done = self._start
         self._last_print = self._start
-        self._cached_count = 0
-        self._llm_count = 0
-        self.done = 0
 
         # Per-interval LLM counters (excludes cache hits)
         self._interval_llm_sent = 0      # LLM requests sent this interval
         self._interval_llm_received = 0  # LLM responses received this interval
 
-        # Token tracking
-        self._interval_input_tokens = 0
-        self._interval_output_tokens = 0
-        self._total_input_tokens = 0
-        self._total_output_tokens = 0
+        # Pulse provider for stats (polled from backend)
+        self._pulse_provider = pulse_provider
+        self._last_pulse: Optional[BackendPulse] = None
+
+    @property
+    def done(self) -> int:
+        """Total completed requests (from backend pulse)."""
+        if self._pulse_provider:
+            return self._pulse_provider().done
+        return 0
 
     def mark_start(self) -> None:
         """Mark that a request has been sent (only counts LLM calls, not cache hits)."""
         self._interval_llm_sent += 1  # Assume that this call is not cached (we don't know yet, but we pull back the count in `mark_done` if need to be)
 
-    def mark_done(self, *, cached: bool = False, input_tokens: int = 0, output_tokens: int = 0) -> None:
+    def mark_done(self, *, cached: bool = False) -> None:
+        """Mark a request as done. Updates stall detection and rate counters.
+
+        The done count itself comes from pulse_provider.done (cache_hits + llm_calls).
+        """
         self._last_done = time.monotonic()
         if cached:
-            self._cached_count += 1
-            self.done += 1
-            self._interval_llm_sent -= 1 # because it was cached, it wasn't really sent -- but we did not know that in `mark_start`.
+            # It was cached, so it wasn't really sent - correct the mark_start() assumption
+            self._interval_llm_sent -= 1
         else:
             self._interval_llm_received += 1
-            self._llm_count += 1
-            self.done += 1
-            # Track tokens (only for non-cached responses)
-            self._interval_input_tokens += input_tokens
-            self._interval_output_tokens += output_tokens
-            self._total_input_tokens += input_tokens
-            self._total_output_tokens += output_tokens
 
     @staticmethod
     def _fmt_eta(seconds: float) -> str:
@@ -518,22 +553,42 @@ class _Heartbeat:
             interval_s = now - self._last_print
             elapsed = now - self._start
 
-            # Per-interval rates
+            # Per-interval rates (from local counters)
             sent_rate = self._interval_llm_sent / interval_s if interval_s > 0 else 0
             recv_rate = self._interval_llm_received / interval_s if interval_s > 0 else 0
-
-            # Token rates (per second this interval)
-            in_tok_rate = self._interval_input_tokens / interval_s if interval_s > 0 else 0
-            out_tok_rate = self._interval_output_tokens / interval_s if interval_s > 0 else 0
 
             # Reset interval counters
             self._interval_llm_sent = 0
             self._interval_llm_received = 0
-            self._interval_input_tokens = 0
-            self._interval_output_tokens = 0
+
+            # Poll backend pulse for tokens, latency, cache hits, llm calls
+            pulse: Optional[BackendPulse] = None
+            if self._pulse_provider:
+                pulse = self._pulse_provider()
+
+            # Compute token rates from delta between polls
+            in_tok_rate = 0.0
+            out_tok_rate = 0.0
+            if pulse and self._last_pulse:
+                delta_in = pulse.input_tokens - self._last_pulse.input_tokens
+                delta_out = pulse.output_tokens - self._last_pulse.output_tokens
+                in_tok_rate = delta_in / interval_s if interval_s > 0 else 0
+                out_tok_rate = delta_out / interval_s if interval_s > 0 else 0
+
+            # Snapshot pulse for next interval
+            if pulse:
+                self._last_pulse = BackendPulse(
+                    cache_hits=pulse.cache_hits,
+                    llm_calls=pulse.llm_calls,
+                    input_tokens=pulse.input_tokens,
+                    output_tokens=pulse.output_tokens,
+                    total_latency_s=pulse.total_latency_s,
+                    min_latency_s=pulse.min_latency_s,
+                    max_latency_s=pulse.max_latency_s,
+                )
 
             # ETA estimation based on LLM calls only (not cache hits)
-            llm_done = self._llm_count
+            llm_done = pulse.llm_calls if pulse else 0
             remaining = max(0, total - self.done)
 
             if llm_done > 0 and elapsed > 0:
@@ -543,20 +598,25 @@ class _Heartbeat:
             else:
                 eta_str = "?"
 
-            # Build token stats string (only if we have token data)
+            # Build token stats string (only if we have pulse provider with token data)
             tok_str = ""
-            if self._total_input_tokens > 0 or self._total_output_tokens > 0:
+            if pulse and (pulse.input_tokens > 0 or pulse.output_tokens > 0):
+                lat_str = f" lat={pulse.avg_latency_s:.1f}s" if pulse.llm_calls > 0 else ""
                 tok_str = (
                     f" | tok: in={self._fmt_tokens(int(in_tok_rate))}/s "
                     f"out={self._fmt_tokens(int(out_tok_rate))}/s "
-                    f"({self._fmt_tokens(self._total_input_tokens)}/{self._fmt_tokens(self._total_output_tokens)})"
+                    f"({self._fmt_tokens(pulse.input_tokens)}/{self._fmt_tokens(pulse.output_tokens)})"
+                    f"{lat_str}"
                 )
+
+            # Get cached count from pulse if available
+            cached_count = pulse.cache_hits if pulse else 0
 
             print(
                 f"[{elapsed:7.1f}s] "
                 f"done={self.done}/{total} "
                 f"sent={sent_rate:.1f}/s recv={recv_rate:.1f}/s "
-                f"cached={self._cached_count} "
+                f"cached={cached_count} "
                 f"failed={failed} "
                 f"eta={eta_str}"
                 f"{tok_str}"
@@ -580,7 +640,8 @@ class _Heartbeat:
 async def run_batched_callable(
     items: List[T],
     async_callable: Callable[[T], Awaitable[R]],
-    batch_config: Optional[BatchConfig]=None,
+    batch_config: Optional[BatchConfig] = None,
+    pulse_provider: Optional[Callable[[], BackendPulse]] = None,
 ) -> List[Union[R, MinimaLlmFailure]]:
     """
     Execute a batch of async calls using the worker pool pattern.
@@ -597,21 +658,24 @@ async def run_batched_callable(
         Async function to call for each item
     batch_config : BatchConfig
         Configuration for batch execution (num_workers, max_failures, etc.)
+    pulse_provider : Optional[Callable[[], BackendPulse]]
+        Optional callback to get backend pulse for heartbeat display
 
     Returns
     -------
     List[Union[R, MinimaLlmFailure]]
         Results in input order (success values or MinimaLlmFailure)
     """
-    
+
     if batch_config is None:
-        batch_config=BatchConfig.from_env()
+        batch_config = BatchConfig.from_env()
 
     num_workers = max(1, int(batch_config.num_workers))
     hb = _Heartbeat(
         interval_seconds=batch_config.heartbeat_s,
         stall_timeout_seconds=batch_config.stall_s,
         num_workers=num_workers,
+        pulse_provider=pulse_provider,
     )
     fc = _FailureCollector(
         print_first_n=batch_config.print_first_failures,
@@ -637,13 +701,10 @@ async def run_batched_callable(
             except asyncio.QueueEmpty:
                 return
 
-            # Reset contextvars to prevent stale state from prior task bleeding through
+            # Reset contextvar for cache status
             set_last_cached(False)
-            set_last_tokens(0, 0)
             hb.mark_start()  # We don't know yet if this was cached, makes the count wrong.
             cached = False
-            input_tokens = 0
-            output_tokens = 0
             try:
                 result = await async_callable(item)
                 # Check if result is a failure (generate() returns Result, not raises)
@@ -653,12 +714,6 @@ async def run_batched_callable(
                 else:
                     # Get cached status. Since the DSPy adapter unwraps the MinimaLlmResponse object, and drops the cached flag, we use a context var as a fall-back
                     cached = bool(getattr(result, "cached", False)) or get_last_cached()
-                    # Extract token counts if available (try result attrs first, then context vars)
-                    input_tokens = getattr(result, "input_tokens", 0) or 0
-                    output_tokens = getattr(result, "output_tokens", 0) or 0
-                    if input_tokens == 0 and output_tokens == 0:
-                        # DSPy adapter unwraps MinimaLlmResponse, losing token attrs - use context var fallback
-                        input_tokens, output_tokens = get_last_tokens()
                 results[i] = result
             except Exception as e:
                 # Code errors (NameError, TypeError, etc.) propagate immediately
@@ -674,7 +729,7 @@ async def run_batched_callable(
                 results[i] = f
                 fc.record(f)
 
-            hb.mark_done(cached=cached, input_tokens=input_tokens, output_tokens=output_tokens)
+            hb.mark_done(cached=cached)
             q.task_done()
 
             # Check if we should trigger early abort after recording failure
@@ -762,6 +817,22 @@ class OpenAIMinimaLlm(AsyncMinimaLlmBackend):
         if cfg.cache_dir:
             os.makedirs(cfg.cache_dir, exist_ok=True)
             self._cache_path = os.path.join(cfg.cache_dir, "minima_llm.db")
+
+        # Backend pulse - diagnostics that persist for lifetime of backend
+        # (Like RpmGate/Cooldown, this has meaningful state, no async primitives)
+        self._pulse = BackendPulse()
+
+    def get_pulse(self) -> BackendPulse:
+        """Return backend diagnostics pulse."""
+        return self._pulse
+
+    def reset_pulse(self) -> None:
+        """Reset diagnostics (e.g., between batches if desired)."""
+        self._pulse = BackendPulse()
+
+    # Backwards compatibility
+    get_stats = get_pulse
+    reset_stats = reset_pulse
 
     def _ensure_async_resources(self) -> None:
         """Lazily create/recreate Semaphore and cache lock for current event loop.
@@ -903,6 +974,7 @@ class OpenAIMinimaLlm(AsyncMinimaLlmBackend):
                 async with self._cache_lock:  # type: ignore[union-attr]
                     cached = cache.get(cache_key)
                 if cached is not None:
+                    self._pulse.cache_hits += 1
                     set_last_cached(True)
                     return MinimaLlmResponse(request_id=req.request_id, text=cached[0], raw=cached[1], cached=True)
 
@@ -931,7 +1003,9 @@ class OpenAIMinimaLlm(AsyncMinimaLlmBackend):
 
             async with self._sem:
                 attempt_timestamps.append(time.monotonic())  # Record send time
+                call_start = time.monotonic()
                 status, headers, raw = await self._post_json(url, payload)
+                call_latency = time.monotonic() - call_start
 
             body_text = raw.decode("utf-8", errors="replace")
             last_body = body_text[:300]
@@ -978,8 +1052,15 @@ class OpenAIMinimaLlm(AsyncMinimaLlmBackend):
                 if overload_warning_printed:
                     print("Server recovered. Resuming normal operation.")
 
+                # Update backend stats
+                self._pulse.llm_calls += 1
+                self._pulse.input_tokens += input_tokens
+                self._pulse.output_tokens += output_tokens
+                self._pulse.total_latency_s += call_latency
+                self._pulse.min_latency_s = min(self._pulse.min_latency_s, call_latency)
+                self._pulse.max_latency_s = max(self._pulse.max_latency_s, call_latency)
+
                 set_last_cached(False)
-                set_last_tokens(input_tokens, output_tokens)
                 return MinimaLlmResponse(
                     request_id=req.request_id,
                     text=str(text),
@@ -1030,7 +1111,9 @@ class OpenAIMinimaLlm(AsyncMinimaLlmBackend):
         This runs requests concurrently (subject to cfg.max_outstanding) and
         prints a heartbeat for long-running jobs.
         """
-        return await run_batched_callable(requests, self.generate, self.cfg.batch)
+        return await run_batched_callable(
+            requests, self.generate, self.cfg.batch, pulse_provider=self.get_pulse
+        )
 
     async def run_batched_callable(
         self,
@@ -1043,4 +1126,6 @@ class OpenAIMinimaLlm(AsyncMinimaLlmBackend):
         Convenience method that delegates to the standalone run_batched_callable
         function with this backend's configuration.
         """
-        return await run_batched_callable(items, async_callable, self.cfg.batch)
+        return await run_batched_callable(
+            items, async_callable, self.cfg.batch, pulse_provider=self.get_pulse
+        )
