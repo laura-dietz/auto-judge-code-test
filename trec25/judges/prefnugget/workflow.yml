@@ -51,3 +51,8 @@ variants:
     max_nuggets_per_topic: 20
     stop_collecting_at_nuggets_per_topic: 20
     
+  subtle2:
+    iterative_nuggets: true
+    max_nuggets_per_topic: 20
+    stop_collecting_at_nuggets_per_topic: 20
+    
