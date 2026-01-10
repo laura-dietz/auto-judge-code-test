@@ -55,12 +55,14 @@ class TestIsListStr:
 
 
 class TestTryParseListStr:
-    """Tests for TolerantChatAdapter.try_parse_list_str() JSON parsing."""
+    """Tests for TolerantChatAdapter.try_parse_list_str() parsing."""
 
     @pytest.fixture
     def adapter_class(self):
         from trec_auto_judge.llm.minima_llm_dspy import TolerantChatAdapter
         return TolerantChatAdapter
+
+    # === JSON (double-quote) tests ===
 
     def test_valid_json_array(self, adapter_class):
         """Valid JSON array should parse correctly."""
@@ -77,8 +79,13 @@ class TestTryParseListStr:
         result = adapter_class.try_parse_list_str('["a", "", "b", null, "c"]')
         assert result == ["a", "b", "c"]
 
+    def test_json_with_apostrophe(self, adapter_class):
+        """JSON handles apostrophes in strings correctly."""
+        result = adapter_class.try_parse_list_str('["What is the article\'s main point?"]')
+        assert result == ["What is the article's main point?"]
+
     def test_invalid_json_raises(self, adapter_class):
-        """Invalid JSON should raise ValueError."""
+        """Invalid input should raise ValueError."""
         with pytest.raises(ValueError, match="Expected JSON array"):
             adapter_class.try_parse_list_str("not json")
 
@@ -91,3 +98,38 @@ class TestTryParseListStr:
         """JSON string (not array) should raise ValueError."""
         with pytest.raises(ValueError, match="Expected JSON array"):
             adapter_class.try_parse_list_str('"just a string"')
+
+    # === Python (single-quote) tests ===
+
+    def test_python_single_quote_array(self, adapter_class):
+        """Python-style single-quote list should parse correctly."""
+        result = adapter_class.try_parse_list_str("['a', 'b', 'c']")
+        assert result == ["a", "b", "c"]
+
+    def test_python_single_quote_with_whitespace(self, adapter_class):
+        """Python list items should be stripped."""
+        result = adapter_class.try_parse_list_str("['  a  ', 'b', 'c  ']")
+        assert result == ["a", "b", "c"]
+
+    def test_python_with_escaped_apostrophe(self, adapter_class):
+        """Python list with properly escaped apostrophe should parse."""
+        result = adapter_class.try_parse_list_str("['What is the article\\'s main point?']")
+        assert result == ["What is the article's main point?"]
+
+    def test_unbalanced_quotes_raises(self, adapter_class):
+        """Odd number of single quotes should raise ValueError (apostrophe issue)."""
+        # This simulates: ['What about article's thing'] with unescaped apostrophe
+        with pytest.raises(ValueError, match="Unbalanced single quotes"):
+            adapter_class.try_parse_list_str("['What about article's thing']")
+
+    # === Empty/edge cases ===
+
+    def test_empty_list(self, adapter_class):
+        """Empty list should parse correctly."""
+        result = adapter_class.try_parse_list_str("[]")
+        assert result == []
+
+    def test_empty_list_with_spaces(self, adapter_class):
+        """Empty list with whitespace should parse correctly."""
+        result = adapter_class.try_parse_list_str("  [  ]  ")
+        assert result == []

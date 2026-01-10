@@ -79,6 +79,7 @@ class ExtractDifferentiatingNuggets(dspy.Signature):
 
     differentiating_questions: list[str] = dspy.OutputField(
         desc='JSON array, e.g. ["Capital of USA?", "Process to cook steel?"]'
+        # desc='JSON array with double quotes, e.g. ["USA\'s capital?", "Process to cook steel?"]'
     )
 
 
@@ -254,6 +255,7 @@ class PrefNuggetJudge(AutoJudge):
             raise RuntimeError("This nugget creation only produces iterative_nuggets")
         # Build lookup structures
         rag_topic_dict: Dict[str, Request] = {t.request_id: t for t in rag_topics}
+        num_topics = len(rag_topic_dict)
         rag_response_by_topic: Dict[str, List[Report]] = {
             topic: list(responses)
             for topic, responses in groupby(
@@ -352,8 +354,16 @@ class PrefNuggetJudge(AutoJudge):
         # =----------------------------------------------=
         # prepare small batches to generate questions, then test.
 
-        def _print_examples(examples_by_topic:Dict[str,List[str]]) -> str:
-            return "\n".join([f"{topic_id}: {len(examples)}  {format_preview(examples,limit=5)}" for topic_id, examples in examples_by_topic.items()])
+        def _print_examples(examples_by_topic:Dict[str,List[str]], counts_by_topic: Dict[str, Dict[str, int]]) -> str:
+            lines = []
+            for topic_id, examples in sorted(examples_by_topic.items()):
+                counts = counts_by_topic.get(topic_id, {})
+                # Sort by count descending, then alphabetically for determinism
+                sorted_examples = sorted(examples, key=lambda q: (-counts.get(q, 0), q))
+                # Format with counts: "question (count)"
+                formatted = [f"{q} ({counts.get(q, 0)})" for q in sorted_examples[:5]]
+                lines.append(f"{topic_id}: {len(examples)}  {formatted}")
+            return "\n".join(lines)
 
         # Build borda_scores lookup for prioritizing best-performing responses
         borda_scores: Dict[str, int] = {key: agg.borda_score for key, agg in aggregates.items()}
@@ -361,7 +371,7 @@ class PrefNuggetJudge(AutoJudge):
         # Spread out elements with same query_id (round-robin interleave)
         # Within each topic, pairs are sorted by winner's borda_score (best performers first)
         extraction_data = _interleave_by_query_id(extraction_data, borda_scores)
-        extraction_data_chunks:List[List[IterativePrefNuggetData]] = _chunk(extraction_data)
+        extraction_data_chunks:List[List[IterativePrefNuggetData]] = _chunk(extraction_data, size=min(5,num_topics))
         current_questions:Dict[str, List[str]]=collections.defaultdict(list)
         topics_done:Set[str] = set()
         # Track how often each question is addressed (per query_id)
@@ -381,13 +391,15 @@ class PrefNuggetJudge(AutoJudge):
                 convert_output,
                 llm_config,
             )
-            print(f"PrefNuggetJudge: Finished extracting nuggets pass {chunk_idx}. Questions: {_print_examples(current_questions)}")
+            print(f"PrefNuggetJudge: Finished extracting nuggets pass {chunk_idx}. Questions: {_print_examples(current_questions, question_addressed_count)}")
 
             for data in filter(lambda d: not d.query_id in topics_done, extraction_chunk):  # don't waste time with done topics.
                 query_id = data.query_id
                 
-                # Add new questions
-                current_questions[query_id].extend(data.differentiating_questions)
+                # Add new questions (initialize count to 1 - the comparison that generated it)
+                for q in data.differentiating_questions:
+                    current_questions[query_id].append(q)
+                    question_addressed_count[query_id][q] = 1
                 # Tabulate how often each question is addressed
                 for q in data.addressed_questions:
                     question_addressed_count[query_id][q] += 1

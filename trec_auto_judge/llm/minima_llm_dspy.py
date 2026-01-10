@@ -120,16 +120,59 @@ class TolerantChatAdapter(ChatAdapter):
             return args == (str,)
         return False
 
+    # Regex patterns for list format detection
+    _SINGLE_QUOTE_LIST = re.compile(r"^\s*\[\s*'")
+    _DOUBLE_QUOTE_LIST = re.compile(r'^\s*\[\s*"')
+    _UNESCAPED_SINGLE = re.compile(r"(?<!\\)'")
+
     @classmethod
     def try_parse_list_str(cls, val: str) -> list[str]:
-        """Parse JSON array string to list[str], or raise ValueError."""
+        """Parse list from JSON or Python syntax.
+
+        - Double-quote lists (JSON): parse directly, handles apostrophes naturally
+        - Single-quote lists (Python): validate balanced quotes, parse if valid
+        - On failure: raise ValueError to trigger retry with fresh LLM call
+        """
+        import ast
         import json
+
+        val = val.strip()
+
+        if cls._DOUBLE_QUOTE_LIST.match(val):
+            # JSON-style double quotes - preferred format, apostrophes are safe
+            try:
+                parsed = json.loads(val)
+                if isinstance(parsed, list):
+                    return [str(x).strip() for x in parsed if x]
+            except json.JSONDecodeError:
+                pass
+            raise ValueError(f"Invalid JSON array: {val[:100]}")
+
+        elif cls._SINGLE_QUOTE_LIST.match(val):
+            # Python-style single quotes - check for balanced quotes first
+            quote_count = len(cls._UNESCAPED_SINGLE.findall(val))
+            if quote_count % 2 != 0:
+                raise ValueError(
+                    f"Unbalanced single quotes ({quote_count}) - "
+                    f"likely apostrophe issue, use JSON format: {val[:100]}"
+                )
+
+            # Even quotes - attempt parse (will fail if apostrophes cause issues)
+            try:
+                parsed = ast.literal_eval(val)
+                if isinstance(parsed, list):
+                    return [str(x).strip() for x in parsed if x]
+            except (ValueError, SyntaxError) as e:
+                raise ValueError(f"Invalid Python list ({e}), use JSON format: {val[:100]}")
+
+        # Empty list [] or other format - try JSON
         try:
             parsed = json.loads(val)
             if isinstance(parsed, list):
                 return [str(x).strip() for x in parsed if x]
         except json.JSONDecodeError:
             pass
+
         raise ValueError(f"Expected JSON array, got: {val[:100]}")
 
     @classmethod
