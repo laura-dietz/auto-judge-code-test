@@ -192,9 +192,11 @@ from .llm_config import BatchConfig, MinimaLlmConfig
 from .llm_protocol import AsyncMinimaLlmBackend, Json, MinimaLlmFailure, MinimaLlmRequest, MinimaLlmResponse, MinimaLlmResult
 
 import contextvars
-# Task-local flag for cache bypass (safe for parallel async execution)
+# Task-local flags for cache bypass and telemetry (safe for parallel async execution)
 _force_refresh_ctx: contextvars.ContextVar[bool] = contextvars.ContextVar('force_refresh', default=False)
 _last_cached_ctx: contextvars.ContextVar[bool] = contextvars.ContextVar('last_cached', default=False)
+_last_input_tokens_ctx: contextvars.ContextVar[int] = contextvars.ContextVar('last_input_tokens', default=0)
+_last_output_tokens_ctx: contextvars.ContextVar[int] = contextvars.ContextVar('last_output_tokens', default=0)
 
 
 # Public API for adapter authors
@@ -210,6 +212,21 @@ def set_last_cached(cached: bool) -> None:
 def get_last_cached() -> bool:
     """Get cache status from most recent generate() in this async task."""
     return _last_cached_ctx.get()
+
+
+def set_last_tokens(input_tokens: int, output_tokens: int) -> None:
+    """Record token usage for heartbeat tracking.
+
+    Called automatically by generate(). Adapter authors can use this if they
+    need to manually track token usage from custom LLM calls.
+    """
+    _last_input_tokens_ctx.set(input_tokens)
+    _last_output_tokens_ctx.set(output_tokens)
+
+
+def get_last_tokens() -> tuple:
+    """Get token usage from most recent generate() in this async task."""
+    return (_last_input_tokens_ctx.get(), _last_output_tokens_ctx.get())
 
 def set_force_refresh(force_refresh: bool)->contextvars.Token[bool]:
     """Call in generate() to force re-issuing the prompt (e.g. when response parsing failed)
@@ -620,8 +637,9 @@ async def run_batched_callable(
             except asyncio.QueueEmpty:
                 return
 
-            # Reset contextvar to prevent stale state from prior task bleeding through
+            # Reset contextvars to prevent stale state from prior task bleeding through
             set_last_cached(False)
+            set_last_tokens(0, 0)
             hb.mark_start()  # We don't know yet if this was cached, makes the count wrong.
             cached = False
             input_tokens = 0
@@ -633,11 +651,14 @@ async def run_batched_callable(
                     fc.record(result)
                 # Check if result was from cache (MinimaLlmResponse has cached attr)
                 else:
-                    # Get cached status. Since the DSPy adapter unwraps the MinimaLlmRespone object, and drops the cached flag, we use a context var as a fall-back
+                    # Get cached status. Since the DSPy adapter unwraps the MinimaLlmResponse object, and drops the cached flag, we use a context var as a fall-back
                     cached = bool(getattr(result, "cached", False)) or get_last_cached()
-                    # Extract token counts if available
+                    # Extract token counts if available (try result attrs first, then context vars)
                     input_tokens = getattr(result, "input_tokens", 0) or 0
                     output_tokens = getattr(result, "output_tokens", 0) or 0
+                    if input_tokens == 0 and output_tokens == 0:
+                        # DSPy adapter unwraps MinimaLlmResponse, losing token attrs - use context var fallback
+                        input_tokens, output_tokens = get_last_tokens()
                 results[i] = result
             except Exception as e:
                 # Code errors (NameError, TypeError, etc.) propagate immediately
@@ -958,6 +979,7 @@ class OpenAIMinimaLlm(AsyncMinimaLlmBackend):
                     print("Server recovered. Resuming normal operation.")
 
                 set_last_cached(False)
+                set_last_tokens(input_tokens, output_tokens)
                 return MinimaLlmResponse(
                     request_id=req.request_id,
                     text=str(text),
