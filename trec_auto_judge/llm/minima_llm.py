@@ -443,16 +443,21 @@ class _Heartbeat:
         self._llm_count = 0
         self.done = 0
 
-        # Per-interval LLM counters (excludes cache hits
+        # Per-interval LLM counters (excludes cache hits)
         self._interval_llm_sent = 0      # LLM requests sent this interval
         self._interval_llm_received = 0  # LLM responses received this interval
-        # self._prev_llm_count = 0         # LLM count at last print (for interval calculation)
+
+        # Token tracking
+        self._interval_input_tokens = 0
+        self._interval_output_tokens = 0
+        self._total_input_tokens = 0
+        self._total_output_tokens = 0
 
     def mark_start(self) -> None:
         """Mark that a request has been sent (only counts LLM calls, not cache hits)."""
         self._interval_llm_sent += 1  # Assume that this call is not cached (we don't know yet, but we pull back the count in `mark_done` if need to be)
 
-    def mark_done(self, *, cached: bool = False) -> None:
+    def mark_done(self, *, cached: bool = False, input_tokens: int = 0, output_tokens: int = 0) -> None:
         self._last_done = time.monotonic()
         if cached:
             self._cached_count += 1
@@ -462,6 +467,11 @@ class _Heartbeat:
             self._interval_llm_received += 1
             self._llm_count += 1
             self.done += 1
+            # Track tokens (only for non-cached responses)
+            self._interval_input_tokens += input_tokens
+            self._interval_output_tokens += output_tokens
+            self._total_input_tokens += input_tokens
+            self._total_output_tokens += output_tokens
 
     @staticmethod
     def _fmt_eta(seconds: float) -> str:
@@ -475,7 +485,16 @@ class _Heartbeat:
             return f"{m:d}m{s:02d}s"
         return f"{s:d}s"
 
-    def maybe_print(self, *, total: int, failed: int, queued: int = 0) -> None:
+    @staticmethod
+    def _fmt_tokens(count: int) -> str:
+        """Format token count with k/M suffix."""
+        if count >= 1_000_000:
+            return f"{count / 1_000_000:.1f}M"
+        if count >= 1_000:
+            return f"{count / 1_000:.1f}k"
+        return str(count)
+
+    def maybe_print(self, *, total: int, failed: int) -> None:
         now = time.monotonic()
 
         if self._every_s > 0 and (now - self._last_print) >= self._every_s:
@@ -486,9 +505,15 @@ class _Heartbeat:
             sent_rate = self._interval_llm_sent / interval_s if interval_s > 0 else 0
             recv_rate = self._interval_llm_received / interval_s if interval_s > 0 else 0
 
+            # Token rates (per second this interval)
+            in_tok_rate = self._interval_input_tokens / interval_s if interval_s > 0 else 0
+            out_tok_rate = self._interval_output_tokens / interval_s if interval_s > 0 else 0
+
             # Reset interval counters
             self._interval_llm_sent = 0
             self._interval_llm_received = 0
+            self._interval_input_tokens = 0
+            self._interval_output_tokens = 0
 
             # ETA estimation based on LLM calls only (not cache hits)
             llm_done = self._llm_count
@@ -501,6 +526,15 @@ class _Heartbeat:
             else:
                 eta_str = "?"
 
+            # Build token stats string (only if we have token data)
+            tok_str = ""
+            if self._total_input_tokens > 0 or self._total_output_tokens > 0:
+                tok_str = (
+                    f" | tok: in={self._fmt_tokens(int(in_tok_rate))}/s "
+                    f"out={self._fmt_tokens(int(out_tok_rate))}/s "
+                    f"({self._fmt_tokens(self._total_input_tokens)}/{self._fmt_tokens(self._total_output_tokens)})"
+                )
+
             print(
                 f"[{elapsed:7.1f}s] "
                 f"done={self.done}/{total} "
@@ -508,6 +542,7 @@ class _Heartbeat:
                 f"cached={self._cached_count} "
                 f"failed={failed} "
                 f"eta={eta_str}"
+                f"{tok_str}"
             )
             self._last_print = now
 
@@ -589,6 +624,8 @@ async def run_batched_callable(
             set_last_cached(False)
             hb.mark_start()  # We don't know yet if this was cached, makes the count wrong.
             cached = False
+            input_tokens = 0
+            output_tokens = 0
             try:
                 result = await async_callable(item)
                 # Check if result is a failure (generate() returns Result, not raises)
@@ -598,6 +635,9 @@ async def run_batched_callable(
                 else:
                     # Get cached status. Since the DSPy adapter unwraps the MinimaLlmRespone object, and drops the cached flag, we use a context var as a fall-back
                     cached = bool(getattr(result, "cached", False)) or get_last_cached()
+                    # Extract token counts if available
+                    input_tokens = getattr(result, "input_tokens", 0) or 0
+                    output_tokens = getattr(result, "output_tokens", 0) or 0
                 results[i] = result
             except Exception as e:
                 # Code errors (NameError, TypeError, etc.) propagate immediately
@@ -613,7 +653,7 @@ async def run_batched_callable(
                 results[i] = f
                 fc.record(f)
 
-            hb.mark_done(cached=cached)
+            hb.mark_done(cached=cached, input_tokens=input_tokens, output_tokens=output_tokens)
             q.task_done()
 
             # Check if we should trigger early abort after recording failure
@@ -904,6 +944,11 @@ class OpenAIMinimaLlm(AsyncMinimaLlmBackend):
                         attempt_timestamps=tuple(attempt_timestamps),
                     )
 
+                # Extract token usage (optional, defaults to 0)
+                usage = data.get("usage", {})
+                input_tokens = usage.get("prompt_tokens", 0) or 0
+                output_tokens = usage.get("completion_tokens", 0) or 0
+
                 # Store in cache on success (under lock)
                 if cache is not None and cache_key is not None:
                     async with self._cache_lock:  # type: ignore[union-attr]
@@ -913,7 +958,13 @@ class OpenAIMinimaLlm(AsyncMinimaLlmBackend):
                     print("Server recovered. Resuming normal operation.")
 
                 set_last_cached(False)
-                return MinimaLlmResponse(request_id=req.request_id, text=str(text), raw=data)
+                return MinimaLlmResponse(
+                    request_id=req.request_id,
+                    text=str(text),
+                    raw=data,
+                    input_tokens=input_tokens,
+                    output_tokens=output_tokens,
+                )
 
             # non-2xx: parse Retry-After if present
             retry_after = self._parse_retry_after(headers)

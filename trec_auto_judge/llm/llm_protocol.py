@@ -49,6 +49,8 @@ class MinimaLlmResponse:
     text: str
     raw: Optional[Json] = None
     cached: bool = False  # True if returned from prompt cache
+    input_tokens: int = 0  # Prompt tokens (from usage.prompt_tokens)
+    output_tokens: int = 0  # Completion tokens (from usage.completion_tokens)
 
 
 
