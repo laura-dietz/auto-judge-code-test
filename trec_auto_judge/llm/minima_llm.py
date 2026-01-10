@@ -205,9 +205,7 @@ class BackendPulse:
     - Token usage (input/output)
     - Latency (min/max/avg)
 
-    Stats persist for the lifetime of the backend instance.
-    Call reset_pulse() to clear between batches if needed.
-
+    Auto-reset at the start of each batch (run_batched/run_batched_callable).
     The heartbeat polls this for display, computing rates from deltas.
     """
     # Request counts
@@ -547,6 +545,44 @@ class _Heartbeat:
         return str(count)
 
     def maybe_print(self, *, total: int, failed: int) -> None:
+        '''Fetch pulse to update statistics.
+        
+        During each heartbeat interval:
+
+        Timeline
+
+        t=0s     t=5s        t=10s       t=15s
+        │        │           │           │
+        │   pulse_provider() │    pulse_provider()
+        │        │           │           │
+        │        ▼           │           ▼
+        │   pulse={in:1000}  │      pulse={in:3500}
+        │        │           │           │
+        │   _last_pulse=None │      _last_pulse={in:1000}
+        │        │           │           │
+        │   rate=? (no prev) │      delta=2500, rate=500/s
+        │        │           │           │
+        │   _last_pulse=     │      _last_pulse=
+        │     {in:1000}      │        {in:3500}
+
+  
+        Step 1: Poll current pulse
+        pulse = self._pulse_provider()
+        # pulse.input_tokens = 3500 (cumulative from backend)
+
+        Step 2: Compute delta from last snapshot
+        if pulse and self._last_pulse: 
+            delta_in = pulse.input_tokens - self._last_pulse.input_tokens  # 3500 - 1000 = 2500
+            in_tok_rate = delta_in / interval_s                     # 2500 / 5s = 500/s
+
+        Step 3: Save snapshot for next interval
+        if pulse:
+            self._last_pulse = BackendPulse(
+                input_tokens=pulse.input_tokens,  # 3500
+                ...
+            )
+      '''
+        
         now = time.monotonic()
 
         if self._every_s > 0 and (now - self._last_print) >= self._every_s:
@@ -1110,7 +1146,26 @@ class OpenAIMinimaLlm(AsyncMinimaLlmBackend):
 
         This runs requests concurrently (subject to cfg.max_outstanding) and
         prints a heartbeat for long-running jobs.
+        
+        Wiring: How pulse_provider Gets Passed
+
+        - OpenAIMinimaLlm.run_batched() passes pulse_provider=self.get_pulse → minima_llm.py:1116
+        - run_batched_callable() receives it and passes to _Heartbeat → minima_llm.py:695
+        - _Heartbeat.__init__ stores it as self._pulse_provider → minima_llm.py:505
+        
+            ┌─────────────────────────────────────────────────────┐
+            │  Batch Runner                                       │
+            │    ↓ async_callable(item)                          │
+            │    ↓                                                │
+            │  [DSPy Adapter] ← doesn't matter what happens here │
+            │    ↓                                                │
+            │  backend.generate() ← pulse updated here           │
+            │                                                     │
+            │  Heartbeat ──────────→ backend.get_pulse()         │
+            │              (direct poll, bypasses call chain)    │
+            └─────────────────────────────────────────────────────┘
         """
+        self.reset_pulse()
         return await run_batched_callable(
             requests, self.generate, self.cfg.batch, pulse_provider=self.get_pulse
         )
@@ -1125,7 +1180,26 @@ class OpenAIMinimaLlm(AsyncMinimaLlmBackend):
 
         Convenience method that delegates to the standalone run_batched_callable
         function with this backend's configuration.
+                
+        Wiring: How pulse_provider Gets Passed
+
+        - OpenAIMinimaLlm.run_batched() passes pulse_provider=self.get_pulse
+        - run_batched_callable() receives it and passes to _Heartbeat
+        - _Heartbeat.__init__ stores it as self._pulse_provider 
+                
+        ┌─────────────────────────────────────────────────────┐
+        │  Batch Runner                                       │
+        │    ↓ async_callable(item)                          │
+        │    ↓                                                │
+        │  [DSPy Adapter] ← doesn't matter what happens here │
+        │    ↓                                                │
+        │  backend.generate() ← pulse updated here           │
+        │                                                     │
+        │  Heartbeat ──────────→ backend.get_pulse()         │
+        │              (direct poll, bypasses call chain)    │
+        └─────────────────────────────────────────────────────┘
         """
+        self.reset_pulse()
         return await run_batched_callable(
             items, async_callable, self.cfg.batch, pulse_provider=self.get_pulse
         )
