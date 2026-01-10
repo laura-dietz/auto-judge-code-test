@@ -410,7 +410,7 @@ class PrefNuggetJudge(AutoJudge):
         # Spread out elements with same query_id (round-robin interleave)
         # Within each topic, pairs are sorted by winner's borda_score (best performers first)
         extraction_data = _interleave_by_query_id(extraction_data, borda_scores)
-        extraction_data_chunks:List[List[IterativePrefNuggetData]] = _chunk(extraction_data, size=min(5,num_topics))
+        extraction_data_chunks:List[List[IterativePrefNuggetData]] = _chunk(extraction_data, size=max(5,2*num_topics))
         tracker = QuestionTracker()
         topics_done:Set[str] = set()
 

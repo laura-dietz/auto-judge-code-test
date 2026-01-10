@@ -385,7 +385,10 @@ class MinimaLlmDSPyLM(_BaseLM):  # type: ignore[misc]
 
         resp = await self._minimallm.generate(req, force_refresh=force_refresh)
         if isinstance(resp, MinimaLlmFailure):
-            raise RuntimeError(f"{resp.error_type}: {resp.message}")
+            error_msg = f"{resp.error_type}: {resp.message}"
+            if resp.body_snippet:
+                error_msg += f"\nResponse body: {resp.body_snippet}"
+            raise RuntimeError(error_msg)
         set_last_cached(resp.cached)
         return [resp.text]
 
