@@ -1165,10 +1165,19 @@ class OpenAIMinimaLlm(AsyncMinimaLlmBackend):
             │              (direct poll, bypasses call chain)    │
             └─────────────────────────────────────────────────────┘
         """
+        self._print_batch_start(len(requests))
         self.reset_pulse()
         return await run_batched_callable(
             requests, self.generate, self.cfg.batch, pulse_provider=self.get_pulse
         )
+
+    def _print_batch_start(self, total: int) -> None:
+        """Print batch configuration at start."""
+        workers = self.cfg.batch.num_workers
+        outstanding = self.cfg.max_outstanding
+        rpm = self.cfg.rpm
+        rpm_str = f"rpm={rpm}" if rpm > 0 else "rpm=unlimited"
+        print(f"Starting batch: {total} items | workers={workers} max_outstanding={outstanding} {rpm_str}")
 
     async def run_batched_callable(
         self,
@@ -1199,6 +1208,7 @@ class OpenAIMinimaLlm(AsyncMinimaLlmBackend):
         │              (direct poll, bypasses call chain)    │
         └─────────────────────────────────────────────────────┘
         """
+        self._print_batch_start(len(items))
         self.reset_pulse()
         return await run_batched_callable(
             items, async_callable, self.cfg.batch, pulse_provider=self.get_pulse
