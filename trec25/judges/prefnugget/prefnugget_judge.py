@@ -196,9 +196,64 @@ class QuestionTracker:
         )[:n]
 
 
-def _chunk(lst: List[T], size: int = 5) -> List[List[T]]:
-    """Split list into chunks of approximately `size` items each."""
-    return [lst[i:i + size] for i in range(0, len(lst), size)]
+def _chunk_by_query(
+    lst: List[IterativePrefNuggetData],
+    borda_scores: Dict[str, int],
+    max_size: int = -1,
+    num_per_query: int = 2
+) -> List[List[IterativePrefNuggetData]]:
+    """Split list into chunks with at most `num_per_query` items per query_id.
+
+    Items with higher borda_score (for their winner) are prioritized first.
+
+    Args:
+        lst: List of data items with query_id attribute
+        borda_scores: Mapping of "run_id:topic_id" -> borda_score
+        max_size: Maximum batch size (-1 means unlimited)
+        num_per_query: Maximum items per query_id in each batch
+
+    Returns:
+        List of batches, each respecting the per-query limit
+    """
+    if not lst:
+        return []
+
+    # Sort by borda_score descending (best winners first)
+    sorted_lst = sorted(
+        lst,
+        key=lambda x: borda_scores.get(f"{x.winner_run_id}:{x.query_id}", 0),
+        reverse=True
+    )
+
+    chunks: List[List[IterativePrefNuggetData]] = []
+    remaining = sorted_lst
+
+    while remaining:
+        chunk: List[IterativePrefNuggetData] = []
+        query_counts: Dict[str, int] = collections.defaultdict(int)
+        still_remaining: List[IterativePrefNuggetData] = []
+
+        for item in remaining:
+            # Check if we can add this item
+            at_max_size = max_size > 0 and len(chunk) >= max_size
+            at_query_limit = query_counts[item.query_id] >= num_per_query
+
+            if at_max_size:
+                # Batch is full, save rest for next chunk
+                still_remaining.append(item)
+            elif at_query_limit:
+                # This query has enough in current batch, defer to next
+                still_remaining.append(item)
+            else:
+                # Add to current batch
+                chunk.append(item)
+                query_counts[item.query_id] += 1
+
+        if chunk:
+            chunks.append(chunk)
+        remaining = still_remaining
+
+    return chunks
 
 def _interleave_by_query_id(
     data: List[IterativePrefNuggetData],
@@ -372,24 +427,32 @@ class PrefNuggetJudge(AutoJudge):
         if not extraction_data:
             print("PrefNuggetJudge: No winner/loser pairs found after comparison")
             return None
+        # Debug: print extraction pairs for reproducibility debugging
+        for i, ed in enumerate(extraction_data[:20]):  # First 20
+            print(f"  [{i}] {ed.query_id}: {ed.winner_run_id} > {ed.loser_run_id}")
+
 
         print(
             f"PrefNuggetJudge: Extracting nuggets from {len(extraction_data)} comparison pairs..."
         )
-        # Debug: print extraction pairs for reproducibility debugging
-        for i, ed in enumerate(extraction_data[:20]):  # First 20
-            print(f"  [{i}] {ed.query_id}: {ed.winner_run_id} > {ed.loser_run_id}")
 
         # Output converter (JSON parsing handled by TolerantChatAdapter)
         def convert_output(
             prediction: dspy.Prediction, data: IterativePrefNuggetData
         ) -> None:
             differentiating_questions = getattr(prediction, "differentiating_questions", [])
-            data.differentiating_questions = list(differentiating_questions)[:max_questions_per_pair] if differentiating_questions else []
-            
+            # Normalize: strip whitespace, filter empty
+            data.differentiating_questions = [
+                q.strip() for q in (differentiating_questions or [])
+                if q and q.strip()
+            ][:max_questions_per_pair]
+
             # we actually may not need those, they are just a ruse
             addressed_questions = getattr(prediction, "addressed_questions", [])
-            data.addressed_questions = list(addressed_questions)[:max_questions_per_pair] if addressed_questions else []
+            data.addressed_questions = [
+                q.strip() for q in (addressed_questions or [])
+                if q and q.strip()
+            ][:max_questions_per_pair]
 
 
         # =----------------------------------------------=
@@ -409,8 +472,7 @@ class PrefNuggetJudge(AutoJudge):
 
         # Spread out elements with same query_id (round-robin interleave)
         # Within each topic, pairs are sorted by winner's borda_score (best performers first)
-        extraction_data = _interleave_by_query_id(extraction_data, borda_scores)
-        extraction_data_chunks:List[List[IterativePrefNuggetData]] = _chunk(extraction_data, size=max(5,2*num_topics))
+        extraction_data_chunks = _chunk_by_query(extraction_data, borda_scores, max_size=-1, num_per_query=2)
         tracker = QuestionTracker()
         topics_done:Set[str] = set()
 
@@ -428,7 +490,6 @@ class PrefNuggetJudge(AutoJudge):
                 convert_output,
                 llm_config,
             )
-            print(f"PrefNuggetJudge: Finished extracting nuggets pass {chunk_idx}. Questions:\n{_print_tracker(tracker)}")
 
             for data in filter(lambda d: d.query_id not in topics_done, extraction_chunk):
                 query_id = data.query_id
@@ -444,6 +505,8 @@ class PrefNuggetJudge(AutoJudge):
                 if tracker.num_questions(query_id) > stop_collecting_at_nuggets_per_topic:
                     topics_done.add(query_id)
             extraction_result_data.extend(extraction_chunk)
+
+            print(f"-- PrefNuggetJudge: Finished extracting nuggets pass {chunk_idx}. Questions:\n{_print_tracker(tracker)}")
 
         extraction_data = extraction_result_data
         print("PrefNuggetJudge: Finished extracting nuggets")
