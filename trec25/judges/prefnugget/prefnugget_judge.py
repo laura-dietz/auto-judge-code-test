@@ -155,6 +155,47 @@ class IterativePrefNuggetData(BaseModel):
 
 T = TypeVar('T')
 
+
+class QuestionTracker:
+    """Track unique questions and their occurrence counts per topic."""
+
+    def __init__(self):
+        # counts[query_id][question] = count
+        self._counts: Dict[str, Dict[str, int]] = collections.defaultdict(lambda: collections.defaultdict(int))
+
+    def add(self, query_id: str, question: str, count: int = 1) -> None:
+        """Add a question, incrementing its count."""
+        self._counts[query_id][question] += count
+
+    def questions(self, query_id: str) -> List[str]:
+        """Get list of unique questions for a topic."""
+        return list(self._counts[query_id].keys())
+
+    def count(self, query_id: str, question: str) -> int:
+        """Get count for a specific question."""
+        return self._counts[query_id].get(question, 0)
+
+    def counts_dict(self, query_id: str) -> Dict[str, int]:
+        """Get all counts for a topic."""
+        return dict(self._counts[query_id])
+
+    def num_questions(self, query_id: str) -> int:
+        """Get number of unique questions for a topic."""
+        return len(self._counts[query_id])
+
+    def items(self):
+        """Iterate over (query_id, questions_dict) pairs."""
+        return self._counts.items()
+
+    def top_questions(self, query_id: str, n: int) -> List[str]:
+        """Get top n questions by count, sorted descending."""
+        return sorted(
+            self._counts[query_id].keys(),
+            key=lambda q: self._counts[query_id][q],
+            reverse=True
+        )[:n]
+
+
 def _chunk(lst: List[T], size: int = 5) -> List[List[T]]:
     """Split list into chunks of approximately `size` items each."""
     return [lst[i:i + size] for i in range(0, len(lst), size)]
@@ -354,15 +395,13 @@ class PrefNuggetJudge(AutoJudge):
         # =----------------------------------------------=
         # prepare small batches to generate questions, then test.
 
-        def _print_examples(examples_by_topic:Dict[str,List[str]], counts_by_topic: Dict[str, Dict[str, int]]) -> str:
+        def _print_tracker(tracker: QuestionTracker) -> str:
             lines = []
-            for topic_id, examples in sorted(examples_by_topic.items()):
-                counts = counts_by_topic.get(topic_id, {})
+            for query_id, counts in sorted(tracker.items())[:5]:
                 # Sort by count descending, then alphabetically for determinism
-                sorted_examples = sorted(examples, key=lambda q: (-counts.get(q, 0), q))
-                # Format with counts: "question (count)"
-                formatted = [f"{q} ({counts.get(q, 0)})" for q in sorted_examples[:5]]
-                lines.append(f"{topic_id}: {len(examples)}  {formatted}")
+                sorted_qs = sorted(counts.keys(), key=lambda q: (-counts[q], q))[:5]
+                formatted = [f"  - {q} ({counts[q]})" for q in sorted_qs]
+                lines.append(f"{query_id}: {len(counts)} questions:\n" + "\n".join(formatted))
             return "\n".join(lines)
 
         # Build borda_scores lookup for prioritizing best-performing responses
@@ -372,17 +411,15 @@ class PrefNuggetJudge(AutoJudge):
         # Within each topic, pairs are sorted by winner's borda_score (best performers first)
         extraction_data = _interleave_by_query_id(extraction_data, borda_scores)
         extraction_data_chunks:List[List[IterativePrefNuggetData]] = _chunk(extraction_data, size=min(5,num_topics))
-        current_questions:Dict[str, List[str]]=collections.defaultdict(list)
+        tracker = QuestionTracker()
         topics_done:Set[str] = set()
-        # Track how often each question is addressed (per query_id)
-        question_addressed_count: Dict[str, Dict[str, int]] = collections.defaultdict(lambda: collections.defaultdict(int))
 
         extraction_result_data = list()
         for chunk_idx, extraction_chunk in enumerate(extraction_data_chunks):
             # set questions so far
             for data in extraction_chunk:
                 topic_id = data.query_id
-                data.given_exam_questions=current_questions[topic_id]
+                data.given_exam_questions = tracker.questions(topic_id)
 
             # Run LLM extraction
             extraction_chunk = run_dspy_batch_generic(
@@ -391,61 +428,56 @@ class PrefNuggetJudge(AutoJudge):
                 convert_output,
                 llm_config,
             )
-            print(f"PrefNuggetJudge: Finished extracting nuggets pass {chunk_idx}. Questions: {_print_examples(current_questions, question_addressed_count)}")
+            print(f"PrefNuggetJudge: Finished extracting nuggets pass {chunk_idx}. Questions:\n{_print_tracker(tracker)}")
 
-            for data in filter(lambda d: not d.query_id in topics_done, extraction_chunk):  # don't waste time with done topics.
+            for data in filter(lambda d: d.query_id not in topics_done, extraction_chunk):
                 query_id = data.query_id
-                
-                # Add new questions (initialize count to 1 - the comparison that generated it)
+
+                # Add new/duplicate questions (count increments for duplicates too)
                 for q in data.differentiating_questions:
-                    current_questions[query_id].append(q)
-                    question_addressed_count[query_id][q] = 1
+                    tracker.add(query_id, q)
                 # Tabulate how often each question is addressed
                 for q in data.addressed_questions:
-                    question_addressed_count[query_id][q] += 1
+                    tracker.add(query_id, q)
 
-                # Purge if exceeds max_nuggets_per_topic (keep most frequently addressed)
-                if len(current_questions[query_id]) > stop_collecting_at_nuggets_per_topic:
-                    topics_done.add(query_id)  # we stop collecting more nuggets.
-                    # I was thinking to keep going, but a new question is unlikely to get used more 
-                    # than once in within one pass, so there it is unlikely to outcompete existing questions.
+                # Stop collecting if we have enough unique questions
+                if tracker.num_questions(query_id) > stop_collecting_at_nuggets_per_topic:
+                    topics_done.add(query_id)
             extraction_result_data.extend(extraction_chunk)
-            
-        extraction_data=extraction_result_data
-        print("PrefNuggetJudge: Finished extracting nuggets")
-        
-        print(f"Question addressed: {question_addressed_count}")
 
-        # done collecting, now get rid of least used nuggets.
-        for query_id in current_questions.keys():
-            counts = question_addressed_count[query_id]
-            # Sort by count descending, keep top max_nuggets_per_topic
-            sorted_questions = sorted(
-                current_questions[query_id],
-                key=lambda q: counts.get(q, 0),
-                reverse=True
-            )
-            current_questions[query_id] = sorted_questions[:max_nuggets_per_topic]
+        extraction_data = extraction_result_data
+        print("PrefNuggetJudge: Finished extracting nuggets")
+        print(f"Question counts: {dict(tracker.items())}")
+
+        # Keep only top max_nuggets_per_topic questions per topic
+        final_questions: Dict[str, List[str]] = {
+            query_id: tracker.top_questions(query_id, max_nuggets_per_topic)
+            for query_id, _ in tracker.items()
+        }
 
         # =----------------------------------------------=
 
-        # Aggregate by topic
-        results_by_topic: Dict[str, List[IterativePrefNuggetData]] = {}
-        for data in extraction_data:
-            results_by_topic.setdefault(data.query_id, []).append(data)
-
-        # Build NuggetBanks
+        # Build NuggetBanks from final_questions (already deduplicated and filtered by count)
         banks: List[NuggetBank] = []
         total_nuggets = 0
-        for topic_id, topic_results in results_by_topic.items():
+        for topic_id, questions in final_questions.items():
             request = rag_topic_dict.get(topic_id)
-            bank = self._aggregate_nuggets_for_topic(
-                topic_id=topic_id,
-                title_query=request.title if request else topic_id,
-                extraction_results=topic_results,
+            bank = NuggetBank(
+                query_id=topic_id,
+                title_query=request.title if request else topic_id
             )
+            nuggets = [
+                NuggetQuestion(
+                    query_id=topic_id,
+                    question=q,
+                    question_id=f"{topic_id}-pn{i}",
+                )
+                for i, q in enumerate(questions)
+            ]
+            bank.add_nuggets(nuggets)
+            bank.index_nuggets()
             banks.append(bank)
-            total_nuggets += len(bank.nuggets_as_list())
+            total_nuggets += len(nuggets)
 
         print(
             f"PrefNuggetJudge: Created {total_nuggets} nuggets across {len(banks)} topics"
