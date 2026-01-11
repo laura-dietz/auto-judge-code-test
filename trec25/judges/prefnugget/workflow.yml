@@ -57,7 +57,7 @@ variants:
     iterative_nuggets: true
     nugget_gen_order: "first"
     pref_judge: "must_decide"  # must_decide | ties_allowed
-    max_pairs_considered: 100
+    max_pairs_considered: 50
     gen_batch_num_per_query: 2
     max_nuggets_per_topic: 20
     stop_collecting_at_nuggets_per_topic: 20
@@ -75,7 +75,7 @@ variants:
     nugget_gen_order: "both"
     pref_judge: "must_decide"  # must_decide | ties_allowed
     gen_batch_num_per_query: 2
-    max_pairs_considered: 100
+    max_pairs_considered: 50
     max_nuggets_per_topic: 20
     stop_collecting_at_nuggets_per_topic: 20
     num_others: 4
@@ -92,7 +92,7 @@ variants:
     nugget_gen_order: "both"
     pref_judge: "ties_allowed"  # must_decide | ties_allowed
     gen_batch_num_per_query: 2
-    max_pairs_considered: 100
+    max_pairs_considered: 50
     max_nuggets_per_topic: 20
     stop_collecting_at_nuggets_per_topic: 20
     num_others: 4
