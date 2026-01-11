@@ -571,16 +571,19 @@ def auto_judge_to_click_command(auto_judge: AutoJudge, cmd_name: str):
             raise click.UsageError("--variant, --sweep, and --all-variants are mutually exclusive.")
 
         # Resolve configurations based on CLI options
-        if variant:
-            configs = [resolve_variant(wf, variant)]
-        elif sweep:
-            configs = resolve_sweep(wf, sweep)
-        elif all_variants:
-            if not wf.variants:
-                raise click.UsageError("No variants defined in workflow.")
-            configs = [resolve_variant(wf, name) for name in wf.variants]
-        else:
-            configs = [resolve_default(wf)]
+        try:
+            if variant:
+                configs = [resolve_variant(wf, variant)]
+            elif sweep:
+                configs = resolve_sweep(wf, sweep)
+            elif all_variants:
+                if not wf.variants:
+                    raise click.UsageError("No variants defined in workflow.")
+                configs = [resolve_variant(wf, name) for name in wf.variants]
+            else:
+                configs = [resolve_default(wf)]
+        except KeyError as e:
+            raise click.UsageError(str(e).strip("'\""))
 
 
         # Step 1: Load base LLM config from file/env
