@@ -10,7 +10,7 @@ This judge is primarily a nugget creator - judge() returns (None, None).
 import collections
 from itertools import groupby
 import sys
-from typing import Any, Dict, List, Optional, Sequence, Set, Type, TypeVar
+from typing import Any, Dict, List, Literal, Set, TypeVar
 
 import dspy
 from pydantic import BaseModel
@@ -26,6 +26,8 @@ from trec_auto_judge.nugget_data import (
 # Import shared utilities
 from trec_auto_judge.llm.minima_llm_dspy import run_dspy_batch_generic
 from trec25.judges.shared.pref_common import (
+    PrefJudgment,
+    PrefTiesJudgment,
     compute_pref_aggregates,
     prepare_prompts,
     run_pref_judgment_batch,
@@ -36,6 +38,7 @@ from trec25.judges.shared.rubric_common import (
     prepare_nugget_grade_data,
     compute_nugget_aggregates,
 )
+
 
 # =============================================================================
 # Leaderboard & Qrels Specs (judge-specific)
@@ -197,14 +200,100 @@ class QuestionTracker:
             reverse=True
         )[:n]
 
+def _print_tracker(tracker: QuestionTracker) -> str:
+    lines = []
+    for query_id, counts in sorted(tracker.items())[:5]:
+        # Sort by count descending, then alphabetically for determinism
+        sorted_qs = sorted(counts.keys(), key=lambda q: (-counts[q], q))[:5]
+        formatted = [f"  - {q} ({counts[q]})" for q in sorted_qs]
+        lines.append(f"{query_id}: {len(counts)} questions:\n" + "\n".join(formatted))
+    return "\n".join(lines)
 
-def _chunk_by_query(
+
+
+
+def _chunk_by_query_both(
+    lst: List[IterativePrefNuggetData],
+    borda_scores: Dict[str, int],
+    nugget_gen_order: Literal["winner", "both"],
+    num_per_query: int = 2, 
+    max_pairs_considered: int = -1
+) -> List[List[IterativePrefNuggetData]]:
+    """Split list into chunks with at most `num_per_query` items per query_id.
+
+    Pairs with higher borda_scores (sum) are prioritized first.
+
+    Args:
+        lst: List of data items with query_id attribute
+        borda_scores: Mapping of "run_id:topic_id" -> borda_score
+        nugget_gen_order: Sorting strategy
+        num_per_query: Maximum items per query_id in each chunk
+        max_pairs_considered (k): only look at the top-k pairs
+
+    Returns:
+        List of batches, each respecting the per-query limit
+    """
+    if not lst:
+        return []
+
+    # First split by topic (convert groupby iterator to dict)
+    sorted_per_topic: Dict[str, List[IterativePrefNuggetData]] = {
+        k: list(g)
+        for k, g in groupby(sorted(lst, key=lambda d: d.query_id), key=lambda d: d.query_id)
+    }
+
+    for query_id in sorted_per_topic:
+        topic_lst = sorted_per_topic[query_id]
+
+        # Sort by quality within each topic
+        if nugget_gen_order == 'both':
+            topic_lst = sorted(
+                topic_lst,
+                key=lambda x: (
+                    borda_scores.get(f"{x.winner_run_id}:{x.query_id}", 0)
+                    + 0.99 * borda_scores.get(f"{x.loser_run_id}:{x.query_id}", 0)
+                ),
+                reverse=True,
+            )
+        elif nugget_gen_order == 'winner':
+            topic_lst = sorted(
+                topic_lst,
+                key=lambda x: borda_scores.get(f"{x.winner_run_id}:{x.query_id}", 0),
+                reverse=True,
+            )
+
+        # Limit to top-k pairs per topic (if max_pairs_considered > 0)
+        if max_pairs_considered > 0:
+            sorted_per_topic[query_id] = topic_lst[:max_pairs_considered]
+        else:
+            sorted_per_topic[query_id] = topic_lst
+    
+    # Third build chunks by popping `n` per topic
+    
+    chunks=[]    
+    while any(x for x in sorted_per_topic.values()):
+        chunk: List[IterativePrefNuggetData] = []
+        
+        for query_id in sorted_per_topic:
+            for rounds in range(num_per_query):
+                lst = sorted_per_topic[query_id]
+                if lst:
+                    elem = lst.pop(0)
+                    sorted_per_topic[query_id]=lst
+                    chunk.append(elem)
+            
+        chunks.append(chunk)
+        
+    return chunks
+
+
+def _chunk_by_query_first(
     lst: List[IterativePrefNuggetData],
     borda_scores: Dict[str, int],
     max_size: int = -1,
-    num_per_query: int = 2
+    num_per_query: int = 2, 
 ) -> List[List[IterativePrefNuggetData]]:
-    """Split list into chunks with at most `num_per_query` items per query_id.
+    """(Obsolete) Split list into chunks with at most `num_per_query` items per query_id.
 
     Items with higher borda_score (for their winner) are prioritized first.
 
@@ -257,6 +346,25 @@ def _chunk_by_query(
 
     return chunks
 
+
+def _chunk_by_query(
+    lst: List[IterativePrefNuggetData],
+    borda_scores: Dict[str, int],
+    nugget_gen_order: Literal["first", "both", "winner"],
+    max_size: int = -1,
+    num_per_query: int = 2, 
+    max_pairs_considered: int = -1
+    ):
+    if nugget_gen_order == "first":
+        return _chunk_by_query_first(lst, borda_scores=borda_scores, max_size=max_size, num_per_query=num_per_query)
+    else:
+        return _chunk_by_query_both(lst
+                                    , borda_scores=borda_scores
+                                    , nugget_gen_order=nugget_gen_order
+                                    , num_per_query=num_per_query
+                                    , max_pairs_considered=max_pairs_considered
+                                    )
+
 def _interleave_by_query_id(
     data: List[IterativePrefNuggetData],
     borda_scores: Dict[str, int],
@@ -302,6 +410,7 @@ def _interleave_by_query_id(
         iterators = next_round
     return result
 
+
 class PrefNuggetJudge(AutoJudge):
     """
     AutoJudge that extracts differentiating nuggets from PrefJudge comparisons.
@@ -336,9 +445,13 @@ class PrefNuggetJudge(AutoJudge):
         rag_responses: Sequence[Report],
         rag_topics: Sequence[Request],
         llm_config: MinimaLlmConfig,
+        pref_judge:Literal['must_decide','ties_allowed'],
         iterative_nuggets:bool,
         max_nuggets_per_topic: int,
         stop_collecting_at_nuggets_per_topic: int,
+        gen_batch_num_per_query:int,
+        max_pairs_considered:int,
+        nugget_gen_order: Literal["first","both", "winner"], # "first is deprecated"
         max_questions_per_pair: int = 5,
         num_pivot: int = 0,
         num_others: int = 8,
@@ -396,11 +509,14 @@ class PrefNuggetJudge(AutoJudge):
             print("PrefNuggetJudge: No comparison pairs generated")
             return None
 
-        grade_data = run_pref_judgment_batch(grade_data, llm_config)
+        pref_prompt = PrefJudgment if pref_judge == "must_decide" else PrefTiesJudgment #  "ties_allowed"
+        grade_data = run_pref_judgment_batch(grade_data, llm_config, signature=pref_prompt)
         print(f"PrefNuggetJudge: Completed {len(grade_data)} pairwise comparisons")
 
         # Include pairs in reverse for position bias handling
         grade_data = grade_data + [data.flip() for data in grade_data]
+        # Drop ties
+        grade_data = [d for d in grade_data if d.better_passage or 0 in [1,2]]
 
         # Compute aggregates (better_than/worse_than lists)
         aggregates = compute_pref_aggregates(grade_data)
@@ -477,26 +593,30 @@ class PrefNuggetJudge(AutoJudge):
         # =----------------------------------------------=
         # prepare small batches to generate questions, then test.
 
-        def _print_tracker(tracker: QuestionTracker) -> str:
-            lines = []
-            for query_id, counts in sorted(tracker.items())[:5]:
-                # Sort by count descending, then alphabetically for determinism
-                sorted_qs = sorted(counts.keys(), key=lambda q: (-counts[q], q))[:5]
-                formatted = [f"  - {q} ({counts[q]})" for q in sorted_qs]
-                lines.append(f"{query_id}: {len(counts)} questions:\n" + "\n".join(formatted))
-            return "\n".join(lines)
 
         # Build borda_scores lookup for prioritizing best-performing responses
         borda_scores: Dict[str, int] = {key: agg.borda_score for key, agg in aggregates.items()}
 
         # Spread out elements with same query_id (round-robin interleave)
         # Within each topic, pairs are sorted by winner's borda_score (best performers first)
-        extraction_data_chunks = _chunk_by_query(extraction_data, borda_scores, max_size=-1, num_per_query=2)
+        extraction_data_chunks = _chunk_by_query(
+            extraction_data,
+            borda_scores=borda_scores,
+            nugget_gen_order=nugget_gen_order,
+            num_per_query=gen_batch_num_per_query,
+            max_pairs_considered=max_pairs_considered,
+        )
         tracker = QuestionTracker()
         topics_done:Set[str] = set()
 
         extraction_result_data = list()
         for chunk_idx, extraction_chunk in enumerate(extraction_data_chunks):
+            # Skip prompts for topics that already have enough questions
+            extraction_chunk = [d for d in extraction_chunk if d.query_id not in topics_done]
+
+            if not extraction_chunk:
+                continue  # All topics in this chunk are done
+
             # set questions so far
             for data in extraction_chunk:
                 topic_id = data.query_id
@@ -567,6 +687,9 @@ class PrefNuggetJudge(AutoJudge):
 
         return NuggetBanks.from_banks_list(banks)
 
+
+##########################################
+##########################################
 
     def create_nuggets_non_iterative(
         self,

@@ -79,6 +79,13 @@ class PrefJudgeData(BaseModel):
 # DSPy Signature
 # =============================================================================
 
+def _parse_better_ties(s: str) -> int:
+    """Extract passage 0-2 from string."""
+    m = re.search(r"\b([0-2])\b", s)
+    if not m:
+        return -1  # Default to -1 if no valid preference is found
+    return int(m.group(1))
+
 
 def _parse_better(s: str) -> int:
     """Extract passage 1-2 from string."""
@@ -121,6 +128,43 @@ If both passages are similar, select the simplest and clearest.
     ) -> None:
         """Convert DSPy Prediction output to PrefJudgeData."""
         data.better_passage = _parse_better(prediction.better_passage)
+        data.confidence = (
+            prediction.confidence or 0.0 if hasattr(prediction, "confidence") else 0.0
+        )
+        data.reasoning = (
+            prediction.reasoning or "" if hasattr(prediction, "reasoning") else ""
+        )
+
+
+
+class PrefTiesJudgment(dspy.Signature):
+
+    dedent(
+        """
+You are a highly experienced and accurate assessor for TREC.
+
+Select the passage that answers the query better. Just answer 1 or 2, without any explanation or extra verbiage.
+If both passages are similar, answer with 0.
+        """
+    )
+
+    query_title: str = dspy.InputField(desc="Query title")
+    query_background: str = dspy.InputField(desc="Background context for the query")
+    query_problem: str = dspy.InputField(desc="Problem statement to be addressed")
+
+    passage_1: str = dspy.InputField(desc="passage 1")
+    passage_2: str = dspy.InputField(desc="passage 2")
+
+    better_passage: Literal["1", "2", "0"] = dspy.OutputField(
+        desc="which is the better passage?"
+    )
+
+    @classmethod
+    def convert_prompt_output(
+        cls, prediction: dspy.Prediction, data: PrefJudgeData
+    ) -> None:
+        """Convert DSPy Prediction output to PrefJudgeData."""
+        data.better_passage = _parse_better_ties(prediction.better_passage)
         data.confidence = (
             prediction.confidence or 0.0 if hasattr(prediction, "confidence") else 0.0
         )

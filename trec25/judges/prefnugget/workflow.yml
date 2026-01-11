@@ -14,11 +14,13 @@ settings:
   no_dupes: true
   on_missing_evals: "fix_aggregate"
   # 
-  only_subtle_prefs: false
   iterative_nuggets: false
   max_nuggets_per_topic: -1
   stop_collecting_at_nuggets_per_topic: 20
-
+  gen_batch_num_per_query: 2
+  max_pairs_considered: -1
+  nugget_gen_order: "both"
+  pref_judge: "must_decide"  # must_decide | ties_allowed
 
 nugget_settings:
   max_questions_per_pair: 5
@@ -53,6 +55,44 @@ variants:
     
   iter20q:
     iterative_nuggets: true
+    nugget_gen_order: "first"
+    pref_judge: "must_decide"  # must_decide | ties_allowed
+    max_pairs_considered: 100
+    gen_batch_num_per_query: 2
+    max_nuggets_per_topic: 20
+    stop_collecting_at_nuggets_per_topic: 20
+    num_others: 4
+    num_pivot: 0
+    no_dupes: true
+    on_missing_evals: "fix_aggregate"
+    nugget_settings:
+      max_questions_per_pair: 5
+    judge_settings:
+      grade_threshold: 4
+
+  iter20both:
+    iterative_nuggets: true
+    nugget_gen_order: "both"
+    pref_judge: "must_decide"  # must_decide | ties_allowed
+    gen_batch_num_per_query: 2
+    max_pairs_considered: 100
+    max_nuggets_per_topic: 20
+    stop_collecting_at_nuggets_per_topic: 20
+    num_others: 4
+    num_pivot: 0
+    no_dupes: true
+    on_missing_evals: "fix_aggregate"
+    nugget_settings:
+      max_questions_per_pair: 5
+    judge_settings:
+      grade_threshold: 4
+
+  iter20bothties:
+    iterative_nuggets: true
+    nugget_gen_order: "both"
+    pref_judge: "ties_allowed"  # must_decide | ties_allowed
+    gen_batch_num_per_query: 2
+    max_pairs_considered: 100
     max_nuggets_per_topic: 20
     stop_collecting_at_nuggets_per_topic: 20
     num_others: 4
