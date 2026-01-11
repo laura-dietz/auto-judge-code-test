@@ -185,6 +185,7 @@ import sqlite3
 import time
 import urllib.error
 import urllib.request
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from typing import Any, Awaitable, Callable, Dict, Iterable, List, Optional, Tuple, TypeVar, Union
 
@@ -858,6 +859,16 @@ class OpenAIMinimaLlm(AsyncMinimaLlmBackend):
         # (Like RpmGate/Cooldown, this has meaningful state, no async primitives)
         self._pulse = BackendPulse()
 
+        # Thread pool for HTTP requests - sized to match max_outstanding
+        # (Python's default is min(32, cpu_count+4) which bottlenecks concurrency)
+        self._executor: Optional[ThreadPoolExecutor] = None
+
+    def _ensure_executor(self) -> ThreadPoolExecutor:
+        """Lazily create/recreate executor (e.g., after aclose())."""
+        if self._executor is None:
+            self._executor = ThreadPoolExecutor(max_workers=self.cfg.max_outstanding)
+        return self._executor
+
     def get_pulse(self) -> BackendPulse:
         """Return backend diagnostics pulse."""
         return self._pulse
@@ -898,8 +909,11 @@ class OpenAIMinimaLlm(AsyncMinimaLlmBackend):
         return cls(MinimaLlmConfig.from_env())
 
     async def aclose(self) -> None:
-        """Close cache database. Backend can be reused - cache reopens automatically."""
+        """Close cache database and executor. Backend can be reused - cache reopens automatically."""
         self._closed = True
+        if self._executor is not None:
+            self._executor.shutdown(wait=False)  # Don't block on pending HTTP requests
+            self._executor = None
         if self._cache is not None:
             print(f"Synchronizing cache at {self.cfg.cache_dir}.")
             self._cache.close()
@@ -979,7 +993,8 @@ class OpenAIMinimaLlm(AsyncMinimaLlmBackend):
                 # Timeout or connection error - return synthetic 408 for retry
                 return 408, {}, f"URLError: {e.reason}".encode()
 
-        return await asyncio.to_thread(_do)
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(self._ensure_executor(), _do)
 
     async def generate(self, req: MinimaLlmRequest, *, force_refresh: bool = False) -> MinimaLlmResult:
         """
@@ -1172,7 +1187,9 @@ class OpenAIMinimaLlm(AsyncMinimaLlmBackend):
         )
 
     def _print_batch_start(self, total: int) -> None:
-        """Print batch configuration at start."""
+        """Print batch configuration at start and ensure executor is ready."""
+        # Eagerly create thread pool so it's ready when workers start
+        self._ensure_executor()
         workers = self.cfg.batch.num_workers
         outstanding = self.cfg.max_outstanding
         rpm = self.cfg.rpm
