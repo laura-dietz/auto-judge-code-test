@@ -1064,6 +1064,9 @@ class OpenAIMinimaLlm(AsyncMinimaLlmBackend):
 
             body_text = raw.decode("utf-8", errors="replace")
             last_body = body_text[:300]
+            
+            if os.environ.get("MINIMA_DEBUG"):
+                print(f"TRACE generate:\n - payload: {payload}\n - response: {last_body}")
 
             if 200 <= status < 300:
                 try:
