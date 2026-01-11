@@ -497,16 +497,19 @@ class _Heartbeat:
         self._interval_llm_sent = 0      # LLM requests sent this interval
         self._interval_llm_received = 0  # LLM responses received this interval
 
+        # Item completion counter - tracks logical items, not raw operations.
+        # This differs from pulse.done which counts operations including retries.
+        # Example: 122 items with 8 parse retries → _done=122, pulse.done=130
+        self._done = 0
+
         # Pulse provider for stats (polled from backend)
         self._pulse_provider = pulse_provider
         self._last_pulse: Optional[BackendPulse] = None
 
     @property
     def done(self) -> int:
-        """Total completed requests (from backend pulse)."""
-        if self._pulse_provider:
-            return self._pulse_provider().done
-        return 0
+        """Total completed items (logical completions, not raw operations)."""
+        return self._done
 
     def mark_start(self) -> None:
         """Mark that a request has been sent (only counts LLM calls, not cache hits)."""
@@ -515,8 +518,9 @@ class _Heartbeat:
     def mark_done(self, *, cached: bool = False) -> None:
         """Mark a request as done. Updates stall detection and rate counters.
 
-        The done count itself comes from pulse_provider.done (cache_hits + llm_calls).
+        Increments _done to track logical item completions (not raw operations).
         """
+        self._done += 1
         self._last_done = time.monotonic()
         if cached:
             # It was cached, so it wasn't really sent - correct the mark_start() assumption
