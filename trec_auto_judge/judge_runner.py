@@ -300,6 +300,7 @@ def _write_run_config(
     if judge_settings:
         config["judge_settings"] = judge_settings
 
+    config_path.parent.mkdir(parents=True, exist_ok=True)
     with open(config_path, "w") as f:
         yaml.safe_dump(config, f, default_flow_style=False, sort_keys=False)
 

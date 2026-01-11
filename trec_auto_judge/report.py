@@ -295,6 +295,8 @@ class JsonlWriter:
         self._owns_stream = isinstance(out, (str, Path))
 
         if self._owns_stream:
+            out_path = Path(out)
+            out_path.parent.mkdir(parents=True, exist_ok=True)
             open_fn = gzip.open if str(out).endswith(".gz") else open
             # "at": append-text so you can resume writing if the file exists
             self._f: TextIO = open_fn(out, mode="wt", encoding="utf-8", buffering=1)
