@@ -19,13 +19,24 @@ import click
 from . import AutoJudge
 
 
+class ExpandedPath(click.Path):
+    """Click Path that expands ~ to home directory."""
+
+    def convert(self, value, param, ctx):
+        # Expand ~ before validation
+        if value is not None:
+            value = str(Path(value).expanduser())
+        return super().convert(value, param, ctx)
+
+
 class ClickRagResponses(click.ParamType):
     name = "dir"
 
     def convert(self, value, param, ctx):
-        if not value or not Path(value).is_dir():
+        path = Path(value).expanduser() if value else None
+        if not path or not path.is_dir():
             self.fail(f"The directory {value} does not exist, so I can not load rag responses from this directory.", param, ctx)
-        runs = load_runs_failsave(Path(value))
+        runs = load_runs_failsave(path)
 
         if len(runs) > 0:
             return runs
@@ -140,9 +151,10 @@ class ClickRagTopics(ClickIrDataset):
             return ret
 
     def convert(self, value, param, ctx):
-        if value and Path(value).is_file():
+        path = Path(value).expanduser() if value else None
+        if path and path.is_file():
             try:
-                ret = load_requests_from_file(Path(value))
+                ret = load_requests_from_file(path)
             except Exception as e:
                 self.fail(f"The file {value} is not valid, no rag-topics could be loaded. {e}", param, ctx)
             return self.fail_if_empty_or_return_otherwise(value, param, ctx, ret)
@@ -182,7 +194,7 @@ def option_llm_config():
     def decorator(func):
         func = click.option(
             "--llm-config",
-            type=click.Path(exists=True, path_type=Path),
+            type=ExpandedPath(exists=True, path_type=Path),
             required=False,
             default=None,
             help="Path to llm-config.yml (dev: base_url+model, submission: model_preferences). "
@@ -213,7 +225,7 @@ class ClickNuggetBanksPath(click.ParamType):
         if value is None:
             return None
 
-        path = Path(value)
+        path = Path(value).expanduser()
 
         if not path.exists():
             self.fail(f"Path {value} does not exist", param, ctx)
@@ -243,7 +255,7 @@ def option_workflow():
     def decorator(func):
         func = click.option(
             "--workflow",
-            type=click.Path(exists=True, path_type=Path),
+            type=ExpandedPath(exists=True, path_type=Path),
             required=False,
             default=None,
             help="Path to workflow.yml declaring the judge's nugget/judge pipeline."
@@ -388,7 +400,7 @@ def auto_judge_to_click_command(auto_judge: AutoJudge, cmd_name: str):
     @option_nugget_banks()
     @option_llm_config()
     @option_submission()
-    @click.option("--output", type=Path, help="Leaderboard output file.", required=True)
+    @click.option("--output", type=ExpandedPath(path_type=Path), help="Leaderboard output file.", required=True)
     def judge_cmd(
         rag_topics: Iterable[Request],
         rag_responses: Iterable[Report],
@@ -417,7 +429,7 @@ def auto_judge_to_click_command(auto_judge: AutoJudge, cmd_name: str):
     @option_nugget_banks()
     @option_llm_config()
     @option_submission()
-    @click.option("--store-nuggets", type=Path, help="Output nuggets file.", required=True)
+    @click.option("--store-nuggets", type=ExpandedPath(path_type=Path), help="Output nuggets file.", required=True)
     def nuggify_cmd(
         rag_responses: Iterable[Report],
         rag_topics: Iterable[Request],
@@ -464,9 +476,9 @@ def auto_judge_to_click_command(auto_judge: AutoJudge, cmd_name: str):
     @option_nugget_banks()
     @option_llm_config()
     @option_submission()
-    @click.option("--out-dir", type=Path, help="Parent directory for all output files.", required=False)
+    @click.option("--out-dir", type=ExpandedPath(path_type=Path), help="Parent directory for all output files.", required=False)
     @click.option("--filebase", type=str, help="Override workflow filebase (e.g., 'my-run').", required=False)
-    @click.option("--store-nuggets", type=Path, help="Override nugget output path.", required=False)
+    @click.option("--store-nuggets", type=ExpandedPath(path_type=Path), help="Override nugget output path.", required=False)
     @click.option("--variant", type=str, help="Run a named variant from workflow.yml (e.g., --variant $name).", required=False)
     @click.option("--sweep", type=str, help="Run a parameter sweep from workflow.yml (e.g., --sweep $name).", required=False)
     @click.option("--all-variants", is_flag=True, help="Run all variants defined in workflow.yml.")
