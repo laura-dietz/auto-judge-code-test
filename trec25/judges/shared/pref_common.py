@@ -198,6 +198,16 @@ def prepare_prompts(
         responses = sorted(responses, key=lambda r: r.metadata.run_id)
         if num_pivot:
             print("pivots: ", [r.metadata.run_id for r in responses[0:num_pivot]])
+        if topic_id not in rag_topic_dict:
+            available = sorted(rag_topic_dict.keys())[:10]
+            available_str = ", ".join(repr(k) for k in available)
+            if len(rag_topic_dict) > 10:
+                available_str += f", ... ({len(rag_topic_dict)} total)"
+            raise KeyError(
+                f"Topic ID {topic_id!r} from responses not found in --rag-topics.\n"
+                f"  Available topic IDs: {available_str}\n"
+                f"  Check that --rag-responses and --rag-topics use matching topic IDs."
+            )
         request = rag_topic_dict[topic_id]
         seen: Set[Tuple[str, str]] = set()
         for idx, response in enumerate(responses):

@@ -9,6 +9,7 @@ This judge is primarily a nugget creator - judge() returns (None, None).
 """
 import collections
 from itertools import groupby
+import sys
 from typing import Any, Dict, List, Optional, Sequence, Set, Type, TypeVar
 
 import dspy
@@ -20,6 +21,7 @@ from trec_auto_judge import *
 from trec_auto_judge.nugget_data import (
     NuggetBank, NuggetBanks, NuggetQuestion
 )
+
 
 # Import shared utilities
 from trec_auto_judge.llm.minima_llm_dspy import run_dspy_batch_generic
@@ -313,6 +315,22 @@ class PrefNuggetJudge(AutoJudge):
     def __init__(self):
         pass
 
+    def filter_non_topic_responses(self, rag_responses: Sequence[Report], topic_ids:Set[str])->Sequence[Report]:
+        broken:bool = False
+        broken_run_ids = []
+        for r in rag_responses:
+            if r.metadata.run_id not in broken_run_ids:
+                if r.metadata.topic_id not in topic_ids:
+                    print(f"Warning, report of run {r.metadata.run_id} is about topic {r.metadata.request_id}, which is not in topic_ids {format_preview(list(topic_ids), limit=10)}" , file=sys.stderr)
+                    broken=True
+                    broken_run_ids.append(r.metadata.run_id)
+        
+        if broken:
+            return list(filter(lambda r: r.metadata.request_id in topic_ids, rag_responses))
+        else:
+            return rag_responses
+    
+
     def create_nuggets(
         self,
         rag_responses: Sequence[Report],
@@ -352,6 +370,7 @@ class PrefNuggetJudge(AutoJudge):
         # Build lookup structures
         rag_topic_dict: Dict[str, Request] = {t.request_id: t for t in rag_topics}
         num_topics = len(rag_topic_dict)
+        rag_responses = self.filter_non_topic_responses(rag_responses, rag_topic_dict.keys())
         rag_response_by_topic: Dict[str, List[Report]] = {
             topic: list(responses)
             for topic, responses in groupby(

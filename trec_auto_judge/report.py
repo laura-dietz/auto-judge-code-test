@@ -44,6 +44,17 @@ class ReportMetaData(BaseModel):
     # AutoJudge
     evaldata: Optional[Dict[str,Any]] = None
 
+    def set_topic_ids(self):
+        self.narrative_id = self.topic_id
+        self.request_id = self.topic_id
+
+    def set_narrative_text(self,narratives:Dict[str,Any]):
+        self.narrative = narratives[self.narrative_id]
+        
+    def set_msmarco_collection_id(self):
+        self.collection_ids = ["msmarco_v2.1_doc_segmented"]
+
+
     def model_post_init(self, __context__: dict | None = None) -> None:
         if self.topic_id is not None and self.narrative_id is not None and str(self.topic_id) != str(self.narrative_id):
             raise ValueError(
@@ -59,10 +70,10 @@ class ReportMetaData(BaseModel):
                     self.topic_id = f"{self.narrative_id}"
                 else:
                     self.topic_id = self.narrative_id
-            
 
         if self.topic_id is None:
             raise RuntimeError(f"ReportMetaData does not contain topic_id or narrative_id: {self}")
+        self.set_topic_ids()
 
         # Expose as RAG format
         if self.narrative_id is None:
@@ -70,15 +81,6 @@ class ReportMetaData(BaseModel):
 
     model_config = ConfigDict(populate_by_name=True)
 
-    def set_topic_ids(self):
-        self.narrative_id = self.topic_id
-        self.request_id = self.topic_id
-
-    def set_narrative_text(self,narratives:Dict[str,Any]):
-        self.narrative = narratives[self.narrative_id]
-        
-    def set_msmarco_collection_id(self):
-        self.collection_ids = ["msmarco_v2.1_doc_segmented"]
 
     
 class NeuclirReportSentence(BaseModel):
