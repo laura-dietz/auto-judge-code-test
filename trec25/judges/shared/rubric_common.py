@@ -8,6 +8,7 @@ Provides:
 """
 
 import re
+from textwrap import dedent
 from typing import Any, Dict, List, Literal, Optional, Sequence
 
 import dspy
@@ -51,17 +52,19 @@ def _parse_grade(s: str) -> int:
 
 
 class GradeNuggetAnswer(dspy.Signature):
-    """
-    Grade how well a passage answers a specific question.
+    __doc__ = dedent(
+        """
+        Grade how well a passage answers a specific question.
 
-    Can the question be answered based on the available context? Choose one:
-    - 5: The answer is highly relevant, complete, and accurate.
-    - 4: The answer is mostly relevant and complete but may have minor gaps or inaccuracies.
-    - 3: The answer is partially relevant and complete, with noticeable gaps or inaccuracies.
-    - 2: The answer has limited relevance and completeness, with significant gaps or inaccuracies.
-    - 1: The answer is minimally relevant or complete, with substantial shortcomings.
-    - 0: The answer is not relevant or complete at all.
-    """
+        Can the question be answered based on the available context? Choose one:
+        - 5: The answer is highly relevant, complete, and accurate.
+        - 4: The answer is mostly relevant and complete but may have minor gaps or inaccuracies.
+        - 3: The answer is partially relevant and complete, with noticeable gaps or inaccuracies.
+        - 2: The answer has limited relevance and completeness, with significant gaps or inaccuracies.
+        - 1: The answer is minimally relevant or complete, with substantial shortcomings.
+        - 0: The answer is not relevant or complete at all.
+        """
+    )
 
     question: str = dspy.InputField(desc="The question to be answered")
     passage: str = dspy.InputField(desc="The passage that may contain the answer")

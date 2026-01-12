@@ -21,7 +21,6 @@ settings:
   max_pairs_considered: -1
   nugget_gen_order: "both"
   pref_judge: "must_decide"  # must_decide | ties_allowed
-  with_confidence: false  # Request confidence scores (invalidates prompt cache)
 
 nugget_settings:
   max_questions_per_pair: 5

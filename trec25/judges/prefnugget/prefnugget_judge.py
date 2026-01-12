@@ -10,6 +10,7 @@ This judge is primarily a nugget creator - judge() returns (None, None).
 import collections
 from itertools import groupby
 import sys
+from textwrap import dedent
 from typing import Any, Dict, List, Literal, Set, TypeVar
 
 import dspy
@@ -26,8 +27,9 @@ from trec_auto_judge.nugget_data import (
 # Import shared utilities
 from trec_auto_judge.llm.minima_llm_dspy import run_dspy_batch_generic
 from trec25.judges.shared.pref_common import (
+    PrefJudgment,
+    PrefTiesJudgment,
     compute_pref_aggregates,
-    get_pref_signature,
     prepare_prompts,
     run_pref_judgment_batch,
 )
@@ -65,16 +67,17 @@ PREFNUGGET_QRELS: QrelsSpec[NuggetGradeData] = QrelsSpec[NuggetGradeData](
 
 
 class ExtractDifferentiatingNuggets(dspy.Signature):
-    """
-    For a query as title, problem statement, and user background, you are given Winner and Loser RAG responses. 
-    Generate brief, atomic questions that target query-essential information which the Winner answers well 
-    and the Loser omits or mishandles.
+    __doc__ = dedent(
+        """
+        For a query as title, problem statement, and user background, you are given Winner and Loser RAG responses.
+        Generate brief, atomic questions that target query-essential information which the Winner answers well
+        and the Loser omits or mishandles.
 
-
-    Only include differences that change the answer to the query (correctness, completeness,
-    usefulness). Prefer short questions such as "Capital of USA?" or "Process of steel cooking?".
-    Avoid generic quality questions.
-    """
+        Only include differences that change the answer to the query (correctness, completeness,
+        usefulness). Prefer short questions such as "Capital of USA?" or "Process of steel cooking?".
+        Avoid generic quality questions.
+        """
+    )
 
     query_title: str = dspy.InputField(desc="Query title")
     query_background: str = dspy.InputField(desc="Background context for the query")
@@ -89,16 +92,18 @@ class ExtractDifferentiatingNuggets(dspy.Signature):
 
 
 class IterativeExtractDifferentiatingNuggets(dspy.Signature):
-    """
-    For a query as title, problem statement, and user background, you are given Winner and Loser RAG responses.
-    Which of the given exam questions are addressed better in the Winner?
+    __doc__ = dedent(
+        """
+        For a query as title, problem statement, and user background, you are given Winner and Loser RAG responses.
+        Which of the given exam questions are addressed better in the Winner?
 
-    Only if your answer is NONE, generate brief, atomic questions that target query-essential 
-    information which the Winner answers well and the Loser omits or mishandles.
-    In this case only include differences that change the answer to the query (correctness, completeness,
-    usefulness). Prefer short questions such as "Capital of USA?" or "Process of steel cooking?".
-    Avoid generic quality questions.
-    """
+        Only if your answer is NONE, generate brief, atomic questions that target query-essential
+        information which the Winner answers well and the Loser omits or mishandles.
+        In this case only include differences that change the answer to the query (correctness, completeness,
+        usefulness). Prefer short questions such as "Capital of USA?" or "Process of steel cooking?".
+        Avoid generic quality questions.
+        """
+    )
 
     query_title: str = dspy.InputField(desc="Query title")
     query_background: str = dspy.InputField(desc="Background context for the query")
@@ -451,7 +456,6 @@ class PrefNuggetJudge(AutoJudge):
         gen_batch_num_per_query:int,
         max_pairs_considered:int,
         nugget_gen_order: Literal["first","both", "winner"], # "first is deprecated"
-        with_confidence: bool = False,
         max_questions_per_pair: int = 5,
         num_pivot: int = 0,
         num_others: int = 8,
@@ -509,11 +513,8 @@ class PrefNuggetJudge(AutoJudge):
             print("PrefNuggetJudge: No comparison pairs generated")
             return None
 
-        pref_prompt = get_pref_signature(
-            ties_allowed=(pref_judge == "ties_allowed"),
-            with_confidence=with_confidence,
-        )
-        grade_data = run_pref_judgment_batch(grade_data, llm_config, signature=pref_prompt)
+        pref_signature = PrefTiesJudgment if pref_judge == "ties_allowed" else PrefJudgment
+        grade_data = run_pref_judgment_batch(grade_data, llm_config, signature=pref_signature)
         print(f"PrefNuggetJudge: Completed {len(grade_data)} pairwise comparisons")
 
         # Include pairs in reverse for position bias handling
@@ -522,7 +523,7 @@ class PrefNuggetJudge(AutoJudge):
         grade_data = [d for d in grade_data if d.better_passage or 0 in [1,2]]
 
         # Compute aggregates (better_than/worse_than lists)
-        aggregates = compute_pref_aggregates(grade_data)
+        aggregates = compute_pref_aggregates(grade_data)  # Note this function does not handle ties
 
         # Step 2: Extract comparison pairs from aggregates
         extraction_data: List[PrefNuggetData] = []

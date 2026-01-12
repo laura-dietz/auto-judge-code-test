@@ -95,19 +95,16 @@ def _parse_better(s: str) -> int:
     return int(m.group(1))
 
 
+# Pairwise preference judgments.
+# Mostly following Prompt of Arabzadeh & Clarke, except asking for query instead of question.
+# Source: https://github.com/Narabzad/llm-relevance-judgement-comparison/blob/main/Pref/judge.py
 class PrefJudgment(dspy.Signature):
-    """
-    Pairwise preference judgments.
-    Mostly following Prompt of Arabzadeh & Clarke, except asking for query instead of question.
-    Source: https://github.com/Narabzad/llm-relevance-judgement-comparison/blob/main/Pref/judge.py
-    """
-
-    dedent(
+    __doc__ = dedent(
         """
-You are a highly experienced and accurate assessor for TREC.
+        You are a highly experienced and accurate assessor for TREC.
 
-Select the passage that answers the query better. Just answer 1 or 2, without any explanation or extra verbiage.
-If both passages are similar, select the simplest and clearest.
+        Select the passage that answers the query better. Just answer 1 or 2, without any explanation or extra verbiage.
+        If both passages are similar, select the simplest and clearest.
         """
     )
 
@@ -121,6 +118,9 @@ If both passages are similar, select the simplest and clearest.
     better_passage: Literal["1", "2"] = dspy.OutputField(
         desc="which is the better passage?"
     )
+    confidence: float = dspy.OutputField(
+        desc="confidence score from 0.0 to 1.0 indicating how certain you are"
+    )
 
     @classmethod
     def convert_prompt_output(
@@ -128,23 +128,18 @@ If both passages are similar, select the simplest and clearest.
     ) -> None:
         """Convert DSPy Prediction output to PrefJudgeData."""
         data.better_passage = _parse_better(prediction.better_passage)
-        data.confidence = (
-            prediction.confidence or 0.0 if hasattr(prediction, "confidence") else 0.0
-        )
-        data.reasoning = (
-            prediction.reasoning or "" if hasattr(prediction, "reasoning") else ""
-        )
+        data.confidence = getattr(prediction, "confidence", 0.0) or 0.0
+        data.reasoning = getattr(prediction, "reasoning", "") or ""
 
 
 
 class PrefTiesJudgment(dspy.Signature):
-
-    dedent(
+    __doc__ = dedent(
         """
-You are a highly experienced and accurate assessor for TREC.
+        You are a highly experienced and accurate assessor for TREC.
 
-Select the passage that answers the query better. Just answer 1 or 2, without any explanation or extra verbiage.
-If both passages are similar, answer with 0.
+        Select the passage that answers the query better. Just answer 1 or 2, without any explanation or extra verbiage.
+        If both passages are similar, answer with 0.
         """
     )
 
@@ -158,6 +153,9 @@ If both passages are similar, answer with 0.
     better_passage: Literal["1", "2", "0"] = dspy.OutputField(
         desc="which is the better passage?"
     )
+    confidence: float = dspy.OutputField(
+        desc="confidence score from 0.0 to 1.0 indicating how certain you are"
+    )
 
     @classmethod
     def convert_prompt_output(
@@ -165,50 +163,8 @@ If both passages are similar, answer with 0.
     ) -> None:
         """Convert DSPy Prediction output to PrefJudgeData."""
         data.better_passage = _parse_better_ties(prediction.better_passage)
-        data.confidence = (
-            prediction.confidence or 0.0 if hasattr(prediction, "confidence") else 0.0
-        )
-        data.reasoning = (
-            prediction.reasoning or "" if hasattr(prediction, "reasoning") else ""
-        )
-
-
-# =============================================================================
-# Confidence-enabled variants (enable with PREF_JUDGE_CONFIDENCE=1)
-# These add a confidence output field, which changes the prompt and invalidates cache.
-# =============================================================================
-
-
-class PrefJudgmentWithConfidence(PrefJudgment):
-    """PrefJudgment with explicit confidence output field."""
-    confidence: float = dspy.OutputField(
-        desc="confidence score from 0.0 to 1.0 indicating how certain you are"
-    )
-
-
-class PrefTiesJudgmentWithConfidence(PrefTiesJudgment):
-    """PrefTiesJudgment with explicit confidence output field."""
-    confidence: float = dspy.OutputField(
-        desc="confidence score from 0.0 to 1.0 indicating how certain you are"
-    )
-
-
-def get_pref_signature(ties_allowed: bool = False, with_confidence: bool = False) -> Type[dspy.Signature]:
-    """
-    Get appropriate preference judgment signature.
-
-    Args:
-        ties_allowed: If True, use PrefTiesJudgment (allows 0 for ties)
-        with_confidence: If True, use confidence-enabled variant.
-                        WARNING: Enabling confidence changes the prompt and invalidates cache.
-
-    Returns:
-        Appropriate DSPy signature class
-    """
-    if ties_allowed:
-        return PrefTiesJudgmentWithConfidence if with_confidence else PrefTiesJudgment
-    else:
-        return PrefJudgmentWithConfidence if with_confidence else PrefJudgment
+        data.confidence = getattr(prediction, "confidence", 0.0) or 0.0
+        data.reasoning = getattr(prediction, "reasoning", "") or ""
 
 
 # =============================================================================
@@ -358,6 +314,14 @@ def compute_pref_aggregates(
         )
     }
 
+    def score_win(data:PrefJudgeData)-> int:
+        if data.better_passage ==1:
+            return 1
+        elif data.better_passage ==2:
+            return -1
+        else:
+            return 0.0 # Tie or something else went wrong
+        
     aggregates: Dict[str, PrefAggregateResult] = {}
     for key, pref_data_list in data_by_key.items():
         if not pref_data_list:
@@ -365,7 +329,7 @@ def compute_pref_aggregates(
 
         first = pref_data_list[0]
         borda_score = sum(
-            1 if data.better_passage == 1 else -1 for data in pref_data_list
+            score_win(data) for data in pref_data_list
         )
         win_frac = float(borda_score) / float(len(pref_data_list))
 

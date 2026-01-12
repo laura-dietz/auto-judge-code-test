@@ -33,7 +33,11 @@ from trec25.judges.shared.rubric_common import (
 # =============================================================================
 
 class GenerateNuggetQuestionsMinimal(dspy.Signature):
-    """Break a query into concise questions that must be answered."""
+    __doc__ = dedent(
+        """
+        Break a query into concise questions that must be answered.
+        """
+    )
 
     query_title: str = dspy.InputField(desc="Query title")
     query_background: str = dspy.InputField(desc="Background context for the query")
@@ -44,9 +48,12 @@ class GenerateNuggetQuestionsMinimal(dspy.Signature):
     )
 
 class GenerateNuggetQuestionsWeb(dspy.Signature):
-    dedent(
-    """Break the query into concise questions that must be answered. 
-     Generate 10 concise insightful questions that reveal whether information relevant for the query was provided, showcasing a deep understanding of the subject matter. Avoid basic or introductory-level inquiries. Keep the questions short."""
+    __doc__ = dedent(
+        """
+        Break the query into concise questions that must be answered.
+        Generate 10 concise insightful questions that reveal whether information relevant for the query was provided, showcasing a deep understanding of the subject matter.
+        Avoid basic or introductory-level inquiries. Keep the questions short.
+        """
     )
 
     query_title: str = dspy.InputField(desc="Query title")
