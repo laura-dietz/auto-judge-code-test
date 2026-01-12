@@ -1066,7 +1066,7 @@ class OpenAIMinimaLlm(AsyncMinimaLlmBackend):
             last_body = body_text[:300]
             
             if os.environ.get("MINIMA_DEBUG"):
-                print(f"TRACE generate:\n - payload: {payload}\n - response: {last_body}")
+                print(f"TRACE generate:\n - payload: {payload}\n - response: {body_text}")
 
             if 200 <= status < 300:
                 try:

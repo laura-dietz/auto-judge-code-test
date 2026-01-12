@@ -99,14 +99,66 @@ class ExtractDifferentiatingNuggets(dspy.Signature):
 
 class IterativeExtractDifferentiatingNuggets(dspy.Signature):
     __doc__ = dedent(
-        """
-        For a query as title, problem statement, and user background, you are given Winner and Loser RAG responses.
-        Which of the given exam questions are addressed better in the Winner?
+      """
+      Compare Winner vs Loser RAG responses for a query. Focus on relevance, correctness, completeness.
+      
+      From given_exam_questions, identify or generate which ones the Winner handles well but the Loser 
+      omits or mishandles.  New differentiating_questions must be brief, 
+      atomic questions about information the Winner handels much better.
 
-        Only if your answer is NONE, generate brief, atomic questions that target query-essential
-        information which the Winner answers well and the Loser omits or mishandles.
-        In this case only include differences that change the answer to the query (correctness, completeness,
-        usefulness). Prefer short questions such as "Capital of USA?" or "Process of steel cooking?".
+      Avoid generic quality questions. 
+      Make questions self-contained (e.g., "Capital of France?" not "The capital?").
+      """        
+        # """
+        # For a query with title and background, you are given Winner and Loser RAG responses.
+
+        # Examine the given_exam_questions. Which of these questions are answered
+        # better by the Winner than the Loser? 
+
+        # You can also generate new differentiating_questions that capture better 
+        # explain why the Winner is better. These should be brief, atomic questions
+        # targeting query-essential information which the Winner answers well and the
+        # Loser omits or mishandles.
+
+        # Focus on differences that affect rlevance, correctness, completeness, or usefulness.
+        # Prefer short questions like "Capital of USA?" or "Process of steel cooking?".
+        # Avoid generic quality questions. Resolve all determiner and implicit references.
+        # """
+    )
+
+    query_title: str = dspy.InputField(desc="Query title")
+    query_background: str = dspy.InputField(desc="Background context for the query")
+    winner_passage: str = dspy.InputField(desc="The passage that won the comparison")
+    loser_passage: str = dspy.InputField(desc="The passage that lost the comparison")
+    given_exam_questions: list[str] = dspy.InputField(desc="Given exam questions")
+
+    differentiating_questions: Optional[List[str]] = dspy.OutputField(
+        desc='Generated questions as a JSON array, e.g. ["Capital of USA?", "Process to cook steel?"]'
+    )
+    reasoning: str = dspy.OutputField(
+        desc="Brief explanation of the analysis"
+    )
+    confidence: float = dspy.OutputField(
+        desc="Confidence score from 0.0 to 1.0 indicating how certain you are"
+    )
+
+
+
+class IterativeDExtractDifferentiatingNuggets(dspy.Signature):
+    __doc__ = dedent(
+        """
+        For a query with title and background, you are given Winner and Loser RAG responses.
+
+        First, examine the given_exam_questions. Which of these questions are answered
+        better by the Winner than the Loser? Output those as addressed_questions.
+
+        Only if NONE of the given_exam_questions explain why the Winner is better,
+        generate new differentiating_questions. These should be brief, atomic questions
+        targeting query-essential information which the Winner answers well and the
+        Loser omits or mishandles.
+
+        Focus on differences that affect correctness, completeness, or usefulness.
+        Prefer short questions like "Capital of USA?" or "Process of steel cooking?".
         Avoid generic quality questions.
         """
     )
@@ -531,8 +583,8 @@ class PrefNuggetJudge(AutoJudge):
 
         # Include pairs in reverse for position bias handling
         grade_data = grade_data + [data.flip() for data in grade_data]
-        # Drop ties
-        grade_data = [d for d in grade_data if d.better_passage or 0 in [1,2]]
+        # Drop ties (only keep pairs with a clear winner)
+        grade_data = [d for d in grade_data if d.better_passage in [1, 2]]
 
         # Compute aggregates (better_than/worse_than lists)
         aggregates = compute_pref_aggregates(grade_data)  # Note this function does not handle ties
