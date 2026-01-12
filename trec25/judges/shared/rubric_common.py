@@ -9,13 +9,13 @@ Provides:
 
 import re
 from textwrap import dedent
-from typing import Any, Dict, List, Literal, Optional, Sequence
+from typing import Any, Dict, List, Literal, Optional, Sequence, Set, Tuple
 
 import dspy
 from pydantic import BaseModel
 
 from trec_auto_judge import Report
-from trec_auto_judge.nugget_data import NuggetBanks, NuggetQuestion
+from trec_auto_judge.nugget_data import NuggetBank, NuggetBanks, NuggetQuestion
 
 
 # =============================================================================
@@ -231,3 +231,47 @@ def compute_nugget_aggregates(
             )
 
     return aggregates
+
+
+# =============================================================================
+# Nugget Bank Construction
+# =============================================================================
+
+
+def build_nugget_banks(
+    questions_by_topic: Dict[str, Tuple[str, List[str]]],
+    max_per_topic: Optional[int] = None,
+) -> NuggetBanks:
+    """Build NuggetBanks with normalization, deduplication, and limits.
+
+    Args:
+        questions_by_topic: topic_id -> (title_query, list of question strings)
+        max_per_topic: Optional limit on nuggets per topic
+
+    Returns:
+        NuggetBanks with deduplicated, normalized questions per topic.
+        question_id is auto-generated as MD5 hash of the question text.
+    """
+    banks = []
+    total = 0
+
+    for topic_id, (title, questions) in questions_by_topic.items():
+        bank = NuggetBank(query_id=topic_id, title_query=title)
+        seen: Set[str] = set()
+        nuggets = []
+
+        for q in questions:
+            if max_per_topic and len(nuggets) >= max_per_topic:
+                break
+            normalized = q.strip()
+            if not normalized or normalized in seen:
+                continue
+            seen.add(normalized)
+            nuggets.append(NuggetQuestion(query_id=topic_id, question=normalized))
+
+        bank.add_nuggets(nuggets)
+        banks.append(bank)
+        total += len(nuggets)
+
+    print(f"Created {total} nuggets across {len(banks)} topics")
+    return NuggetBanks.from_banks_list(banks)

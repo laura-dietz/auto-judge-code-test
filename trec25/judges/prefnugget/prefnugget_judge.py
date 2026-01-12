@@ -19,9 +19,7 @@ from pydantic import BaseModel
 from trec_auto_judge import MinimaLlmConfig
 
 from trec_auto_judge import *
-from trec_auto_judge.nugget_data import (
-    NuggetBank, NuggetBanks, NuggetQuestion
-)
+from trec_auto_judge.nugget_data import NuggetBanks
 
 
 # Import shared utilities
@@ -39,6 +37,7 @@ from trec25.judges.shared.rubric_common import (
     GradeNuggetAnswer,
     prepare_nugget_grade_data,
     compute_nugget_aggregates,
+    build_nugget_banks,
 )
 
 
@@ -454,61 +453,26 @@ def extract_winner_loser_pairs(
     return extraction_data
 
 
-def build_nugget_banks_from_results(
+def _flatten_extraction_results(
     extraction_data: List[PrefNuggetData],
     rag_topic_dict: Dict[str, Request],
-    max_per_topic: Optional[int] = None,
-) -> NuggetBanks:
-    """Build NuggetBanks from extraction results, deduplicating questions.
-
-    Args:
-        extraction_data: List of PrefNuggetData with differentiating_questions populated
-        rag_topic_dict: topic_id -> Request mapping
-        max_per_topic: Optional limit on nuggets per topic
+) -> Dict[str, tuple[str, List[str]]]:
+    """Convert extraction results to format expected by build_nugget_banks.
 
     Returns:
-        NuggetBanks with deduplicated questions per topic
+        Dict mapping topic_id -> (title, list of question strings)
     """
-    # Group by topic
-    results_by_topic: Dict[str, List[PrefNuggetData]] = {}
+    # Group questions by topic
+    questions_by_topic: Dict[str, List[str]] = {}
     for data in extraction_data:
-        results_by_topic.setdefault(data.query_id, []).append(data)
+        questions_by_topic.setdefault(data.query_id, []).extend(data.differentiating_questions)
 
-    # Build banks with deduplication
-    banks = []
-    total_nuggets = 0
-
-    for topic_id, topic_results in results_by_topic.items():
-        request = rag_topic_dict.get(topic_id)
-        bank = NuggetBank(
-            query_id=topic_id,
-            title_query=request.title if request else topic_id
-        )
-        seen_questions: Dict[str, NuggetQuestion] = {}
-
-        for result in topic_results:
-            for question_text in result.differentiating_questions:
-                if max_per_topic and len(seen_questions) >= max_per_topic:
-                    break
-                normalized = question_text.strip()
-                if not normalized or normalized in seen_questions:
-                    continue
-                nugget = NuggetQuestion(
-                    query_id=topic_id,
-                    question=normalized,
-                    question_id=f"{topic_id}-pn{len(seen_questions)}",
-                )
-                seen_questions[normalized] = nugget
-            if max_per_topic and len(seen_questions) >= max_per_topic:
-                break
-
-        bank.add_nuggets(list(seen_questions.values()))
-        bank.index_nuggets()
-        banks.append(bank)
-        total_nuggets += len(seen_questions)
-
-    print(f"PrefNuggetJudge: Created {total_nuggets} nuggets across {len(banks)} topics")
-    return NuggetBanks.from_banks_list(banks)
+    # Add titles
+    return {
+        topic_id: (rag_topic_dict[topic_id].title or topic_id, questions)
+        for topic_id, questions in questions_by_topic.items()
+        if topic_id in rag_topic_dict
+    }
 
 
 class PrefNuggetJudge(AutoJudge):
@@ -688,11 +652,8 @@ class PrefNuggetJudge(AutoJudge):
         
         
         # Build NuggetBanks from results (max_per_topic limits final count)
-        return build_nugget_banks_from_results(
-            extraction_data= extraction_result_data,
-            rag_topic_dict= rag_topic_dict,
-            max_per_topic=max_nuggets_per_topic
-        )
+        questions_by_topic = _flatten_extraction_results(extraction_result_data, rag_topic_dict)
+        return build_nugget_banks(questions_by_topic, max_per_topic=max_nuggets_per_topic)
 
     def judge(
         self,

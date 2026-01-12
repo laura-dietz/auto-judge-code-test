@@ -7,9 +7,7 @@ Rubric-based AutoJudge that:
 """
 from textwrap import dedent
 from trec_auto_judge import *
-from trec_auto_judge.nugget_data import (
-    NuggetBank, NuggetBanks, NuggetQuestion
-)
+from trec_auto_judge.nugget_data import NuggetBanks, NuggetQuestion
 
 import dspy
 import json
@@ -25,6 +23,7 @@ from trec_auto_judge.llm.minima_llm_dspy import run_dspy_batch_generic
 from trec25.judges.shared.rubric_common import (
     NuggetGradeData,
     GradeNuggetAnswer,
+    build_nugget_banks,
 )
 
 
@@ -317,30 +316,14 @@ class RubricJudge(AutoJudge):
             convert_gen_output,
             llm_config,
         )
-        print(f"Rubric: Finished gnerating questions")
+        print(f"Rubric: Finished generating questions")
 
         # Build NuggetBanks from generated questions
-        banks = []
-        for data in gen_data:
-            bank = NuggetBank(
-                query_id=data.query_id,
-                title_query=data.query_title
-            )
-
-            nuggets = [
-                NuggetQuestion(
-                    query_id=data.query_id,
-                    question=question_text,
-                    question_id=f"{data.query_id}-q{i}"
-                )
-                for i, question_text in enumerate(data.questions)
-            ]
-
-            bank.add_nuggets(nuggets)
-            bank.index_nuggets()
-            banks.append(bank)
-
-        return NuggetBanks.from_banks_list(banks)
+        questions_by_topic = {
+            data.query_id: (data.query_title, data.questions)
+            for data in gen_data
+        }
+        return build_nugget_banks(questions_by_topic)
 
 
     
