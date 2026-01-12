@@ -256,7 +256,36 @@ class TolerantChatAdapter(ChatAdapter):
         return parsed
 
     
-dspy.settings.configure(adapter=TolerantChatAdapter())
+def _get_dspy_version() -> tuple[int, int, int]:
+    """Parse DSPy version into (major, minor, patch) tuple."""
+    version_str = getattr(dspy, "__version__", "0.0.0")
+    try:
+        parts = version_str.split(".")[:3]
+        return tuple(int(p) for p in parts)  # type: ignore
+    except (ValueError, AttributeError):
+        return (0, 0, 0)
+
+
+def _select_adapter():
+    """Select appropriate adapter based on DSPy version.
+
+    - DSPy 3.0+: Use stock ChatAdapter with JSON fallback
+    - DSPy < 3.0: Use TolerantChatAdapter for parsing workarounds
+    """
+    version = _get_dspy_version()
+
+    if version >= (3, 0, 0):
+        # DSPy 3.x has improved parsing with automatic JSON fallback
+        return ChatAdapter()
+    else:
+        # Older DSPy needs our tolerant parsing for list/float handling
+        return TolerantChatAdapter()
+
+
+_dspy_version = _get_dspy_version()
+_adapter = _select_adapter()
+print(f"DSPy {'.'.join(map(str, _dspy_version))} loaded, using {type(_adapter).__name__}")
+dspy.settings.configure(adapter=_adapter)
 
 
 
@@ -666,7 +695,7 @@ async def run_dspy_batch(
     parse_retry_limit = 3 if http_max_attempts == 0 else http_max_attempts
 
     # Use dspy.context() to support multiple asyncio.run() calls (unlike dspy.settings.configure)
-    with dspy.context(lm=lm, adapter=TolerantChatAdapter()):
+    with dspy.context(lm=lm, adapter=_select_adapter()):
         predictor = predictor_class(signature_class)
 
         async def _maybe_await(result):

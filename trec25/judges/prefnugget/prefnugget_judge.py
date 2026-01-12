@@ -88,6 +88,12 @@ class ExtractDifferentiatingNuggets(dspy.Signature):
         desc='JSON array, e.g. ["Capital of USA?", "Process to cook steel?"]'
         # desc='JSON array with double quotes, e.g. ["USA\'s capital?", "Process to cook steel?"]'
     )
+    reasoning: str = dspy.OutputField(
+        desc="Brief explanation of why these questions differentiate the passages"
+    )
+    confidence: float = dspy.OutputField(
+        desc="Confidence score from 0.0 to 1.0 indicating how certain you are"
+    )
 
 
 
@@ -116,6 +122,12 @@ class IterativeExtractDifferentiatingNuggets(dspy.Signature):
     )
     differentiating_questions: Optional[List[str]] = dspy.OutputField(
         desc='Generated questions as a JSON array, e.g. ["Capital of USA?", "Process to cook steel?"]'
+    )
+    reasoning: str = dspy.OutputField(
+        desc="Brief explanation of the analysis"
+    )
+    confidence: float = dspy.OutputField(
+        desc="Confidence score from 0.0 to 1.0 indicating how certain you are"
     )
 
 # =============================================================================

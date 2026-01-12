@@ -72,8 +72,11 @@ class GradeNuggetAnswer(dspy.Signature):
     grade: Literal["0", "1", "2", "3", "4", "5"] = dspy.OutputField(
         desc="Grade from 0-5 indicating how well the passage answers the question"
     )
-    reasoning: Optional[str] = dspy.OutputField(
-        desc="Brief explanation of the grade", default=None, required=False
+    reasoning: str = dspy.OutputField(
+        desc="Brief explanation of the grade"
+    )
+    confidence: float = dspy.OutputField(
+        desc="Confidence score from 0.0 to 1.0 indicating how certain you are"
     )
 
     @classmethod

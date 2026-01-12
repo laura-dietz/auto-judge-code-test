@@ -46,6 +46,12 @@ class GenerateNuggetQuestionsMinimal(dspy.Signature):
     questions: list[str] = dspy.OutputField(
         desc="List of concise questions that must be answered to address the query"
     )
+    reasoning: str = dspy.OutputField(
+        desc="Brief explanation of the reasoning behind the questions"
+    )
+    confidence: float = dspy.OutputField(
+        desc="Confidence score from 0.0 to 1.0 indicating how certain you are"
+    )
 
 class GenerateNuggetQuestionsWeb(dspy.Signature):
     __doc__ = dedent(
@@ -62,6 +68,12 @@ class GenerateNuggetQuestionsWeb(dspy.Signature):
 
     questions: list[str] = dspy.OutputField(
         desc="List of concise questions that must be answered to address the query"
+    )
+    reasoning: str = dspy.OutputField(
+        desc="Brief explanation of the reasoning behind the questions"
+    )
+    confidence: float = dspy.OutputField(
+        desc="Confidence score from 0.0 to 1.0 indicating how certain you are"
     )
 
 

@@ -1,7 +1,8 @@
 """Tests for minima_llm_dspy module, particularly TolerantChatAdapter."""
 
 import pytest
-from typing import List, Optional, Union
+from typing import List, Literal, Optional, Union
+from textwrap import dedent
 
 
 class TestIsListStr:
@@ -133,3 +134,277 @@ class TestTryParseListStr:
         """Empty list with whitespace should parse correctly."""
         result = adapter_class.try_parse_list_str("  [  ]  ")
         assert result == []
+
+
+# =============================================================================
+# Adapter parse() method tests
+# =============================================================================
+
+
+class TestTolerantAdapterParse:
+    """Test TolerantChatAdapter.parse() handles missing fields and list types."""
+
+    @pytest.fixture
+    def adapter(self):
+        """Create TolerantChatAdapter instance."""
+        from trec_auto_judge.llm.minima_llm_dspy import TolerantChatAdapter
+        return TolerantChatAdapter()
+
+    @pytest.fixture
+    def signature_with_optional_confidence(self):
+        """Create a signature with optional confidence field."""
+        import dspy
+
+        class TestSignature(dspy.Signature):
+            __doc__ = "Test signature with optional confidence."
+            query: str = dspy.InputField()
+            answer: str = dspy.OutputField()
+            confidence: Optional[float] = dspy.OutputField()
+
+        return TestSignature
+
+    @pytest.fixture
+    def signature_with_required_fields(self):
+        """Create a signature with all required fields."""
+        import dspy
+
+        class TestSignature(dspy.Signature):
+            __doc__ = "Test signature with required fields."
+            query: str = dspy.InputField()
+            answer: str = dspy.OutputField()
+            reasoning: str = dspy.OutputField()
+
+        return TestSignature
+
+    @pytest.fixture
+    def signature_with_list_str(self):
+        """Create a signature with list[str] output."""
+        import dspy
+
+        class TestSignature(dspy.Signature):
+            __doc__ = "Test signature with list output."
+            query: str = dspy.InputField()
+            questions: list[str] = dspy.OutputField()
+
+        return TestSignature
+
+    @pytest.fixture
+    def signature_with_optional_list_str(self):
+        """Create a signature with Optional[List[str]] output."""
+        import dspy
+
+        class TestSignature(dspy.Signature):
+            __doc__ = "Test signature with optional list output."
+            query: str = dspy.InputField()
+            questions: Optional[List[str]] = dspy.OutputField()
+
+        return TestSignature
+
+    def test_missing_optional_field_returns_none(self, adapter, signature_with_optional_confidence):
+        """Optional fields missing from output should get None."""
+        completion = dedent("""
+            [[ ## answer ## ]]
+            The capital of France is Paris.
+        """)
+        result = adapter.parse(signature_with_optional_confidence, completion)
+        assert result["answer"] == "The capital of France is Paris."
+        assert result["confidence"] is None
+
+    def test_present_optional_field_parsed(self, adapter, signature_with_optional_confidence):
+        """Optional fields present should be parsed."""
+        completion = dedent("""
+            [[ ## answer ## ]]
+            The capital of France is Paris.
+            [[ ## confidence ## ]]
+            0.95
+        """)
+        result = adapter.parse(signature_with_optional_confidence, completion)
+        assert result["answer"] == "The capital of France is Paris."
+        assert result["confidence"] == 0.95
+
+    def test_missing_required_field_raises(self, adapter, signature_with_required_fields):
+        """Required fields missing should raise AdapterParseError."""
+        from trec_auto_judge.llm.minima_llm_dspy import AdapterParseError
+
+        completion = dedent("""
+            [[ ## answer ## ]]
+            The capital of France is Paris.
+        """)
+        with pytest.raises(AdapterParseError, match="Missing required field: reasoning"):
+            adapter.parse(signature_with_required_fields, completion)
+
+    def test_list_str_field_parsed_from_json(self, adapter, signature_with_list_str):
+        """list[str] output should be parsed from JSON."""
+        completion = dedent("""
+            [[ ## questions ## ]]
+            ["What is the capital?", "What is the population?"]
+        """)
+        result = adapter.parse(signature_with_list_str, completion)
+        assert result["questions"] == ["What is the capital?", "What is the population?"]
+
+    def test_list_str_field_parsed_from_python(self, adapter, signature_with_list_str):
+        """list[str] output should be parsed from Python syntax."""
+        completion = dedent("""
+            [[ ## questions ## ]]
+            ['What is the capital?', 'What is the population?']
+        """)
+        result = adapter.parse(signature_with_list_str, completion)
+        assert result["questions"] == ["What is the capital?", "What is the population?"]
+
+    def test_list_str_with_apostrophe_in_json(self, adapter, signature_with_list_str):
+        """list[str] containing apostrophes should parse from JSON."""
+        completion = dedent("""
+            [[ ## questions ## ]]
+            ["What's the article's main point?", "How does it compare?"]
+        """)
+        result = adapter.parse(signature_with_list_str, completion)
+        assert result["questions"] == ["What's the article's main point?", "How does it compare?"]
+
+    def test_list_str_with_apostrophe_raises_in_python_syntax(self, adapter, signature_with_list_str):
+        """list[str] with unescaped apostrophe in Python syntax should raise."""
+        from trec_auto_judge.llm.minima_llm_dspy import AdapterParseError
+
+        completion = dedent("""
+            [[ ## questions ## ]]
+            ['What's the main point?']
+        """)
+        with pytest.raises(AdapterParseError, match="Unbalanced single quotes"):
+            adapter.parse(signature_with_list_str, completion)
+
+    def test_optional_list_str_missing_returns_none(self, adapter, signature_with_optional_list_str):
+        """Optional[List[str]] missing should return None."""
+        completion = dedent("""
+            [[ ## other_field ## ]]
+            Some value
+        """)
+        result = adapter.parse(signature_with_optional_list_str, completion)
+        assert result["questions"] is None
+
+    def test_optional_list_str_present_parsed(self, adapter, signature_with_optional_list_str):
+        """Optional[List[str]] present should be parsed."""
+        completion = dedent("""
+            [[ ## questions ## ]]
+            ["Question 1", "Question 2"]
+        """)
+        result = adapter.parse(signature_with_optional_list_str, completion)
+        assert result["questions"] == ["Question 1", "Question 2"]
+
+
+class TestStockVsTolerantAdapter:
+    """Compare DSPy 3.1 stock ChatAdapter vs TolerantChatAdapter."""
+
+    @pytest.fixture
+    def tolerant_adapter(self):
+        from trec_auto_judge.llm.minima_llm_dspy import TolerantChatAdapter
+        return TolerantChatAdapter()
+
+    @pytest.fixture
+    def stock_adapter(self):
+        from dspy.adapters.chat_adapter import ChatAdapter
+        return ChatAdapter()
+
+    @pytest.fixture
+    def simple_signature(self):
+        """Simple signature with string output."""
+        import dspy
+
+        class TestSignature(dspy.Signature):
+            __doc__ = "Simple test signature."
+            query: str = dspy.InputField()
+            answer: str = dspy.OutputField()
+
+        return TestSignature
+
+    @pytest.fixture
+    def signature_with_literal(self):
+        """Signature with Literal output (like better_passage)."""
+        import dspy
+
+        class TestSignature(dspy.Signature):
+            __doc__ = "Test signature with literal choice."
+            passage_1: str = dspy.InputField()
+            passage_2: str = dspy.InputField()
+            better_passage: Literal["1", "2"] = dspy.OutputField()
+
+        return TestSignature
+
+    def test_both_adapters_parse_simple_output(self, tolerant_adapter, stock_adapter, simple_signature):
+        """Both adapters should parse well-formed simple output identically."""
+        completion = dedent("""
+            [[ ## answer ## ]]
+            The capital of France is Paris.
+        """)
+
+        tolerant_result = tolerant_adapter.parse(simple_signature, completion)
+        stock_result = stock_adapter.parse(simple_signature, completion)
+
+        assert tolerant_result["answer"] == "The capital of France is Paris."
+        assert stock_result["answer"] == "The capital of France is Paris."
+
+    def test_both_adapters_parse_literal_output(self, tolerant_adapter, stock_adapter, signature_with_literal):
+        """Both adapters should parse Literal output."""
+        completion = dedent("""
+            [[ ## better_passage ## ]]
+            1
+        """)
+
+        tolerant_result = tolerant_adapter.parse(signature_with_literal, completion)
+        stock_result = stock_adapter.parse(signature_with_literal, completion)
+
+        assert tolerant_result["better_passage"] == "1"
+        assert stock_result["better_passage"] == "1"
+
+    def test_stock_adapter_list_str_behavior(self, stock_adapter):
+        """Document how stock ChatAdapter handles list[str] fields."""
+        import dspy
+
+        class ListSignature(dspy.Signature):
+            __doc__ = "Signature with list output."
+            query: str = dspy.InputField()
+            items: list[str] = dspy.OutputField()
+
+        completion = dedent("""
+            [[ ## items ## ]]
+            ["item1", "item2", "item3"]
+        """)
+
+        # Stock adapter may return the raw string or parse it
+        # This test documents the actual behavior
+        result = stock_adapter.parse(ListSignature, completion)
+
+        # Check what type we get - stock adapter might not parse JSON
+        if isinstance(result["items"], str):
+            # Stock adapter returns raw string - TolerantChatAdapter would parse it
+            assert '["item1"' in result["items"]
+        else:
+            # Stock adapter does parse - good!
+            assert result["items"] == ["item1", "item2", "item3"]
+
+
+class TestAdapterVersionSelection:
+    """Test that the correct adapter is selected based on DSPy version."""
+
+    def test_get_dspy_version_returns_tuple(self):
+        """_get_dspy_version should return a 3-tuple of ints."""
+        from trec_auto_judge.llm.minima_llm_dspy import _get_dspy_version
+
+        version = _get_dspy_version()
+        assert isinstance(version, tuple)
+        assert len(version) == 3
+        assert all(isinstance(v, int) for v in version)
+
+    def test_select_adapter_returns_adapter(self):
+        """_select_adapter should return an adapter instance."""
+        from trec_auto_judge.llm.minima_llm_dspy import _select_adapter
+        from dspy.adapters.chat_adapter import ChatAdapter
+
+        adapter = _select_adapter()
+        # Should be either ChatAdapter or TolerantChatAdapter (which is a subclass)
+        assert isinstance(adapter, ChatAdapter)
+
+    def test_tolerant_adapter_is_chat_adapter_subclass(self):
+        """TolerantChatAdapter should be a ChatAdapter subclass."""
+        from trec_auto_judge.llm.minima_llm_dspy import TolerantChatAdapter
+        from dspy.adapters.chat_adapter import ChatAdapter
+
+        assert issubclass(TolerantChatAdapter, ChatAdapter)
