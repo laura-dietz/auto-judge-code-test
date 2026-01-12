@@ -1058,6 +1058,10 @@ class OpenAIMinimaLlm(AsyncMinimaLlmBackend):
         # (Like RpmGate/Cooldown, this has meaningful state, no async primitives)
         self._pulse = BackendPulse()
 
+        # Overload tracking - shared across concurrent requests
+        # Only print warning once per overload episode (reset on recovery)
+        self._overload_warned = False
+
         # Thread pool for HTTP requests - sized to match max_outstanding
         # (Python's default is min(32, cpu_count+4) which bottlenecks concurrency)
         self._executor: Optional[ThreadPoolExecutor] = None
@@ -1244,7 +1248,7 @@ class OpenAIMinimaLlm(AsyncMinimaLlmBackend):
         attempt = 0
         attempt_timestamps: List[float] = []
         last_body: Optional[str] = None
-        overload_warning_printed = False
+        this_request_saw_overload = False  # Track if THIS request saw overload (for recovery msg)
 
         while True:
             attempt += 1
@@ -1302,7 +1306,9 @@ class OpenAIMinimaLlm(AsyncMinimaLlmBackend):
                     async with self._cache_lock:  # type: ignore[union-attr]
                         cache.put(cache_key, str(text), data)
 
-                if overload_warning_printed:
+                # Print recovery message and reset backend-level overload flag
+                if this_request_saw_overload and self._overload_warned:
+                    self._overload_warned = False
                     print("Server recovered. Resuming normal operation.")
 
                 # Update backend stats
@@ -1333,12 +1339,20 @@ class OpenAIMinimaLlm(AsyncMinimaLlmBackend):
                 # Timeout (408) or overload suggests server might be struggling
                 cooldown_s = retry_after or self.cfg.cooldown_floor_s or 1.0
                 await self._cooldown.bump(cooldown_s)
-                if not overload_warning_printed:
+                this_request_saw_overload = True
+                if not self._overload_warned:
+                    # DEBUG: Print raw headers and body to diagnose parsing issues
+                    print(f"DEBUG 429 headers: {headers}")
+                    print(f"DEBUG 429 body: {body_text[:500]}")
+                    print(f"DEBUG parsed rate_info: retry_after_s={rate_info.retry_after_s}, "
+                          f"limit_requests={rate_info.limit_requests}, remaining_requests={rate_info.remaining_requests}, "
+                          f"reset_requests_s={rate_info.reset_requests_s}, error_message={rate_info.error_message!r}")
+
                     info_str = rate_info.summary()
                     print(f"Server overload (HTTP {status}). {info_str}")
                     rpm_str = f" Adjusted RPM to {new_rpm:.0f}." if new_rpm else ""
                     print(f"  Retrying with cooldown={cooldown_s:.1f}s.{rpm_str} Press Ctrl-C to abort.")
-                    overload_warning_printed = True
+                    self._overload_warned = True
 
             if (self.cfg.max_attempts > 0 and attempt >= self.cfg.max_attempts) or not _is_retriable_status(status):
                 error_type = "TimeoutError" if status == 408 else "HTTPError"
