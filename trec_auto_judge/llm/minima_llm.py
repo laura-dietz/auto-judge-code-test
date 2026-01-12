@@ -1059,8 +1059,8 @@ class OpenAIMinimaLlm(AsyncMinimaLlmBackend):
         self._pulse = BackendPulse()
 
         # Overload tracking - shared across concurrent requests
-        # Only print warning once per overload episode (reset on recovery)
-        self._overload_warned = False
+        # -1 = no overload, >=0 = count of 429s in current episode (warn on first)
+        self._overload_warned = -1
 
         # Thread pool for HTTP requests - sized to match max_outstanding
         # (Python's default is min(32, cpu_count+4) which bottlenecks concurrency)
@@ -1306,10 +1306,11 @@ class OpenAIMinimaLlm(AsyncMinimaLlmBackend):
                     async with self._cache_lock:  # type: ignore[union-attr]
                         cache.put(cache_key, str(text), data)
 
-                # Print recovery message and reset backend-level overload flag
-                if this_request_saw_overload and self._overload_warned:
-                    self._overload_warned = False
-                    print("Server recovered. Resuming normal operation.")
+                # Print recovery message and reset backend-level overload counter
+                if this_request_saw_overload and self._overload_warned >= 0:
+                    count = self._overload_warned
+                    self._overload_warned = -1
+                    print(f"Server recovered after {count} retries. Resuming normal operation.")
 
                 # Update backend stats
                 self._pulse.llm_calls += 1
@@ -1340,7 +1341,8 @@ class OpenAIMinimaLlm(AsyncMinimaLlmBackend):
                 cooldown_s = retry_after or self.cfg.cooldown_floor_s or 1.0
                 await self._cooldown.bump(cooldown_s)
                 this_request_saw_overload = True
-                if not self._overload_warned:
+                if self._overload_warned < 0:
+                    # First overload in this episode - print warning
                     # DEBUG: Print raw headers and body to diagnose parsing issues
                     print(f"DEBUG 429 headers: {headers}")
                     print(f"DEBUG 429 body: {body_text[:500]}")
@@ -1352,7 +1354,9 @@ class OpenAIMinimaLlm(AsyncMinimaLlmBackend):
                     print(f"Server overload (HTTP {status}). {info_str}")
                     rpm_str = f" Adjusted RPM to {new_rpm:.0f}." if new_rpm else ""
                     print(f"  Retrying with cooldown={cooldown_s:.1f}s.{rpm_str} Press Ctrl-C to abort.")
-                    self._overload_warned = True
+                    self._overload_warned = 0
+                # Count every overload response
+                self._overload_warned += 1
 
             if (self.cfg.max_attempts > 0 and attempt >= self.cfg.max_attempts) or not _is_retriable_status(status):
                 error_type = "TimeoutError" if status == 408 else "HTTPError"
