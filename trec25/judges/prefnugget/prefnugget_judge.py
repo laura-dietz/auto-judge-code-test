@@ -102,8 +102,8 @@ class IterativeExtractDifferentiatingNuggets(dspy.Signature):
       """
       Compare Winner vs Loser RAG responses for a query. Focus on relevance, correctness, completeness.
       
-      From given_exam_questions, identify or generate which ones the Winner handles well but the Loser 
-      omits or mishandles.  New differentiating_questions must be brief, 
+      From given_exam_questions, identify or generate questions the Winner addresses much better than the Loser.
+      Reuse questions where possible. New differentiating_questions must be brief, 
       atomic questions about information the Winner handels much better.
 
       Avoid generic quality questions. 
@@ -144,43 +144,43 @@ class IterativeExtractDifferentiatingNuggets(dspy.Signature):
 
 
 
-class IterativeDExtractDifferentiatingNuggets(dspy.Signature):
-    __doc__ = dedent(
-        """
-        For a query with title and background, you are given Winner and Loser RAG responses.
+# class IterativeDExtractDifferentiatingNuggets(dspy.Signature):
+#     __doc__ = dedent(
+#         """
+#         For a query with title and background, you are given Winner and Loser RAG responses.
 
-        First, examine the given_exam_questions. Which of these questions are answered
-        better by the Winner than the Loser? Output those as addressed_questions.
+#         First, examine the given_exam_questions. Which of these questions are answered
+#         better by the Winner than the Loser? Output those as addressed_questions.
 
-        Only if NONE of the given_exam_questions explain why the Winner is better,
-        generate new differentiating_questions. These should be brief, atomic questions
-        targeting query-essential information which the Winner answers well and the
-        Loser omits or mishandles.
+#         Only if NONE of the given_exam_questions explain why the Winner is better,
+#         generate new differentiating_questions. These should be brief, atomic questions
+#         targeting query-essential information which the Winner answers well and the
+#         Loser omits or mishandles.
 
-        Focus on differences that affect correctness, completeness, or usefulness.
-        Prefer short questions like "Capital of USA?" or "Process of steel cooking?".
-        Avoid generic quality questions.
-        """
-    )
+#         Focus on differences that affect correctness, completeness, or usefulness.
+#         Prefer short questions like "Capital of USA?" or "Process of steel cooking?".
+#         Avoid generic quality questions.
+#         """
+#     )
 
-    query_title: str = dspy.InputField(desc="Query title")
-    query_background: str = dspy.InputField(desc="Background context for the query")
-    winner_passage: str = dspy.InputField(desc="The passage that won the comparison")
-    loser_passage: str = dspy.InputField(desc="The passage that lost the comparison")
-    given_exam_questions: list[str] = dspy.InputField(desc="Given exam questions")
+#     query_title: str = dspy.InputField(desc="Query title")
+#     query_background: str = dspy.InputField(desc="Background context for the query")
+#     winner_passage: str = dspy.InputField(desc="The passage that won the comparison")
+#     loser_passage: str = dspy.InputField(desc="The passage that lost the comparison")
+#     given_exam_questions: list[str] = dspy.InputField(desc="Given exam questions")
 
-    addressed_questions: Optional[List[str]] = dspy.OutputField(
-        desc='The questions better addressed in the Winner as a JSON array, e.g. ["Capital of USA?", "Process to cook steel?"]'
-    )
-    differentiating_questions: Optional[List[str]] = dspy.OutputField(
-        desc='Generated questions as a JSON array, e.g. ["Capital of USA?", "Process to cook steel?"]'
-    )
-    reasoning: str = dspy.OutputField(
-        desc="Brief explanation of the analysis"
-    )
-    confidence: float = dspy.OutputField(
-        desc="Confidence score from 0.0 to 1.0 indicating how certain you are"
-    )
+#     addressed_questions: Optional[List[str]] = dspy.OutputField(
+#         desc='The questions better addressed in the Winner as a JSON array, e.g. ["Capital of USA?", "Process to cook steel?"]'
+#     )
+#     differentiating_questions: Optional[List[str]] = dspy.OutputField(
+#         desc='Generated questions as a JSON array, e.g. ["Capital of USA?", "Process to cook steel?"]'
+#     )
+#     reasoning: str = dspy.OutputField(
+#         desc="Brief explanation of the analysis"
+#     )
+#     confidence: float = dspy.OutputField(
+#         desc="Confidence score from 0.0 to 1.0 indicating how certain you are"
+#     )
 
 # =============================================================================
 # Data Model (for nugget extraction - specific to PrefNuggetJudge)

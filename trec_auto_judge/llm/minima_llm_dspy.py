@@ -269,19 +269,26 @@ def _get_dspy_version() -> tuple[int, int, int]:
 
 
 def _select_adapter():
-    """Select appropriate adapter based on DSPy version.
+    """Select adapter for DSPy.
 
-    - DSPy 3.0+: Use stock ChatAdapter with JSON fallback
-    - DSPy < 3.0: Use TolerantChatAdapter for parsing workarounds
+    Always use TolerantChatAdapter for better list[str] and Optional field handling.
     """
-    version = _get_dspy_version()
+    
+    
+    # """
+    # - DSPy 3.0+: Use stock ChatAdapter with JSON fallback
+    # - DSPy < 3.0: Use TolerantChatAdapter for parsing workarounds
+    # """
+    # version = _get_dspy_version()
 
-    if version >= (3, 0, 0):
-        # DSPy 3.x has improved parsing with automatic JSON fallback
-        return ChatAdapter()
-    else:
-        # Older DSPy needs our tolerant parsing for list/float handling
-        return TolerantChatAdapter()
+    # if version >= (3, 0, 0):
+    #     # DSPy 3.x has improved parsing with automatic JSON fallback
+    #     return ChatAdapter()
+    # else:
+    #     # Older DSPy needs our tolerant parsing for list/float handling
+    #     return TolerantChatAdapter()
+
+    return TolerantChatAdapter()
 
 
 _dspy_version = _get_dspy_version()
