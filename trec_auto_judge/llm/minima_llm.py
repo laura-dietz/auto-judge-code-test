@@ -237,6 +237,165 @@ class BackendPulse:
 BackendStats = BackendPulse
 
 
+# ----------------------------
+# Rate Limit Info
+# ----------------------------
+
+@dataclass
+class RateLimitInfo:
+    """Parsed rate limit information from HTTP response.
+
+    Extracted from headers (Retry-After, x-ratelimit-*) and response body.
+    Used to configure cooldown/backpressure and display warnings.
+    """
+    # When to retry (seconds from now)
+    retry_after_s: Optional[float] = None
+
+    # Request limits
+    limit_requests: Optional[int] = None
+    remaining_requests: Optional[int] = None
+    reset_requests_s: Optional[float] = None  # seconds until reset
+
+    # Token limits
+    limit_tokens: Optional[int] = None
+    remaining_tokens: Optional[int] = None
+    reset_tokens_s: Optional[float] = None  # seconds until reset
+
+    # Error message from body
+    error_message: Optional[str] = None
+    error_type: Optional[str] = None
+
+    def summary(self) -> str:
+        """Human-readable summary for warning messages."""
+        parts = []
+        if self.retry_after_s is not None:
+            parts.append(f"retry_after={self.retry_after_s:.1f}s")
+        if self.remaining_requests is not None and self.limit_requests is not None:
+            parts.append(f"requests={self.remaining_requests}/{self.limit_requests}")
+        if self.remaining_tokens is not None and self.limit_tokens is not None:
+            parts.append(f"tokens={self.remaining_tokens}/{self.limit_tokens}")
+        if self.reset_requests_s is not None:
+            parts.append(f"reset_in={self.reset_requests_s:.0f}s")
+        if self.error_message:
+            # Truncate long messages
+            msg = self.error_message[:80] + "..." if len(self.error_message) > 80 else self.error_message
+            parts.append(f'msg="{msg}"')
+        return " | ".join(parts) if parts else "(no rate limit info)"
+
+    @property
+    def suggested_delay_s(self) -> Optional[float]:
+        """Best guess for how long to wait before retrying."""
+        # Priority: explicit retry_after > reset time > None
+        if self.retry_after_s is not None:
+            return self.retry_after_s
+        # Use the longer of request/token reset times
+        resets = [r for r in [self.reset_requests_s, self.reset_tokens_s] if r is not None]
+        return max(resets) if resets else None
+
+
+def _parse_retry_after_value(value: str) -> Optional[float]:
+    """Parse Retry-After header value (seconds or HTTP date)."""
+    if not value:
+        return None
+    value = value.strip()
+
+    # Try numeric first (most common)
+    try:
+        return float(value.rstrip('s'))  # Handle "30" or "30s"
+    except ValueError:
+        pass
+
+    # Try HTTP date format (RFC 7231)
+    try:
+        from email.utils import parsedate_to_datetime
+        dt = parsedate_to_datetime(value)
+        delay = (dt.timestamp() - time.time())
+        return max(0.0, delay)
+    except (ValueError, TypeError):
+        pass
+
+    return None
+
+
+def _parse_reset_timestamp(value: str) -> Optional[float]:
+    """Parse reset timestamp (Unix epoch or relative seconds)."""
+    if not value:
+        return None
+    try:
+        ts = float(value)
+        # If it looks like a Unix timestamp (> year 2000), compute delta
+        if ts > 946684800:  # 2000-01-01
+            return max(0.0, ts - time.time())
+        else:
+            # Treat as relative seconds
+            return ts
+    except ValueError:
+        return None
+
+
+def _parse_rate_limit_info(
+    status: int,
+    headers: Dict[str, str],
+    body: bytes,
+) -> RateLimitInfo:
+    """Extract rate limit info from HTTP response.
+
+    Parses:
+    - Retry-After header (seconds or HTTP date)
+    - x-ratelimit-* headers (OpenAI/Anthropic style)
+    - Error message from JSON body
+    """
+    info = RateLimitInfo()
+
+    # Parse Retry-After header
+    if ra := headers.get("retry-after"):
+        info.retry_after_s = _parse_retry_after_value(ra)
+
+    # Parse x-ratelimit-* headers (case-insensitive, already lowercased)
+    if v := headers.get("x-ratelimit-limit-requests"):
+        try:
+            info.limit_requests = int(v)
+        except ValueError:
+            pass
+    if v := headers.get("x-ratelimit-remaining-requests"):
+        try:
+            info.remaining_requests = int(v)
+        except ValueError:
+            pass
+    if v := headers.get("x-ratelimit-reset-requests"):
+        info.reset_requests_s = _parse_reset_timestamp(v)
+
+    if v := headers.get("x-ratelimit-limit-tokens"):
+        try:
+            info.limit_tokens = int(v)
+        except ValueError:
+            pass
+    if v := headers.get("x-ratelimit-remaining-tokens"):
+        try:
+            info.remaining_tokens = int(v)
+        except ValueError:
+            pass
+    if v := headers.get("x-ratelimit-reset-tokens"):
+        info.reset_tokens_s = _parse_reset_timestamp(v)
+
+    # Parse error body for message
+    if body and status >= 400:
+        try:
+            body_text = body.decode("utf-8", errors="replace")
+            data = json.loads(body_text)
+            if "error" in data:
+                err = data["error"]
+                if isinstance(err, dict):
+                    info.error_message = err.get("message")
+                    info.error_type = err.get("type") or err.get("code")
+                elif isinstance(err, str):
+                    info.error_message = err
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            pass
+
+    return info
+
+
 import contextvars
 # Task-local flags for cache bypass and telemetry (safe for parallel async execution)
 _force_refresh_ctx: contextvars.ContextVar[bool] = contextvars.ContextVar('force_refresh', default=False)
@@ -297,13 +456,29 @@ def _jittered(base: float, jitter: float) -> float:
 # ----------------------------
 
 class RpmGate:
-    """Simple RPM limiter with lazy per-loop lock initialization."""
+    """RPM limiter with dynamic adjustment based on rate limit headers.
+
+    Supports both static configuration and dynamic updates from server
+    rate limit responses (x-ratelimit-* headers).
+    """
 
     def __init__(self, rpm: int):
-        self._rpm = rpm
+        self._configured_rpm = rpm  # User-configured RPM (0 = unlimited)
+        self._server_rpm: Optional[float] = None  # Learned from rate limit headers
         self._lock: Optional[asyncio.Lock] = None
         self._bound_loop: Optional[asyncio.AbstractEventLoop] = None
         self._next_ok = 0.0
+
+    @property
+    def effective_rpm(self) -> float:
+        """Current effective RPM (min of configured and server-learned)."""
+        if self._configured_rpm <= 0:
+            # No configured limit - use server limit if known
+            return self._server_rpm or 0
+        if self._server_rpm is None:
+            return float(self._configured_rpm)
+        # Use the more restrictive of the two
+        return min(float(self._configured_rpm), self._server_rpm)
 
     def _ensure_lock(self) -> asyncio.Lock:
         """Get or create lock for current event loop."""
@@ -313,10 +488,30 @@ class RpmGate:
             self._bound_loop = loop
         return self._lock
 
+    def update_from_rate_limit(self, rate_info: "RateLimitInfo") -> Optional[float]:
+        """Update RPM based on rate limit info from server response.
+
+        Computes effective RPM from x-ratelimit-limit-requests and reset time.
+        Returns the new effective RPM if updated, None otherwise.
+        """
+        # Compute RPM from request limits
+        if rate_info.limit_requests and rate_info.reset_requests_s:
+            # requests per reset_period → requests per minute
+            new_rpm = (rate_info.limit_requests / rate_info.reset_requests_s) * 60.0
+
+            # Only update if this is more restrictive or we don't have a value yet
+            if self._server_rpm is None or new_rpm < self._server_rpm:
+                old_rpm = self.effective_rpm
+                self._server_rpm = new_rpm
+                if old_rpm != self.effective_rpm:
+                    return self.effective_rpm
+        return None
+
     async def wait_turn(self) -> None:
-        if self._rpm <= 0:
+        rpm = self.effective_rpm
+        if rpm <= 0:
             return
-        spacing = 60.0 / float(self._rpm)
+        spacing = 60.0 / rpm
         async with self._ensure_lock():
             now = time.monotonic()
             if now < self._next_ok:
@@ -1127,22 +1322,34 @@ class OpenAIMinimaLlm(AsyncMinimaLlmBackend):
                     output_tokens=output_tokens,
                 )
 
-            # non-2xx: parse Retry-After if present
-            retry_after = self._parse_retry_after(headers)
+            # non-2xx: parse rate limit info from headers and body
+            rate_info = _parse_rate_limit_info(status, headers, raw)
+            retry_after = rate_info.suggested_delay_s
+
+            # Update RPM from rate limit headers (learns server's actual limit)
+            new_rpm = self._rpm.update_from_rate_limit(rate_info)
 
             if _is_overload_status(status) or status == 408:
                 # Timeout (408) or overload suggests server might be struggling
-                await self._cooldown.bump(retry_after or self.cfg.cooldown_floor_s or 1.0)
+                cooldown_s = retry_after or self.cfg.cooldown_floor_s or 1.0
+                await self._cooldown.bump(cooldown_s)
                 if not overload_warning_printed:
-                    print(f"Server overload (HTTP {status}). Retrying with cooldown. Press Ctrl-C to abort.")
+                    info_str = rate_info.summary()
+                    print(f"Server overload (HTTP {status}). {info_str}")
+                    rpm_str = f" Adjusted RPM to {new_rpm:.0f}." if new_rpm else ""
+                    print(f"  Retrying with cooldown={cooldown_s:.1f}s.{rpm_str} Press Ctrl-C to abort.")
                     overload_warning_printed = True
 
             if (self.cfg.max_attempts > 0 and attempt >= self.cfg.max_attempts) or not _is_retriable_status(status):
                 error_type = "TimeoutError" if status == 408 else "HTTPError"
+                # Include rate limit info in error message
+                msg = f"status={status}"
+                if rate_info.error_message:
+                    msg += f" | {rate_info.error_message}"
                 return MinimaLlmFailure(
                     request_id=req.request_id,
                     error_type=error_type,
-                    message=f"status={status}",
+                    message=msg,
                     attempts=attempt,
                     status=status,
                     body_snippet=last_body,
