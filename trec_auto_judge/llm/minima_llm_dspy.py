@@ -7,7 +7,9 @@ from typing import Any, Callable, Dict, List, Optional, Type, Union, cast, get_a
 import asyncio
 import contextvars
 import inspect
+import os
 import re
+
 
 try:
     import dspy
@@ -402,6 +404,12 @@ class MinimaLlmDSPyLM(_BaseLM):  # type: ignore[misc]
             if prompt is None:
                 raise ValueError("DSPy LM requires either prompt or messages")
             messages = [{"role": "user", "content": prompt}]
+
+        # Debug: show what kwargs DSPy passes (set MINIMA_DEBUG=1 to enable)
+        if os.environ.get("MINIMA_DEBUG") and kwargs:
+            print(f"[MinimaLlmDSPyLM] DSPy kwargs: {list(kwargs.keys())}")
+            if "response_format" in kwargs:
+                print(f"[MinimaLlmDSPyLM] response_format: {kwargs['response_format']}")
 
         req = MinimaLlmRequest(
             request_id=str(kwargs.pop("request_id", "dspy")),
