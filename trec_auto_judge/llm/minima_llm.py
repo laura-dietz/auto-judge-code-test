@@ -1343,13 +1343,12 @@ class OpenAIMinimaLlm(AsyncMinimaLlmBackend):
                 this_request_saw_overload = True
                 if self._overload_warned < 0:
                     # First overload in this episode - print warning
-                    # DEBUG: Print raw headers and body to diagnose parsing issues
-                    print(f"DEBUG 429 headers: {headers}")
-                    print(f"DEBUG 429 body: {body_text[:500]}")
-                    print(f"DEBUG parsed rate_info: retry_after_s={rate_info.retry_after_s}, "
-                          f"limit_requests={rate_info.limit_requests}, remaining_requests={rate_info.remaining_requests}, "
-                          f"reset_requests_s={rate_info.reset_requests_s}, error_message={rate_info.error_message!r}")
-
+                    if os.environ.get("MINIMA_DEBUG"):
+                        print(f"DEBUG 429 headers: {headers}")
+                        print(f"DEBUG 429 body: {body_text[:500]}")
+                        print(f"DEBUG parsed rate_info: retry_after_s={rate_info.retry_after_s}, "
+                              f"limit_requests={rate_info.limit_requests}, remaining_requests={rate_info.remaining_requests}, "
+                              f"reset_requests_s={rate_info.reset_requests_s}, error_message={rate_info.error_message!r}")
                     info_str = rate_info.summary()
                     print(f"Server overload (HTTP {status}). {info_str}")
                     rpm_str = f" Adjusted RPM to {new_rpm:.0f}." if new_rpm else ""
