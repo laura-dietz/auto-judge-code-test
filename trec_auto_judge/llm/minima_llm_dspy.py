@@ -91,17 +91,57 @@ class TolerantChatAdapter(ChatAdapter):
         )
 
     @classmethod
-    def is_optional_float(cls, ann):
-        """Return True if annotation is Optional[float] or Union[float, NoneType]."""
-        return cls.is_optional_type(ann) and float in typing.get_args(ann)
+    def is_float(cls, ann):
+        """Return True if annotation is float or Optional[float]."""
+        origin = getattr(ann, "__origin__", None)
+
+        # Handle Optional[float] -> Union[float, None]
+        if origin is typing.Union:
+            args = getattr(ann, "__args__", ())
+            non_none = [a for a in args if a is not type(None)]
+            if len(non_none) == 1:
+                return cls.is_float(non_none[0])
+            return False
+
+        return ann is float
 
     @classmethod
-    def try_parse_float(cls, val):
-        """Safely parse float, or return None if invalid."""
+    def is_int(cls, ann):
+        """Return True if annotation is int or Optional[int]."""
+        origin = getattr(ann, "__origin__", None)
+
+        if origin is typing.Union:
+            args = getattr(ann, "__args__", ())
+            non_none = [a for a in args if a is not type(None)]
+            if len(non_none) == 1:
+                return cls.is_int(non_none[0])
+            return False
+
+        return ann is int
+
+    @classmethod
+    def try_parse_float(cls, val) -> float:
+        """Parse float from LLM output. Raises ValueError on failure."""
         try:
-            return float(str(val).strip())
+            s = str(val).strip()
+            m = re.search(r"[-+]?[0-9]*\.?[0-9]+", s)
+            if m:
+                return float(m.group())
         except (ValueError, TypeError):
-            return None
+            pass
+        raise ValueError(f"Could not parse float: {str(val)[:50]}")
+
+    @classmethod
+    def try_parse_int(cls, val) -> int:
+        """Parse int from LLM output. Raises ValueError on failure."""
+        try:
+            s = str(val).strip()
+            m = re.search(r"[-+]?\d+", s)
+            if m:
+                return int(m.group())
+        except (ValueError, TypeError):
+            pass
+        raise ValueError(f"Could not parse int: {str(val)[:50]}")
 
     @classmethod
     def is_list_str(cls, ann):
@@ -230,8 +270,28 @@ class TolerantChatAdapter(ChatAdapter):
 
             if name in parsed:
                 val = parsed[name]
-                if self.is_optional_float(annotation):
-                    parsed[name] = self.try_parse_float(val)
+                if self.is_float(annotation):
+                    try:
+                        parsed[name] = self.try_parse_float(val)
+                    except ValueError as e:
+                        raise AdapterParseError(
+                            adapter_name="TolerantChatAdapter",
+                            signature=signature,
+                            lm_response=completion,
+                            parsed_result=parsed,
+                            message=str(e),
+                        )
+                elif self.is_int(annotation):
+                    try:
+                        parsed[name] = self.try_parse_int(val)
+                    except ValueError as e:
+                        raise AdapterParseError(
+                            adapter_name="TolerantChatAdapter",
+                            signature=signature,
+                            lm_response=completion,
+                            parsed_result=parsed,
+                            message=str(e),
+                        )
                 elif self.is_list_str(annotation) and isinstance(val, str):
                     try:
                         parsed[name] = self.try_parse_list_str(val)
