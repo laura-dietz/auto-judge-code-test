@@ -84,64 +84,45 @@ class TolerantChatAdapter(ChatAdapter):
 
     @classmethod
     def is_optional_type(cls, tp):
-        """General helper: returns True if annotation is Optional[...]"""
+        """Return True if annotation is Optional[...]."""
         return (
             getattr(tp, "__origin__", None) is typing.Union
             and type(None) in getattr(tp, "__args__", ())
         )
 
     @classmethod
-    def is_float(cls, ann):
-        """Return True if annotation is float or Optional[float]."""
-        origin = getattr(ann, "__origin__", None)
-
-        # Handle Optional[float] -> Union[float, None]
-        if origin is typing.Union:
+    def unwrap_optional(cls, ann) -> type:
+        """Unwrap Optional[T] to T, or return ann unchanged."""
+        if getattr(ann, "__origin__", None) is typing.Union:
             args = getattr(ann, "__args__", ())
             non_none = [a for a in args if a is not type(None)]
             if len(non_none) == 1:
-                return cls.is_float(non_none[0])
-            return False
-
-        return ann is float
+                return non_none[0]
+        return ann
 
     @classmethod
-    def is_int(cls, ann):
-        """Return True if annotation is int or Optional[int]."""
-        origin = getattr(ann, "__origin__", None)
+    def is_type(cls, ann, target: type) -> bool:
+        """Return True if annotation is target or Optional[target]."""
+        return cls.unwrap_optional(ann) is target
 
-        if origin is typing.Union:
-            args = getattr(ann, "__args__", ())
-            non_none = [a for a in args if a is not type(None)]
-            if len(non_none) == 1:
-                return cls.is_int(non_none[0])
-            return False
+    # Convenience methods for common types
+    is_float = classmethod(lambda cls, ann: cls.is_type(ann, float))
+    is_int = classmethod(lambda cls, ann: cls.is_type(ann, int))
 
-        return ann is int
+    # Regex patterns for numeric parsing
+    _FLOAT_PATTERN = re.compile(r"[-+]?[0-9]*\.?[0-9]+")
+    _INT_PATTERN = re.compile(r"[-+]?\d+")
 
     @classmethod
-    def try_parse_float(cls, val) -> float:
-        """Parse float from LLM output. Raises ValueError on failure."""
+    def try_parse_numeric(cls, val, target: type, pattern: re.Pattern) -> int | float:
+        """Parse numeric value from LLM output. Raises ValueError on failure."""
         try:
-            s = str(val).strip()
-            m = re.search(r"[-+]?[0-9]*\.?[0-9]+", s)
+            m = pattern.search(str(val).strip())
             if m:
-                return float(m.group())
+                return target(m.group())
         except (ValueError, TypeError):
             pass
-        raise ValueError(f"Could not parse float: {str(val)[:50]}")
-
-    @classmethod
-    def try_parse_int(cls, val) -> int:
-        """Parse int from LLM output. Raises ValueError on failure."""
-        try:
-            s = str(val).strip()
-            m = re.search(r"[-+]?\d+", s)
-            if m:
-                return int(m.group())
-        except (ValueError, TypeError):
-            pass
-        raise ValueError(f"Could not parse int: {str(val)[:50]}")
+        raise ValueError(f"Could not parse {target.__name__}: {str(val)[:50]}")
 
     @classmethod
     def is_list_str(cls, ann):
@@ -221,15 +202,14 @@ class TolerantChatAdapter(ChatAdapter):
     def _is_non_value(cls, s: str) -> bool:
         return s.strip().lower() in {"", "none", "null"}
 
-    def parse(self, signature, completion: str):
-        # 1) Stream-parse into sections, allowing headers anywhere in the line.
-        sections: list[tuple[str | None, list[str]]] = [(None, [])]
-        current_k, current_lines = sections[-1]
+    # -------------------------------------------------------------------------
+    # Parse pipeline: extract → reduce → coerce
+    # -------------------------------------------------------------------------
 
-        def push_text(txt: str):
-            txt = txt.strip()
-            if txt:
-                current_lines.append(txt)
+    def _extract_sections(self, completion: str) -> list[tuple[str | None, list[str]]]:
+        """Extract (header, lines) sections from completion using [[ ## field ## ]] markers."""
+        sections: list[tuple[str | None, list[str]]] = [(None, [])]
+        current_lines = sections[-1][1]
 
         for raw_line in completion.splitlines():
             line = raw_line.strip()
@@ -238,84 +218,83 @@ class TolerantChatAdapter(ChatAdapter):
 
             last_end = 0
             for m in self._HEADER_RE.finditer(line):
-                # Text before the header belongs to the current section
-                before = line[last_end : m.start()]
+                # Text before header → current section
+                before = line[last_end:m.start()].strip()
                 if before:
-                    push_text(before)
+                    current_lines.append(before)
 
-                # Start a new section at this header
+                # Start new section at this header
                 header = self.normalize_field_name(m.group("name"))
                 sections.append((header, []))
-                current_k, current_lines = sections[-1]
-
+                current_lines = sections[-1][1]
                 last_end = m.end()
 
-            # Trailing text after the last header belongs to the current section
-            after = line[last_end:]
+            # Trailing text → current section
+            after = line[last_end:].strip()
             if after:
-                push_text(after)
+                current_lines.append(after)
 
-        # 2) Reduce sections into {field: value} for known output fields.
-        parsed: dict[str, typing.Any] = {}
-        for k, lines in sections:
-            if k in signature.output_fields:
+        return sections
+
+    def _sections_to_dict(self, sections: list[tuple[str | None, list[str]]], output_fields: set[str]) -> dict[str, str]:
+        """Reduce sections to {field: value} for known output fields."""
+        parsed: dict[str, str] = {}
+        for key, lines in sections:
+            if key in output_fields:
                 val = "\n".join(lines).strip()
-                if self._is_non_value(val):
-                    continue
-                parsed[k] = val  # last occurrence wins
+                if not self._is_non_value(val):
+                    parsed[key] = val  # last occurrence wins
+        return parsed
 
-        # 3) Fill missing fields + coerce Optional[float] and list[str].
+    def _coerce_field(self, val: str, annotation: type) -> typing.Any:
+        """Coerce string value to annotation type. Raises ValueError on failure."""
+        if self.is_float(annotation):
+            return float(self.try_parse_numeric(val, float, self._FLOAT_PATTERN))
+        if self.is_int(annotation):
+            return int(self.try_parse_numeric(val, int, self._INT_PATTERN))
+        if self.is_list_str(annotation) and isinstance(val, str):
+            return list(self.try_parse_list_str(val))
+        return val  # No coercion needed
+
+    def _validate_and_coerce(self, parsed: dict[str, str], signature, completion: str) -> dict[str, typing.Any]:
+        """Validate required fields present and coerce all values to target types."""
+        result: dict[str, typing.Any] = {}
+
         for name, field in signature.output_fields.items():
             annotation = field.annotation
 
             if name in parsed:
-                val = parsed[name]
-                if self.is_float(annotation):
-                    try:
-                        parsed[name] = self.try_parse_float(val)
-                    except ValueError as e:
-                        raise AdapterParseError(
-                            adapter_name="TolerantChatAdapter",
-                            signature=signature,
-                            lm_response=completion,
-                            parsed_result=parsed,
-                            message=str(e),
-                        )
-                elif self.is_int(annotation):
-                    try:
-                        parsed[name] = self.try_parse_int(val)
-                    except ValueError as e:
-                        raise AdapterParseError(
-                            adapter_name="TolerantChatAdapter",
-                            signature=signature,
-                            lm_response=completion,
-                            parsed_result=parsed,
-                            message=str(e),
-                        )
-                elif self.is_list_str(annotation) and isinstance(val, str):
-                    try:
-                        parsed[name] = self.try_parse_list_str(val)
-                    except ValueError as e:
-                        raise AdapterParseError(
-                            adapter_name="TolerantChatAdapter",
-                            signature=signature,
-                            lm_response=completion,
-                            parsed_result=parsed,
-                            message=str(e),
-                        )
-            else:
-                if self.is_optional_type(annotation):
-                    parsed[name] = None
-                else:
+                try:
+                    result[name] = self._coerce_field(parsed[name], annotation)
+                except (ValueError, TypeError) as e:
                     raise AdapterParseError(
                         adapter_name="TolerantChatAdapter",
                         signature=signature,
                         lm_response=completion,
                         parsed_result=parsed,
-                        message=f"Missing required field: {name}",
+                        message=str(e),
                     )
+            elif self.is_optional_type(annotation):
+                result[name] = None
+            else:
+                raise AdapterParseError(
+                    adapter_name="TolerantChatAdapter",
+                    signature=signature,
+                    lm_response=completion,
+                    parsed_result=parsed,
+                    message=f"Missing required field: {name}",
+                )
 
-        return parsed
+        return result
+
+    def parse(self, signature, completion: str) -> dict[str, typing.Any]:
+        """Parse LLM completion into typed output fields.
+
+        Pipeline: extract sections → reduce to dict → validate & coerce types
+        """
+        sections = self._extract_sections(completion)
+        parsed = self._sections_to_dict(sections, set(signature.output_fields.keys()))
+        return self._validate_and_coerce(parsed, signature, completion)
 
     
 def _get_dspy_version() -> tuple[int, int, int]:
