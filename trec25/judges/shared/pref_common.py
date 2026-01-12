@@ -173,6 +173,43 @@ If both passages are similar, answer with 0.
         )
 
 
+# =============================================================================
+# Confidence-enabled variants (enable with PREF_JUDGE_CONFIDENCE=1)
+# These add a confidence output field, which changes the prompt and invalidates cache.
+# =============================================================================
+
+
+class PrefJudgmentWithConfidence(PrefJudgment):
+    """PrefJudgment with explicit confidence output field."""
+    confidence: float = dspy.OutputField(
+        desc="confidence score from 0.0 to 1.0 indicating how certain you are"
+    )
+
+
+class PrefTiesJudgmentWithConfidence(PrefTiesJudgment):
+    """PrefTiesJudgment with explicit confidence output field."""
+    confidence: float = dspy.OutputField(
+        desc="confidence score from 0.0 to 1.0 indicating how certain you are"
+    )
+
+
+def get_pref_signature(ties_allowed: bool = False, with_confidence: bool = False) -> Type[dspy.Signature]:
+    """
+    Get appropriate preference judgment signature.
+
+    Args:
+        ties_allowed: If True, use PrefTiesJudgment (allows 0 for ties)
+        with_confidence: If True, use confidence-enabled variant.
+                        WARNING: Enabling confidence changes the prompt and invalidates cache.
+
+    Returns:
+        Appropriate DSPy signature class
+    """
+    if ties_allowed:
+        return PrefTiesJudgmentWithConfidence if with_confidence else PrefTiesJudgment
+    else:
+        return PrefJudgmentWithConfidence if with_confidence else PrefJudgment
+
 
 # =============================================================================
 # Pair Formation and Sampling

@@ -26,9 +26,8 @@ from trec_auto_judge.nugget_data import (
 # Import shared utilities
 from trec_auto_judge.llm.minima_llm_dspy import run_dspy_batch_generic
 from trec25.judges.shared.pref_common import (
-    PrefJudgment,
-    PrefTiesJudgment,
     compute_pref_aggregates,
+    get_pref_signature,
     prepare_prompts,
     run_pref_judgment_batch,
 )
@@ -291,8 +290,7 @@ def _chunk_by_query_first(
     lst: List[IterativePrefNuggetData],
     borda_scores: Dict[str, int],
     max_size: int = -1,
-    num_per_query: int = 2,
-    max_pairs_considered: int = -1,
+    num_per_query: int = 2, 
 ) -> List[List[IterativePrefNuggetData]]:
     """(Obsolete) Split list into chunks with at most `num_per_query` items per query_id.
 
@@ -303,7 +301,6 @@ def _chunk_by_query_first(
         borda_scores: Mapping of "run_id:topic_id" -> borda_score
         max_size: Maximum batch size (-1 means unlimited)
         num_per_query: Maximum items per query_id in each batch
-        max_pairs_considered: Maximum pairs per topic (-1 means unlimited)
 
     Returns:
         List of batches, each respecting the per-query limit
@@ -317,16 +314,6 @@ def _chunk_by_query_first(
         key=lambda x: borda_scores.get(f"{x.winner_run_id}:{x.query_id}", 0),
         reverse=True
     )
-
-    # Limit to top-k pairs per topic (if max_pairs_considered > 0)
-    if max_pairs_considered > 0:
-        topic_counts: Dict[str, int] = collections.defaultdict(int)
-        limited: List[IterativePrefNuggetData] = []
-        for item in sorted_lst:
-            if topic_counts[item.query_id] < max_pairs_considered:
-                limited.append(item)
-                topic_counts[item.query_id] += 1
-        sorted_lst = limited
 
     chunks: List[List[IterativePrefNuggetData]] = []
     remaining = sorted_lst
@@ -368,7 +355,7 @@ def _chunk_by_query(
     max_pairs_considered: int = -1
     ):
     if nugget_gen_order == "first":
-        return _chunk_by_query_first(lst, borda_scores=borda_scores, max_size=max_size, num_per_query=num_per_query, max_pairs_considered=max_pairs_considered)
+        return _chunk_by_query_first(lst, borda_scores=borda_scores, max_size=max_size, num_per_query=num_per_query)
     else:
         return _chunk_by_query_both(lst
                                     , borda_scores=borda_scores
@@ -464,6 +451,7 @@ class PrefNuggetJudge(AutoJudge):
         gen_batch_num_per_query:int,
         max_pairs_considered:int,
         nugget_gen_order: Literal["first","both", "winner"], # "first is deprecated"
+        with_confidence: bool = False,
         max_questions_per_pair: int = 5,
         num_pivot: int = 0,
         num_others: int = 8,
@@ -521,7 +509,10 @@ class PrefNuggetJudge(AutoJudge):
             print("PrefNuggetJudge: No comparison pairs generated")
             return None
 
-        pref_prompt = PrefJudgment if pref_judge == "must_decide" else PrefTiesJudgment #  "ties_allowed"
+        pref_prompt = get_pref_signature(
+            ties_allowed=(pref_judge == "ties_allowed"),
+            with_confidence=with_confidence,
+        )
         grade_data = run_pref_judgment_batch(grade_data, llm_config, signature=pref_prompt)
         print(f"PrefNuggetJudge: Completed {len(grade_data)} pairwise comparisons")
 

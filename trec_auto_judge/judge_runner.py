@@ -172,7 +172,6 @@ def run_judge(
             # Pass responses based on nugget_depends_on_responses flag
             responses_for_nuggets = rag_responses if nugget_depends_on_responses else None
 
-            print(f"[{datetime.now().isoformat(timespec='seconds')}] Creating Nuggets...")
             current_nuggets = auto_judge.create_nuggets(
                 rag_responses=responses_for_nuggets,
                 rag_topics=rag_topics,
@@ -180,7 +179,6 @@ def run_judge(
                 nugget_banks=input_nuggets,
                 **nugget_kwargs,
             )
-            print(f"[{datetime.now().isoformat(timespec='seconds')}] Done Creating nuggets")
             # Verify created nuggets
             if current_nuggets is not None:
                 # Verify type matches what auto_judge declared
@@ -212,8 +210,6 @@ def run_judge(
         # Pass nuggets based on judge_uses_nuggets flag
         nuggets_for_judge = current_nuggets if judge_uses_nuggets else None
 
-        print(f"[{datetime.now().isoformat(timespec='seconds')}] Judging...")
-
         leaderboard, qrels = auto_judge.judge(
             rag_responses=rag_responses,
             rag_topics=rag_topics,
@@ -221,9 +217,6 @@ def run_judge(
             nugget_banks=nuggets_for_judge,
             **judge_kwargs,
         )
-
-        print(f"[{datetime.now().isoformat(timespec='seconds')}] Done Judging...")
-
 
         # Step 3: Write outputs
         if judge_output_path:
