@@ -11,7 +11,7 @@ import collections
 from itertools import groupby
 import sys
 from textwrap import dedent
-from typing import Any, Dict, List, Literal, Set, TypeVar
+from typing import Any, Dict, List, Literal, Set
 
 import dspy
 from pydantic import BaseModel
@@ -27,6 +27,7 @@ from trec_auto_judge.nugget_data import (
 # Import shared utilities
 from trec_auto_judge.llm.minima_llm_dspy import run_dspy_batch_generic
 from trec25.judges.shared.pref_common import (
+    PrefAggregateResult,
     PrefJudgment,
     PrefTiesJudgment,
     compute_pref_aggregates,
@@ -109,21 +110,6 @@ class IterativeExtractDifferentiatingNuggets(dspy.Signature):
       Avoid generic quality questions. 
       Make questions self-contained (e.g., "Capital of France?" not "The capital?").
       """        
-        # """
-        # For a query with title and background, you are given Winner and Loser RAG responses.
-
-        # Examine the given_exam_questions. Which of these questions are answered
-        # better by the Winner than the Loser? 
-
-        # You can also generate new differentiating_questions that capture better 
-        # explain why the Winner is better. These should be brief, atomic questions
-        # targeting query-essential information which the Winner answers well and the
-        # Loser omits or mishandles.
-
-        # Focus on differences that affect rlevance, correctness, completeness, or usefulness.
-        # Prefer short questions like "Capital of USA?" or "Process of steel cooking?".
-        # Avoid generic quality questions. Resolve all determiner and implicit references.
-        # """
     )
 
     query_title: str = dspy.InputField(desc="Query title")
@@ -143,52 +129,17 @@ class IterativeExtractDifferentiatingNuggets(dspy.Signature):
     )
 
 
-
-# class IterativeDExtractDifferentiatingNuggets(dspy.Signature):
-#     __doc__ = dedent(
-#         """
-#         For a query with title and background, you are given Winner and Loser RAG responses.
-
-#         First, examine the given_exam_questions. Which of these questions are answered
-#         better by the Winner than the Loser? Output those as addressed_questions.
-
-#         Only if NONE of the given_exam_questions explain why the Winner is better,
-#         generate new differentiating_questions. These should be brief, atomic questions
-#         targeting query-essential information which the Winner answers well and the
-#         Loser omits or mishandles.
-
-#         Focus on differences that affect correctness, completeness, or usefulness.
-#         Prefer short questions like "Capital of USA?" or "Process of steel cooking?".
-#         Avoid generic quality questions.
-#         """
-#     )
-
-#     query_title: str = dspy.InputField(desc="Query title")
-#     query_background: str = dspy.InputField(desc="Background context for the query")
-#     winner_passage: str = dspy.InputField(desc="The passage that won the comparison")
-#     loser_passage: str = dspy.InputField(desc="The passage that lost the comparison")
-#     given_exam_questions: list[str] = dspy.InputField(desc="Given exam questions")
-
-#     addressed_questions: Optional[List[str]] = dspy.OutputField(
-#         desc='The questions better addressed in the Winner as a JSON array, e.g. ["Capital of USA?", "Process to cook steel?"]'
-#     )
-#     differentiating_questions: Optional[List[str]] = dspy.OutputField(
-#         desc='Generated questions as a JSON array, e.g. ["Capital of USA?", "Process to cook steel?"]'
-#     )
-#     reasoning: str = dspy.OutputField(
-#         desc="Brief explanation of the analysis"
-#     )
-#     confidence: float = dspy.OutputField(
-#         desc="Confidence score from 0.0 to 1.0 indicating how certain you are"
-#     )
-
 # =============================================================================
 # Data Model (for nugget extraction - specific to PrefNuggetJudge)
 # =============================================================================
 
 
 class PrefNuggetData(BaseModel):
-    """Data model for extracting differentiating nuggets from comparison pairs."""
+    """Data model for extracting differentiating nuggets from comparison pairs.
+
+    Used by both iterative and non-iterative extraction paths.
+    For iterative extraction, given_exam_questions is set before each batch.
+    """
 
     # Input fields (for DSPy signature)
     query_id: str
@@ -198,35 +149,15 @@ class PrefNuggetData(BaseModel):
     loser_run_id: str
     winner_passage: str
     loser_passage: str
+    given_exam_questions: Optional[List[str]] = None  # Set only for iterative extraction
 
     # Output fields (populated by LLM)
-    differentiating_questions: List[str] = []
-
-
-
-class IterativePrefNuggetData(BaseModel):
-    """Data model for extracting differentiating nuggets from comparison pairs."""
-
-    # Input fields (for DSPy signature)
-    query_id: str
-    query_title: str
-    query_background: str = ""
-    winner_run_id: str
-    loser_run_id: str
-    winner_passage: str
-    loser_passage: str
-    given_exam_questions: List[str] = []
-
-    # Output fields (populated by LLM)
-    addressed_questions: List[str] = []
     differentiating_questions: List[str] = []
 
 
 # =============================================================================
 # PrefNuggetJudge Implementation
 # =============================================================================
-
-T = TypeVar('T')
 
 
 class QuestionTracker:
@@ -235,10 +166,16 @@ class QuestionTracker:
     def __init__(self):
         # counts[query_id][question] = count
         self._counts: Dict[str, Dict[str, int]] = collections.defaultdict(lambda: collections.defaultdict(int))
+        self._topics_done: Set[str] = set()  # Topics that have collected enough questions
 
     def add(self, query_id: str, question: str, count: int = 1) -> None:
         """Add a question, incrementing its count."""
         self._counts[query_id][question] += count
+
+    def add_all(self, query_id: str, questions: List[str], count: int = 1) -> None:
+        """Add multiple questions, incrementing each count."""
+        for q in questions:
+            self._counts[query_id][q] += count
 
     def questions(self, query_id: str) -> List[str]:
         """Get list of unique questions for a topic."""
@@ -268,6 +205,27 @@ class QuestionTracker:
             reverse=True
         )[:n]
 
+    def is_done(self, query_id: str) -> bool:
+        """Check if topic has collected enough questions."""
+        return query_id in self._topics_done
+
+    def mark_done(self, query_id: str) -> None:
+        """Mark topic as having collected enough questions."""
+        self._topics_done.add(query_id)
+
+    def check_and_mark_done(self, query_id: str, stop_at_count: int) -> bool:
+        """Mark done if threshold exceeded. Returns True if now done."""
+        if self.num_questions(query_id) > stop_at_count:
+            self._topics_done.add(query_id)
+            return True
+        return False
+
+    def check_all_done(self, stop_at_count: int) -> None:
+        """Check all topics and mark done if threshold exceeded."""
+        for query_id in self._counts.keys():
+            if self.num_questions(query_id) > stop_at_count:
+                self._topics_done.add(query_id)
+
 def _print_tracker(tracker: QuestionTracker) -> str:
     lines = []
     for query_id, counts in sorted(tracker.items())[:5]:
@@ -281,12 +239,12 @@ def _print_tracker(tracker: QuestionTracker) -> str:
 
 
 def _chunk_by_query_both(
-    lst: List[IterativePrefNuggetData],
+    lst: List[PrefNuggetData],
     borda_scores: Dict[str, int],
     nugget_gen_order: Literal["winner", "both"],
     num_per_query: int = 2, 
     max_pairs_considered: int = -1
-) -> List[List[IterativePrefNuggetData]]:
+) -> List[List[PrefNuggetData]]:
     """Split list into chunks with at most `num_per_query` items per query_id.
 
     Pairs with higher borda_scores (sum) are prioritized first.
@@ -305,7 +263,7 @@ def _chunk_by_query_both(
         return []
 
     # First split by topic (convert groupby iterator to dict)
-    sorted_per_topic: Dict[str, List[IterativePrefNuggetData]] = {
+    sorted_per_topic: Dict[str, List[PrefNuggetData]] = {
         k: list(g)
         for k, g in groupby(sorted(lst, key=lambda d: d.query_id), key=lambda d: d.query_id)
     }
@@ -340,7 +298,7 @@ def _chunk_by_query_both(
     
     chunks=[]    
     while any(x for x in sorted_per_topic.values()):
-        chunk: List[IterativePrefNuggetData] = []
+        chunk: List[PrefNuggetData] = []
         
         for query_id in sorted_per_topic:
             for rounds in range(num_per_query):
@@ -355,128 +313,202 @@ def _chunk_by_query_both(
     return chunks
 
 
-def _chunk_by_query_first(
-    lst: List[IterativePrefNuggetData],
-    borda_scores: Dict[str, int],
-    max_size: int = -1,
-    num_per_query: int = 2, 
-) -> List[List[IterativePrefNuggetData]]:
-    """(Obsolete) Split list into chunks with at most `num_per_query` items per query_id.
-
-    Items with higher borda_score (for their winner) are prioritized first.
-
-    Args:
-        lst: List of data items with query_id attribute
-        borda_scores: Mapping of "run_id:topic_id" -> borda_score
-        max_size: Maximum batch size (-1 means unlimited)
-        num_per_query: Maximum items per query_id in each batch
-
-    Returns:
-        List of batches, each respecting the per-query limit
-    """
-    if not lst:
-        return []
-
-    # Sort by borda_score descending (best winners first)
-    sorted_lst = sorted(
-        lst,
-        key=lambda x: borda_scores.get(f"{x.winner_run_id}:{x.query_id}", 0),
-        reverse=True
-    )
-
-    chunks: List[List[IterativePrefNuggetData]] = []
-    remaining = sorted_lst
-
-    while remaining:
-        chunk: List[IterativePrefNuggetData] = []
-        query_counts: Dict[str, int] = collections.defaultdict(int)
-        still_remaining: List[IterativePrefNuggetData] = []
-
-        for item in remaining:
-            # Check if we can add this item
-            at_max_size = max_size > 0 and len(chunk) >= max_size
-            at_query_limit = query_counts[item.query_id] >= num_per_query
-
-            if at_max_size:
-                # Batch is full, save rest for next chunk
-                still_remaining.append(item)
-            elif at_query_limit:
-                # This query has enough in current batch, defer to next
-                still_remaining.append(item)
-            else:
-                # Add to current batch
-                chunk.append(item)
-                query_counts[item.query_id] += 1
-
-        if chunk:
-            chunks.append(chunk)
-        remaining = still_remaining
-
-    return chunks
-
-
 def _chunk_by_query(
-    lst: List[IterativePrefNuggetData],
+    lst: List[PrefNuggetData],
     borda_scores: Dict[str, int],
-    nugget_gen_order: Literal["first", "both", "winner"],
-    max_size: int = -1,
-    num_per_query: int = 2, 
+    nugget_gen_order: Literal["both", "winner"],
+    num_per_query: int = 2,
     max_pairs_considered: int = -1
     ):
-    if nugget_gen_order == "first":
-        return _chunk_by_query_first(lst, borda_scores=borda_scores, max_size=max_size, num_per_query=num_per_query)
-    else:
-        return _chunk_by_query_both(lst
-                                    , borda_scores=borda_scores
-                                    , nugget_gen_order=nugget_gen_order
-                                    , num_per_query=num_per_query
-                                    , max_pairs_considered=max_pairs_considered
-                                    )
+    return _chunk_by_query_both(
+        lst,
+        borda_scores=borda_scores,
+        nugget_gen_order=nugget_gen_order,
+        num_per_query=num_per_query,
+        max_pairs_considered=max_pairs_considered,
+    )
 
-def _interleave_by_query_id(
-    data: List[IterativePrefNuggetData],
-    borda_scores: Dict[str, int],
-) -> List[IterativePrefNuggetData]:
+# =============================================================================
+# Shared Utilities
+# =============================================================================
+
+def build_response_lookups(
+    rag_responses: Sequence[Report],
+    rag_topics: Sequence[Request],
+) -> tuple[Dict[str, Request], Dict[str, List[Report]]]:
+    """Build lookup structures for responses and topics.
+
+    Returns:
+        rag_topic_dict: topic_id -> Request
+        rag_response_by_topic: topic_id -> List[Report]
     """
-    Reorder so elements with same query_id are maximally spread out (round-robin).
+    rag_topic_dict: Dict[str, Request] = {t.request_id: t for t in rag_topics}
+    rag_response_by_topic: Dict[str, List[Report]] = {
+        topic: list(responses)
+        for topic, responses in groupby(
+            sorted(rag_responses, key=lambda r: r.metadata.topic_id),
+            key=lambda r: r.metadata.topic_id,
+        )
+    }
+    return rag_topic_dict, rag_response_by_topic
 
-    Within each topic, pairs are sorted by winner's borda_score (descending) so that
-    comparisons involving the best-performing responses are processed first.
+
+def run_preference_phase(
+    rag_topic_dict: Dict[str, Request],
+    rag_response_by_topic: Dict[str, List[Report]],
+    llm_config: MinimaLlmConfig,
+    num_pivot: int,
+    num_others: int,
+    no_dupes: bool,
+    pref_judge: Literal['must_decide', 'ties_allowed'] = 'must_decide',
+) -> Optional[tuple[List, Dict]]:
+    """Run pairwise preference comparisons and compute aggregates.
+
+    Returns:
+        Tuple of (grade_data, aggregates) or None if no comparison pairs generated.
+        grade_data: List of comparison results (flipped for position bias, ties dropped)
+        aggregates: Dict of computed aggregates with better_than/worse_than lists
+    """
+    print(f"PrefNuggetJudge: Running pairwise comparisons (num_pivot={num_pivot}, num_others={num_others})...")
+    grade_data = prepare_prompts(
+        rag_topic_dict=rag_topic_dict,
+        rag_response_by_topic=rag_response_by_topic,
+        num_pivot=num_pivot,
+        num_others=num_others,
+        no_dupes=no_dupes
+    )
+
+    if not grade_data:
+        print("PrefNuggetJudge: No comparison pairs generated")
+        return None
+
+    pref_signature = PrefTiesJudgment if pref_judge == "ties_allowed" else PrefJudgment
+    grade_data = run_pref_judgment_batch(grade_data, llm_config, signature=pref_signature)
+    print(f"PrefNuggetJudge: Completed {len(grade_data)} pairwise comparisons")
+
+    # Include pairs in reverse for position bias handling
+    grade_data = grade_data + [data.flip() for data in grade_data]
+    # Drop ties (only keep pairs with a clear winner)
+    grade_data = [d for d in grade_data if d.better_passage in [1, 2]]
+
+    # Compute aggregates (better_than/worse_than lists)
+    aggregates = compute_pref_aggregates(grade_data)
+
+    return grade_data, aggregates
+
+
+def extract_winner_loser_pairs(
+    aggregates: Dict[str, PrefAggregateResult],
+    rag_responses: Sequence[Report],
+    rag_topic_dict: Dict[str, Request],
+) -> List[PrefNuggetData]:
+    """Extract winner/loser pairs from preference aggregates.
 
     Args:
-        data: List of extraction data items
-        borda_scores: Mapping of "run_id:topic_id" -> borda_score
+        aggregates: Dict of computed aggregates with better_than/worse_than lists
+        rag_responses: RAG responses (used to build responses_by_key)
+        rag_topic_dict: topic_id -> Request mapping
+
+    Returns:
+        List of PrefNuggetData objects ready for LLM extraction
     """
-    by_query: Dict[str, List[IterativePrefNuggetData]] = collections.defaultdict(list)
-    for item in data:
-        by_query[item.query_id].append(item)
+    responses_by_key: Dict[str, Report] = {
+        f"{r.metadata.run_id}:{r.metadata.topic_id}": r for r in rag_responses
+    }
+    extraction_data: List[PrefNuggetData] = []
+    seen_pairs: Set[tuple[str, str, str]] = set()  # (topic_id, winner, loser)
 
-    # Sort by query_id for deterministic ordering
-    sorted_query_ids = sorted(by_query.keys())
+    for _key, agg in aggregates.items():
+        topic_id = agg.topic_id
+        winner_run_id = agg.run_id
+        winner_key = f"{winner_run_id}:{topic_id}"
+        winner_response = responses_by_key.get(winner_key)
 
-    # Within each topic, sort by winner's borda_score (descending), then by run_ids for determinism
-    for qid in sorted_query_ids:
-        by_query[qid].sort(
-            key=lambda x: (
-                -borda_scores.get(f"{x.winner_run_id}:{x.query_id}", 0),  # Best winners first
-                x.winner_run_id,
-                x.loser_run_id,
-            )
+        if not winner_response:
+            continue
+
+        request = rag_topic_dict.get(topic_id)
+        if not request:
+            continue
+
+        # This response beat these runs
+        for loser_run_id in agg.better_than:
+            pair_key = (topic_id, winner_run_id, loser_run_id)
+            if pair_key not in seen_pairs:
+                seen_pairs.add(pair_key)
+                loser_key = f"{loser_run_id}:{topic_id}"
+                loser_response = responses_by_key.get(loser_key)
+                if loser_response:
+                    extraction_data.append(
+                        PrefNuggetData(
+                            query_id=topic_id,
+                            query_title=request.title or "",
+                            query_background=request.background or "",
+                            winner_run_id=winner_run_id,
+                            loser_run_id=loser_run_id,
+                            winner_passage=winner_response.get_report_text(),
+                            loser_passage=loser_response.get_report_text(),
+                        )
+                    )
+
+    return extraction_data
+
+
+def build_nugget_banks_from_results(
+    extraction_data: List[PrefNuggetData],
+    rag_topic_dict: Dict[str, Request],
+    max_per_topic: Optional[int] = None,
+) -> NuggetBanks:
+    """Build NuggetBanks from extraction results, deduplicating questions.
+
+    Args:
+        extraction_data: List of PrefNuggetData with differentiating_questions populated
+        rag_topic_dict: topic_id -> Request mapping
+        max_per_topic: Optional limit on nuggets per topic
+
+    Returns:
+        NuggetBanks with deduplicated questions per topic
+    """
+    # Group by topic
+    results_by_topic: Dict[str, List[PrefNuggetData]] = {}
+    for data in extraction_data:
+        results_by_topic.setdefault(data.query_id, []).append(data)
+
+    # Build banks with deduplication
+    banks = []
+    total_nuggets = 0
+
+    for topic_id, topic_results in results_by_topic.items():
+        request = rag_topic_dict.get(topic_id)
+        bank = NuggetBank(
+            query_id=topic_id,
+            title_query=request.title if request else topic_id
         )
+        seen_questions: Dict[str, NuggetQuestion] = {}
 
-    # Round-robin interleave (deterministic order)
-    result: List[IterativePrefNuggetData] = []
-    iterators = [iter(by_query[qid]) for qid in sorted_query_ids]
-    while iterators:
-        next_round = []
-        for it in iterators:
-            try:
-                result.append(next(it))
-                next_round.append(it)
-            except StopIteration:
-                pass
-        iterators = next_round
-    return result
+        for result in topic_results:
+            for question_text in result.differentiating_questions:
+                if max_per_topic and len(seen_questions) >= max_per_topic:
+                    break
+                normalized = question_text.strip()
+                if not normalized or normalized in seen_questions:
+                    continue
+                nugget = NuggetQuestion(
+                    query_id=topic_id,
+                    question=normalized,
+                    question_id=f"{topic_id}-pn{len(seen_questions)}",
+                )
+                seen_questions[normalized] = nugget
+            if max_per_topic and len(seen_questions) >= max_per_topic:
+                break
+
+        bank.add_nuggets(list(seen_questions.values()))
+        bank.index_nuggets()
+        banks.append(bank)
+        total_nuggets += len(seen_questions)
+
+    print(f"PrefNuggetJudge: Created {total_nuggets} nuggets across {len(banks)} topics")
+    return NuggetBanks.from_banks_list(banks)
 
 
 class PrefNuggetJudge(AutoJudge):
@@ -519,12 +551,12 @@ class PrefNuggetJudge(AutoJudge):
         stop_collecting_at_nuggets_per_topic: int,
         gen_batch_num_per_query:int,
         max_pairs_considered:int,
-        nugget_gen_order: Literal["first","both", "winner"], # "first is deprecated"
+        nugget_gen_order: Literal["both", "winner"],
         max_questions_per_pair: int = 5,
         num_pivot: int = 0,
         num_others: int = 8,
         no_dupes:bool = True,
-        nugget_banks: Optional[NuggetBanks] = None,
+        # nugget_banks: Optional[NuggetBanks] = None,
         **kwargs,
     ) -> Optional[NuggetBanks]:
         """
@@ -546,86 +578,30 @@ class PrefNuggetJudge(AutoJudge):
             NuggetBanks with differentiating questions per topic
         """
         
-        if not iterative_nuggets:
-            raise RuntimeError("This nugget creation only produces iterative_nuggets")
+
         # Build lookup structures
-        rag_topic_dict: Dict[str, Request] = {t.request_id: t for t in rag_topics}
-        num_topics = len(rag_topic_dict)
+        rag_topic_dict, rag_response_by_topic = build_response_lookups(rag_responses, rag_topics)
         rag_responses = self.filter_non_topic_responses(rag_responses, rag_topic_dict.keys())
-        rag_response_by_topic: Dict[str, List[Report]] = {
-            topic: list(responses)
-            for topic, responses in groupby(
-                sorted(rag_responses, key=lambda r: r.metadata.topic_id),
-                key=lambda r: r.metadata.topic_id,
-            )
-        }
-        responses_by_key: Dict[str, Report] = {
-            f"{r.metadata.run_id}:{r.metadata.topic_id}": r for r in rag_responses
-        }
 
         # Step 1: Run pairwise preference comparisons
-        print(f"PrefNuggetJudge: Running pairwise comparisons (num_pivot={num_pivot}, num_others={num_others})...")
-        grade_data = prepare_prompts(
+        result = run_preference_phase(
             rag_topic_dict=rag_topic_dict,
             rag_response_by_topic=rag_response_by_topic,
+            llm_config=llm_config,
             num_pivot=num_pivot,
             num_others=num_others,
-            no_dupes=no_dupes
+            no_dupes=no_dupes,
+            pref_judge=pref_judge,
         )
-
-        if not grade_data:
-            print("PrefNuggetJudge: No comparison pairs generated")
+        if result is None:
             return None
-
-        pref_signature = PrefTiesJudgment if pref_judge == "ties_allowed" else PrefJudgment
-        grade_data = run_pref_judgment_batch(grade_data, llm_config, signature=pref_signature)
-        print(f"PrefNuggetJudge: Completed {len(grade_data)} pairwise comparisons")
-
-        # Include pairs in reverse for position bias handling
-        grade_data = grade_data + [data.flip() for data in grade_data]
-        # Drop ties (only keep pairs with a clear winner)
-        grade_data = [d for d in grade_data if d.better_passage in [1, 2]]
-
-        # Compute aggregates (better_than/worse_than lists)
-        aggregates = compute_pref_aggregates(grade_data)  # Note this function does not handle ties
+        _, aggregates = result
 
         # Step 2: Extract comparison pairs from aggregates
-        extraction_data: List[PrefNuggetData] = []
-        seen_pairs: Set[tuple[str, str, str]] = set()  # (topic_id, winner, loser)
-
-        for _key, agg in aggregates.items():
-            topic_id = agg.topic_id
-            winner_run_id = agg.run_id
-            winner_key = f"{winner_run_id}:{topic_id}"
-            winner_response = responses_by_key.get(winner_key)
-
-            if not winner_response:
-                continue
-
-            request = rag_topic_dict.get(topic_id)
-            if not request:
-                continue
-
-            # This response beat these runs
-            for loser_run_id in agg.better_than:
-                pair_key = (topic_id, winner_run_id, loser_run_id)
-                if pair_key not in seen_pairs:
-                    seen_pairs.add(pair_key)
-                    loser_key = f"{loser_run_id}:{topic_id}"
-                    loser_response = responses_by_key.get(loser_key)
-                    if loser_response:
-                        extraction_data.append(
-                            IterativePrefNuggetData(
-                                query_id=topic_id,
-                                query_title=request.title or "",
-                                query_background=request.background or "",
-                                winner_run_id=winner_run_id,
-                                loser_run_id=loser_run_id,
-                                winner_passage=winner_response.get_report_text(),
-                                loser_passage=loser_response.get_report_text(),
-                                given_exam_questions=[]  # needs to get filled in later
-                            )
-                        )
+        extraction_data = extract_winner_loser_pairs(aggregates, rag_responses, rag_topic_dict)
+        # Initialize given_exam_questions for iterative extraction (filled in per-chunk later)
+        for data in extraction_data:
+            data.given_exam_questions = []
 
         if not extraction_data:
             print("PrefNuggetJudge: No winner/loser pairs found after comparison")
@@ -634,14 +610,11 @@ class PrefNuggetJudge(AutoJudge):
         for i, ed in enumerate(extraction_data[:20]):  # First 20
             print(f"  [{i}] {ed.query_id}: {ed.winner_run_id} > {ed.loser_run_id}")
 
-
-        print(
-            f"PrefNuggetJudge: Extracting nuggets from {len(extraction_data)} comparison pairs..."
-        )
+        print(f"PrefNuggetJudge: Extracting nuggets from {len(extraction_data)} comparison pairs...")
 
         # Output converter (JSON parsing handled by TolerantChatAdapter)
         def convert_output(
-            prediction: dspy.Prediction, data: IterativePrefNuggetData
+            prediction: dspy.Prediction, data: PrefNuggetData
         ) -> None:
             differentiating_questions = getattr(prediction, "differentiating_questions", [])
             # Normalize: strip whitespace, filter empty
@@ -650,305 +623,76 @@ class PrefNuggetJudge(AutoJudge):
                 if q and q.strip()
             ][:max_questions_per_pair]
 
-            # we actually may not need those, they are just a ruse
-            addressed_questions = getattr(prediction, "addressed_questions", [])
-            data.addressed_questions = [
-                q.strip() for q in (addressed_questions or [])
-                if q and q.strip()
-            ][:max_questions_per_pair]
+        if iterative_nuggets:
+            # Build borda_scores lookup for prioritizing best-performing responses
+            borda_scores: Dict[str, int] = {key: agg.borda_score for key, agg in aggregates.items()}
 
+            # Spread out elements with same query_id (round-robin interleave)
+            # Within each topic, pairs are sorted by winner's borda_score (best performers first)
+            extraction_data_chunks = _chunk_by_query(
+                extraction_data,
+                borda_scores=borda_scores,
+                nugget_gen_order=nugget_gen_order,
+                num_per_query=gen_batch_num_per_query,
+                max_pairs_considered=max_pairs_considered,
+            )
+            tracker = QuestionTracker()
 
-        # =----------------------------------------------=
-        # prepare small batches to generate questions, then test.
+            extraction_result_data = list()
+            
+            
+            ### This is special for `iterative_nuggets = True`
+            for chunk_idx, extraction_chunk in enumerate(extraction_data_chunks):
+                # Skip prompts for topics that already have enough questions
+                extraction_chunk = [d for d in extraction_chunk if not tracker.is_done(d.query_id)]
 
+                if not extraction_chunk:
+                    continue  # All topics in this chunk are done
 
-        # Build borda_scores lookup for prioritizing best-performing responses
-        borda_scores: Dict[str, int] = {key: agg.borda_score for key, agg in aggregates.items()}
+                # set questions so far
+                for data in extraction_chunk:
+                    topic_id = data.query_id
+                    data.given_exam_questions = tracker.questions(topic_id)
 
-        # Spread out elements with same query_id (round-robin interleave)
-        # Within each topic, pairs are sorted by winner's borda_score (best performers first)
-        extraction_data_chunks = _chunk_by_query(
-            extraction_data,
-            borda_scores=borda_scores,
-            nugget_gen_order=nugget_gen_order,
-            num_per_query=gen_batch_num_per_query,
-            max_pairs_considered=max_pairs_considered,
-        )
-        tracker = QuestionTracker()
-        topics_done:Set[str] = set()
+                # Run LLM extraction
+                extraction_chunk = run_dspy_batch_generic(
+                    extraction_chunk,
+                    IterativeExtractDifferentiatingNuggets,
+                    convert_output,
+                    llm_config,
+                )
 
-        extraction_result_data = list()
-        for chunk_idx, extraction_chunk in enumerate(extraction_data_chunks):
-            # Skip prompts for topics that already have enough questions
-            extraction_chunk = [d for d in extraction_chunk if d.query_id not in topics_done]
+                for data in extraction_chunk:
+                    # Add questions (count increments for duplicates - tracks reuse)
+                    tracker.add_all(data.query_id, data.differentiating_questions)
 
-            if not extraction_chunk:
-                continue  # All topics in this chunk are done
+                # Mark topics as done if they've collected enough questions
+                tracker.check_all_done(stop_at_count=stop_collecting_at_nuggets_per_topic)
 
-            # set questions so far
-            for data in extraction_chunk:
-                topic_id = data.query_id
-                data.given_exam_questions = tracker.questions(topic_id)
+                extraction_result_data.extend(extraction_chunk)
 
-            # Run LLM extraction
-            extraction_chunk = run_dspy_batch_generic(
-                extraction_chunk,
-                IterativeExtractDifferentiatingNuggets,
+                print(f"-- PrefNuggetJudge: Finished extracting nuggets pass {chunk_idx}. Questions:\n{_print_tracker(tracker)}")
+
+            print("PrefNuggetJudge: Finished extracting nuggets")
+            print(f"Question counts: {dict(tracker.items())}")
+
+        else:
+            # Non-iterative: single batch extraction
+            extraction_result_data = run_dspy_batch_generic(
+                extraction_data,
+                ExtractDifferentiatingNuggets,
                 convert_output,
                 llm_config,
             )
-
-            for data in filter(lambda d: d.query_id not in topics_done, extraction_chunk):
-                query_id = data.query_id
-
-                # Add new/duplicate questions (count increments for duplicates too)
-                for q in data.differentiating_questions:
-                    tracker.add(query_id, q)
-                # Tabulate how often each question is addressed
-                for q in data.addressed_questions:
-                    tracker.add(query_id, q)
-
-                # Stop collecting if we have enough unique questions
-                if tracker.num_questions(query_id) > stop_collecting_at_nuggets_per_topic:
-                    topics_done.add(query_id)
-            extraction_result_data.extend(extraction_chunk)
-
-            print(f"-- PrefNuggetJudge: Finished extracting nuggets pass {chunk_idx}. Questions:\n{_print_tracker(tracker)}")
-
-        extraction_data = extraction_result_data
-        print("PrefNuggetJudge: Finished extracting nuggets")
-        print(f"Question counts: {dict(tracker.items())}")
-
-        # Keep only top max_nuggets_per_topic questions per topic
-        final_questions: Dict[str, List[str]] = {
-            query_id: tracker.top_questions(query_id, max_nuggets_per_topic)
-            for query_id, _ in tracker.items()
-        }
-
-        # =----------------------------------------------=
-
-        # Build NuggetBanks from final_questions (already deduplicated and filtered by count)
-        banks: List[NuggetBank] = []
-        total_nuggets = 0
-        for topic_id, questions in final_questions.items():
-            request = rag_topic_dict.get(topic_id)
-            bank = NuggetBank(
-                query_id=topic_id,
-                title_query=request.title if request else topic_id
-            )
-            nuggets = [
-                NuggetQuestion(
-                    query_id=topic_id,
-                    question=q,
-                    question_id=f"{topic_id}-pn{i}",
-                )
-                for i, q in enumerate(questions)
-            ]
-            bank.add_nuggets(nuggets)
-            bank.index_nuggets()
-            banks.append(bank)
-            total_nuggets += len(nuggets)
-
-        print(
-            f"PrefNuggetJudge: Created {total_nuggets} nuggets across {len(banks)} topics"
-        )
-
-        return NuggetBanks.from_banks_list(banks)
-
-
-##########################################
-##########################################
-
-    def create_nuggets_non_iterative(
-        self,
-        rag_responses: Sequence[Report],
-        rag_topics: Sequence[Request],
-        llm_config: MinimaLlmConfig,
-        iterative_nuggets:bool,
-        max_questions_per_pair: int = 5,
-        num_pivot: int = 0,
-        num_others: int = 8,
-        no_dupes:bool = True,
-        nugget_banks: Optional[NuggetBanks] = None,
-        **kwargs,
-    ) -> Optional[NuggetBanks]:
-        """
-        Extract differentiating nuggets from pairwise preference comparisons.
-
-        First runs pairwise comparisons (like PrefJudge), then extracts
-        NuggetQuestion objects explaining WHY the better response won.
-
-        Args:
-            rag_responses: Responses to compare
-            rag_topics: Topics being evaluated
-            llm_config: LLM configuration
-            nugget_banks: Ignored (not used for refinement)
-            max_questions_per_pair: Max questions to extract per comparison
-            num_pivot: Number of pivot responses (compared against all)
-            num_others: Max number of non-pivot comparisons to sample
-
-        Returns:
-            NuggetBanks with differentiating questions per topic
-        """
+            print("PrefNuggetJudge: Finished extracting nuggets")
         
-        if iterative_nuggets:
-            raise RuntimeError("This nugget creation does not produce iterative_nuggets")
-        # Build lookup structures
-        rag_topic_dict: Dict[str, Request] = {t.request_id: t for t in rag_topics}
-        rag_response_by_topic: Dict[str, List[Report]] = {
-            topic: list(responses)
-            for topic, responses in groupby(
-                sorted(rag_responses, key=lambda r: r.metadata.topic_id),
-                key=lambda r: r.metadata.topic_id,
-            )
-        }
-        responses_by_key: Dict[str, Report] = {
-            f"{r.metadata.run_id}:{r.metadata.topic_id}": r for r in rag_responses
-        }
-
-        # Step 1: Run pairwise preference comparisons
-        print(f"PrefNuggetJudge: Running pairwise comparisons (num_pivot={num_pivot}, num_others={num_others})...")
-        grade_data = prepare_prompts(
-            rag_topic_dict=rag_topic_dict,
-            rag_response_by_topic=rag_response_by_topic,
-            num_pivot=num_pivot,
-            num_others=num_others,
-            no_dupes=no_dupes
+        
+        # Build NuggetBanks from results (max_per_topic limits final count)
+        return build_nugget_banks_from_results(
+            extraction_data= extraction_result_data,
+            rag_topic_dict= rag_topic_dict,
+            max_per_topic=max_nuggets_per_topic
         )
-
-        if not grade_data:
-            print("PrefNuggetJudge: No comparison pairs generated")
-            return None
-
-        grade_data = run_pref_judgment_batch(grade_data, llm_config)
-        print(f"PrefNuggetJudge: Completed {len(grade_data)} pairwise comparisons")
-
-        # Include pairs in reverse for position bias handling
-        grade_data = grade_data + [data.flip() for data in grade_data]
-
-        # Compute aggregates (better_than/worse_than lists)
-        aggregates = compute_pref_aggregates(grade_data)
-
-        # Step 2: Extract comparison pairs from aggregates
-        extraction_data: List[PrefNuggetData] = []
-        seen_pairs: Set[tuple[str, str, str]] = set()  # (topic_id, winner, loser)
-
-        for _key, agg in aggregates.items():
-            topic_id = agg.topic_id
-            winner_run_id = agg.run_id
-            winner_key = f"{winner_run_id}:{topic_id}"
-            winner_response = responses_by_key.get(winner_key)
-
-            if not winner_response:
-                continue
-
-            request = rag_topic_dict.get(topic_id)
-            if not request:
-                continue
-
-            # This response beat these runs
-            for loser_run_id in agg.better_than:
-                pair_key = (topic_id, winner_run_id, loser_run_id)
-                if pair_key not in seen_pairs:
-                    seen_pairs.add(pair_key)
-                    loser_key = f"{loser_run_id}:{topic_id}"
-                    loser_response = responses_by_key.get(loser_key)
-                    if loser_response:
-                        extraction_data.append(
-                            PrefNuggetData(
-                                query_id=topic_id,
-                                query_title=request.title or "",
-                                query_background=request.background or "",
-                                winner_run_id=winner_run_id,
-                                loser_run_id=loser_run_id,
-                                winner_passage=winner_response.get_report_text(),
-                                loser_passage=loser_response.get_report_text(),
-                            )
-                        )
-
-        if not extraction_data:
-            print("PrefNuggetJudge: No winner/loser pairs found after comparison")
-            return None
-
-        print(
-            f"PrefNuggetJudge: Extracting nuggets from {len(extraction_data)} comparison pairs..."
-        )
-        # Debug: print extraction pairs for reproducibility debugging
-        for i, ed in enumerate(extraction_data[:20]):  # First 20
-            print(f"  [{i}] {ed.query_id}: {ed.winner_run_id} > {ed.loser_run_id}")
-
-        # Output converter (JSON parsing handled by TolerantChatAdapter)
-        def convert_output(
-            prediction: dspy.Prediction, data: PrefNuggetData
-        ) -> None:
-            questions = getattr(prediction, "differentiating_questions", [])
-            data.differentiating_questions = list(questions)[:max_questions_per_pair] if questions else []
-
-        # Run LLM extraction
-        extraction_data = run_dspy_batch_generic(
-            extraction_data,
-            ExtractDifferentiatingNuggets,
-            convert_output,
-            llm_config,
-        )
-        print("PrefNuggetJudge: Finished extracting nuggets")
-
-        # Aggregate by topic
-        results_by_topic: Dict[str, List[PrefNuggetData]] = {}
-        for data in extraction_data:
-            results_by_topic.setdefault(data.query_id, []).append(data)
-
-        # Build NuggetBanks
-        banks: List[NuggetBank] = []
-        total_nuggets = 0
-        for topic_id, topic_results in results_by_topic.items():
-            request = rag_topic_dict.get(topic_id)
-            bank = self._aggregate_nuggets_for_topic(
-                topic_id=topic_id,
-                title_query=request.title if request else topic_id,
-                extraction_results=topic_results,
-            )
-            banks.append(bank)
-            total_nuggets += len(bank.nuggets_as_list())
-
-        print(
-            f"PrefNuggetJudge: Created {total_nuggets} nuggets across {len(banks)} topics"
-        )
-
-        return NuggetBanks.from_banks_list(banks)
-
-
-    def _aggregate_nuggets_for_topic(
-        self,
-        topic_id: str,
-        title_query: str,
-        extraction_results: List[PrefNuggetData],
-    ) -> NuggetBank:
-        """Aggregate extracted questions into a single NuggetBank, deduplicating."""
-        bank = NuggetBank(query_id=topic_id, title_query=title_query)
-        seen_questions: Dict[str, NuggetQuestion] = {}
-
-        for result in extraction_results:
-            for question_text in result.differentiating_questions:
-                normalized = question_text.strip()
-                if not normalized:
-                    continue
-
-                if normalized in seen_questions:
-                    # Could merge references here if NuggetQuestion supported it
-                    pass
-                else:
-                    nugget = NuggetQuestion(
-                        query_id=topic_id,
-                        question=normalized,
-                        question_id=f"{topic_id}-pn{len(seen_questions)}",
-                    )
-                    seen_questions[normalized] = nugget
-
-        bank.add_nuggets(list(seen_questions.values()))
-        bank.index_nuggets()
-        return bank
-
 
     def judge(
         self,
@@ -956,7 +700,7 @@ class PrefNuggetJudge(AutoJudge):
         rag_topics: Sequence[Request],
         llm_config: MinimaLlmConfig,
         nugget_banks: Optional[NuggetBanks] = None,
-        grade_threshold: int = 3,
+        grade_threshold: int = 4,
         on_missing_evals: str = "fix_aggregate",
         filebase: str = "prefnugget",
         **kwargs

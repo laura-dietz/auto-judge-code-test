@@ -112,8 +112,8 @@ variants:
       no_dupes: true
       on_missing_evals: fix_aggregate
       iterative_nuggets: true
-      max_nuggets_per_topic: 2000
-      stop_collecting_at_nuggets_per_topic: 50
+      max_nuggets_per_topic: 20
+      stop_collecting_at_nuggets_per_topic: 20
       gen_batch_num_per_query: 2
       max_pairs_considered: 100
       nugget_gen_order: both
