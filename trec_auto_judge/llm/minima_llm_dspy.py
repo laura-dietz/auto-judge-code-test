@@ -820,6 +820,66 @@ async def run_dspy_batch(
     return cast(List[BaseModel], results)
 
 
+async def _collect_requests_for_batch(
+    signature_class: Type[dspy.Signature],
+    annotation_objs: List[BaseModel],
+    backend: "OpenAIMinimaLlm",
+    predictor_class: Type = None,
+) -> None:
+    """
+    Phase 1 of batch execution: Run through DSPy to queue all requests.
+
+    generate() returns BatchPendingResponse sentinels during this phase.
+    We don't care about parsing results - just need all requests queued
+    in the BatchCollector.
+
+    Args:
+        signature_class: DSPy signature with InputFields/OutputFields
+        annotation_objs: List of Pydantic models with input data
+        backend: OpenAIMinimaLlm backend with batch_mode() active
+        predictor_class: DSPy predictor class (default: ChainOfThought)
+    """
+    if predictor_class is None:
+        predictor_class = dspy.ChainOfThought
+
+    lm = MinimaLlmDSPyLM(backend)
+    input_fields = _get_input_field_names(signature_class)
+
+    with dspy.context(lm=lm, adapter=_select_adapter()):
+        predictor = predictor_class(signature_class)
+
+        async def _maybe_await(result):
+            """Await if awaitable, otherwise return value directly."""
+            if inspect.isawaitable(result):
+                return await result
+            return result
+
+        async def invoke_predictor(pred, **kw):
+            """Invoke predictor with version-tolerant async/sync handling."""
+            import functools
+
+            for method_name in ("acall", "aforward"):
+                method = getattr(pred, method_name, None)
+                if callable(method):
+                    return await _maybe_await(method(**kw))
+
+            loop = asyncio.get_running_loop()
+            return await loop.run_in_executor(None, functools.partial(pred, **kw))
+
+        async def collect_one(obj: BaseModel) -> BaseModel:
+            """Queue request without processing result."""
+            kw = obj.model_dump(include=set(input_fields))
+            try:
+                # This calls generate() which queues request and returns sentinel
+                await invoke_predictor(predictor, **kw)
+            except Exception:
+                # Parse errors expected - sentinel isn't valid LLM output
+                # We're just collecting requests, not processing results
+                pass
+            return obj
+
+        # Run through batched callable - results ignored
+        await backend.run_batched_callable(annotation_objs, collect_one)
 
 
 T = typing.TypeVar("T", bound=BaseModel)
@@ -835,7 +895,12 @@ def run_dspy_batch_generic(
     Run DSPy batch for any data model and signature.
 
     Convenience wrapper around run_dspy_batch that handles asyncio
-    and backend setup.
+    and backend setup. Supports Parasail batch mode for 50% cost savings.
+
+    When llm_config.parasail.prefix is set, uses two-phase execution:
+    1. Collection: Queue all requests (generate() returns sentinels)
+    2. Submission: Upload batch, poll until complete, populate cache
+    3. Retrieval: Run again, everything hits cache
 
     Args:
         data: List of Pydantic models to process
@@ -851,12 +916,31 @@ def run_dspy_batch_generic(
     if not data:
         return data
 
+    backend = OpenAIMinimaLlm(llm_config)
+
+    # Check if Parasail batch mode is enabled
+    if llm_config.parasail.prefix:
+        async def _run_batch_mode():
+            async with backend.batch_mode(llm_config.parasail.prefix):
+                # Phase 1: Collection - queue all requests
+                # generate() returns BatchPendingResponse sentinels
+                await _collect_requests_for_batch(signature, data, backend)
+
+            # Phase 2: Submission happens on context exit (batch_mode)
+            # Batch uploaded, polled until complete, results cached
+
+            # Phase 3: Retrieval - run again, everything hits cache
+            return await run_dspy_batch(signature, data, converter, backend=backend)
+
+        return asyncio.run(_run_batch_mode())
+
+    # Normal mode - single pass
     return asyncio.run(
         run_dspy_batch(
             signature,
             data,
             converter,
-            backend=OpenAIMinimaLlm(llm_config),
+            backend=backend,
         )
     )
 

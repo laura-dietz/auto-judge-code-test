@@ -89,6 +89,50 @@ class BatchConfig:
 
 
 # ----------------------------
+# Parasail batch configuration
+# ----------------------------
+
+@dataclass(frozen=True)
+class ParasailBatchConfig:
+    """
+    Configuration for Parasail Batch API.
+
+    Parasail offers 50% cost savings by submitting requests as batch jobs
+    instead of real-time HTTP. Batches are uploaded as .jsonl files, polled
+    for completion, and results downloaded to cache.
+
+    Parameters
+    ----------
+    prefix : Optional[str]
+        If set, enables batch mode with this prefix for state files.
+        Set to None to disable batch mode.
+    state_dir : Optional[str]
+        Directory for batch state files (resumption support).
+        Falls back to cache_dir if not set.
+    poll_interval_s : float
+        Seconds between status checks while polling.
+    max_poll_hours : float
+        Maximum hours to wait for batch completion.
+    """
+    prefix: Optional[str] = None  # None = batch mode disabled
+    state_dir: Optional[str] = None  # Falls back to cache_dir
+    poll_interval_s: float = 30.0
+    max_poll_hours: float = 24.0
+
+    @classmethod
+    def from_dict(cls, data: Optional[dict]) -> "ParasailBatchConfig":
+        """Load from dict (YAML parsing)."""
+        if not data:
+            return cls()
+        return cls(
+            prefix=data.get("prefix"),
+            state_dir=data.get("state_dir"),
+            poll_interval_s=float(data.get("poll_interval_s", 30.0)),
+            max_poll_hours=float(data.get("max_poll_hours", 24.0)),
+        )
+
+
+# ----------------------------
 # LLM configuration
 # ----------------------------
 
@@ -193,6 +237,9 @@ class MinimaLlmConfig:
 
     # Batch execution (composed)
     batch: BatchConfig = field(default_factory=BatchConfig)
+
+    # Parasail batch mode (composed)
+    parasail: ParasailBatchConfig = field(default_factory=ParasailBatchConfig)
 
     # Transport / backpressure
     max_outstanding: int = 32
@@ -364,6 +411,7 @@ class MinimaLlmConfig:
             api_key=data.get("api_key", ""),
             cache_dir=data.get("cache_dir"),
             force_refresh=bool(data.get("force_refresh", False)),
+            parasail=ParasailBatchConfig.from_dict(data.get("parasail")),
         )
 
     # ----------------------------
@@ -439,5 +487,12 @@ class MinimaLlmConfig:
         add("Cache")
         kv("cache_dir", self.cache_dir if self.cache_dir else "<disabled>")
         kv("force_refresh", self.force_refresh)
+
+        add("Parasail batch")
+        kv("prefix", self.parasail.prefix if self.parasail.prefix else "<disabled>")
+        if self.parasail.prefix:
+            kv("state_dir", self.parasail.state_dir or "<uses cache_dir>")
+            kv("poll_interval_s", self.parasail.poll_interval_s)
+            kv("max_poll_hours", self.parasail.max_poll_hours)
 
         return "\n".join(lines)

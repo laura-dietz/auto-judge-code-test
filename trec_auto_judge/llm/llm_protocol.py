@@ -77,6 +77,25 @@ class MinimaLlmFailure:
 MinimaLlmResult = Union[MinimaLlmResponse, MinimaLlmFailure]
 
 
+@dataclass(frozen=True)
+class BatchPendingResponse:
+    """
+    Sentinel returned during batch collection phase.
+
+    When Parasail batch mode is enabled, generate() returns this during the
+    collection phase instead of blocking for an HTTP response. This signals
+    that the request was queued for batch submission.
+
+    Callers should NOT try to extract text from this - it's a marker that
+    the real response will be available from cache after batch completion.
+
+    Used in two-phase batch execution:
+    1. Collection phase: generate() queues requests, returns BatchPendingResponse
+    2. Submission phase: batch_mode() context exit submits and polls
+    3. Retrieval phase: generate() returns from cache (100% hits)
+    """
+    request_id: str
+    cache_key: str
 
 
 @runtime_checkable

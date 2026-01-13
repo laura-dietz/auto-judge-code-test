@@ -651,4 +651,38 @@ def auto_judge_to_click_command(auto_judge: AutoJudge, cmd_name: str):
 
         click.echo(f"\nAll configurations complete.", err=True)
 
+    @cli.command("batch-status")
+    @option_llm_config()
+    @click.option("--prefix", type=str, help="Batch prefix to check status for.")
+    @click.option("--list", "list_local", is_flag=True, help="List local batch state files.")
+    @click.option("--remote", is_flag=True, help="List batches from Parasail API.")
+    @click.option("--cancel", "cancel_id", type=str, help="Cancel a batch by ID.")
+    def batch_status_cmd(
+        llm_config: Optional[Path],
+        prefix: Optional[str],
+        list_local: bool,
+        remote: bool,
+        cancel_id: Optional[str],
+    ):
+        """Check Parasail batch status and populate cache if completed."""
+        from .llm.parasail_batch import (
+            check_and_populate_cache,
+            list_batch_states,
+            list_remote_batches,
+            cancel_batch,
+        )
+
+        resolved_config = _resolve_llm_config(llm_config, submission=False)
+
+        if list_local:
+            list_batch_states(resolved_config)
+        elif remote:
+            list_remote_batches(resolved_config)
+        elif cancel_id:
+            cancel_batch(cancel_id, resolved_config)
+        elif prefix:
+            check_and_populate_cache(prefix, resolved_config)
+        else:
+            click.echo("Specify --prefix, --list, --remote, or --cancel", err=True)
+
     return cli

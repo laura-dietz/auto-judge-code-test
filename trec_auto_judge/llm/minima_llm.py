@@ -189,8 +189,10 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from typing import Any, Awaitable, Callable, Dict, Iterable, List, Optional, Tuple, TypeVar, Union
 
+from contextlib import asynccontextmanager
+
 from .llm_config import BatchConfig, MinimaLlmConfig
-from .llm_protocol import AsyncMinimaLlmBackend, Json, MinimaLlmFailure, MinimaLlmRequest, MinimaLlmResponse, MinimaLlmResult
+from .llm_protocol import AsyncMinimaLlmBackend, BatchPendingResponse, Json, MinimaLlmFailure, MinimaLlmRequest, MinimaLlmResponse, MinimaLlmResult
 
 
 # ----------------------------
@@ -1066,6 +1068,11 @@ class OpenAIMinimaLlm(AsyncMinimaLlmBackend):
         # (Python's default is min(32, cpu_count+4) which bottlenecks concurrency)
         self._executor: Optional[ThreadPoolExecutor] = None
 
+        # Parasail batch mode state
+        # When batch_mode() context is active, requests are queued instead of sent
+        self._batch_collector: Optional["BatchCollector"] = None
+        self._batch_prefix: Optional[str] = None
+
     def _ensure_executor(self) -> ThreadPoolExecutor:
         """Lazily create/recreate executor (e.g., after aclose())."""
         if self._executor is None:
@@ -1122,6 +1129,51 @@ class OpenAIMinimaLlm(AsyncMinimaLlmBackend):
             self._cache.close()
             self._cache = None  # Allow reopening on next use
             print("Cache synched.")
+
+    def batch_mode(self, prefix: str):
+        """
+        Async context manager for Parasail batch mode.
+
+        When active, generate() queues requests and returns BatchPendingResponse
+        sentinels instead of making HTTP calls. On context exit, the batch is
+        submitted to Parasail, polled until complete, and results are written
+        to cache.
+
+        Usage:
+            async with backend.batch_mode("my-judge-v1"):
+                # Phase 1: Collection - generate() returns sentinels
+                await run_dspy_batch(...)  # All requests queued
+
+            # Phase 2: Submission happens here (context exit)
+            # Batch uploaded, polled, results cached
+
+            # Phase 3: Retrieval - run again, everything hits cache
+            await run_dspy_batch(...)
+
+        Args:
+            prefix: Identifier for batch state files (for resumption)
+        """
+        # Import here to avoid circular import
+        from .parasail_batch import BatchCollector
+
+        @asynccontextmanager
+        async def _batch_mode_context():
+            self._batch_prefix = prefix
+            self._batch_collector = BatchCollector(self.cfg, prefix, backend=self)
+
+            try:
+                yield
+            finally:
+                # Submit batch on context exit if there are pending requests
+                if self._batch_collector and self._batch_collector.has_pending():
+                    print(f"\nSubmitting batch '{prefix}' ({self._batch_collector.pending_count} requests)...")
+                    await self._batch_collector.submit_and_wait()
+                    print(f"\nBatch complete. Results in cache.\n")
+
+                self._batch_prefix = None
+                self._batch_collector = None
+
+        return _batch_mode_context()
 
     def _endpoint(self, path: str) -> str:
         # If base_url already ends in /v1, avoid duplicating /v1.
@@ -1231,6 +1283,20 @@ class OpenAIMinimaLlm(AsyncMinimaLlmBackend):
                     self._pulse.cache_hits += 1
                     set_last_cached(True)
                     return MinimaLlmResponse(request_id=req.request_id, text=cached[0], raw=cached[1], cached=True)
+
+        # Batch collection mode: queue request and return sentinel immediately
+        # This enables two-phase execution where we collect all requests first,
+        # submit as a batch, then retrieve from cache on second pass
+        if self._batch_collector is not None:
+            if cache_key is None:
+                cache_key = self._make_cache_key(req)
+            self._batch_collector.add_request(req, cache_key)
+            # Return sentinel - caller should not try to use this as a real response
+            # The real response will be available from cache after batch completion
+            return BatchPendingResponse(  # type: ignore[return-value]
+                request_id=req.request_id,
+                cache_key=cache_key,
+            )
 
         payload: Json = {
             "model": self.cfg.model,
