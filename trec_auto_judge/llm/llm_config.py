@@ -103,9 +103,13 @@ class ParasailBatchConfig:
 
     Parameters
     ----------
+    llm_batch_prefix : Optional[str]
+        User-facing batch prefix (e.g., "rubric"). If set, enables batch mode.
+        The full state file identifier is computed by judge_runner from:
+        {llm_batch_prefix}_{out_dir}_{filebase}_{config_name}
     prefix : Optional[str]
-        If set, enables batch mode with this prefix for state files.
-        Set to None to disable batch mode.
+        Computed batch state identifier. Set by judge_runner from llm_batch_prefix.
+        Do not set directly in config - use llm_batch_prefix instead.
     state_dir : Optional[str]
         Directory for batch state files (resumption support).
         Falls back to cache_dir if not set.
@@ -113,11 +117,15 @@ class ParasailBatchConfig:
         Seconds between status checks while polling.
     max_poll_hours : float
         Maximum hours to wait for batch completion.
+    max_batch_size : int
+        Maximum requests per batch upload (default 50000).
     """
-    prefix: Optional[str] = None  # None = batch mode disabled
+    llm_batch_prefix: Optional[str] = None  # User-facing prefix
+    prefix: Optional[str] = None  # Computed by click_plus
     state_dir: Optional[str] = None  # Falls back to cache_dir
     poll_interval_s: float = 30.0
     max_poll_hours: float = 24.0
+    max_batch_size: int = 50000  # Max requests per batch upload
 
     @classmethod
     def from_dict(cls, data: Optional[dict]) -> "ParasailBatchConfig":
@@ -125,10 +133,12 @@ class ParasailBatchConfig:
         if not data:
             return cls()
         return cls(
-            prefix=data.get("prefix"),
+            llm_batch_prefix=data.get("llm_batch_prefix"),
+            prefix=data.get("prefix"),  # For backward compat with old configs
             state_dir=data.get("state_dir"),
             poll_interval_s=float(data.get("poll_interval_s", 30.0)),
             max_poll_hours=float(data.get("max_poll_hours", 24.0)),
+            max_batch_size=int(data.get("max_batch_size", 50000)),
         )
 
 
@@ -400,18 +410,19 @@ class MinimaLlmConfig:
         with open(path) as f:
             data = yaml.safe_load(f) or {}
 
-        if "base_url" not in data:
-            raise ValueError(f"Missing required field 'base_url' in {path}")
-        if "model" not in data:
-            raise ValueError(f"Missing required field 'model' in {path}")
+        # Start with env config as base
+        base = cls.from_env()
 
-        return cls(
-            base_url=cls._normalize_base_url(data["base_url"]),
-            model=data["model"],
-            api_key=data.get("api_key", ""),
-            cache_dir=data.get("cache_dir"),
-            force_refresh=bool(data.get("force_refresh", False)),
-            parasail=ParasailBatchConfig.from_dict(data.get("parasail")),
+        # Replace with YAML values where present
+        from dataclasses import replace
+        return replace(
+            base,
+            base_url=cls._normalize_base_url(data["base_url"]) if "base_url" in data else base.base_url,
+            model=data["model"] if "model" in data else base.model,
+            api_key=data["api_key"] if "api_key" in data else base.api_key,
+            cache_dir=data["cache_dir"] if "cache_dir" in data else base.cache_dir,
+            force_refresh=bool(data["force_refresh"]) if "force_refresh" in data else base.force_refresh,
+            parasail=ParasailBatchConfig.from_dict(data["parasail"]) if "parasail" in data else base.parasail,
         )
 
     # ----------------------------

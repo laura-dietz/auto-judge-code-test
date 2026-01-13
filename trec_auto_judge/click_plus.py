@@ -300,7 +300,7 @@ def _resolve_llm_config(
         except Exception as e:
             raise click.ClickException(f"Could not resolve model preferences from {llm_config_path}: {e}")
 
-    # Dev mode: load direct config (base_url + model)
+    # Dev mode: load config from YAML (with env as base)
     if llm_config_path is not None:
         try:
             config = MinimaLlmConfig.from_yaml(llm_config_path)
@@ -308,8 +308,8 @@ def _resolve_llm_config(
             return config
         except FileNotFoundError:
             click.echo(f"Warning: Config file not found: {llm_config_path}", err=True)
-        except ValueError as e:
-            click.echo(f"Warning: {e}", err=True)
+        # Note: from_yaml calls from_env() which raises RuntimeError if env vars missing
+        # We let that propagate since it's a user error that needs fixing
 
     # Fallback to environment-based config
     return MinimaLlmConfig.from_env()
@@ -372,6 +372,68 @@ def _apply_llm_model_override(
     updated_config = llm_config.with_model(llm_model)
     click.echo(f"Model override from settings: {llm_model}", err=True)
     return updated_config, stripped_settings
+
+
+def _sanitize_path_for_prefix(path: Optional[Path]) -> str:
+    """Sanitize a path for use in batch state file names.
+
+    Replaces slashes, tildes, and other unsafe characters with underscores.
+    Returns empty string if path is None.
+    """
+    if path is None:
+        return ""
+    # Convert to string and replace unsafe characters
+    s = str(path)
+    # Replace common path separators and special chars
+    for char in "/\\~:":
+        s = s.replace(char, "_")
+    # Remove leading/trailing underscores and collapse multiple underscores
+    import re
+    s = re.sub(r"_+", "_", s).strip("_")
+    return s
+
+
+def _apply_batch_prefix(
+    llm_config: MinimaLlmConfig,
+    out_dir: Optional[Path],
+    filebase: str,
+    config_name: str,
+) -> MinimaLlmConfig:
+    """
+    Compute full batch prefix from llm_batch_prefix + out_dir + filebase + config_name.
+
+    Creates a new config with the computed prefix set in parasail.prefix.
+
+    Args:
+        llm_config: LLM configuration with llm_batch_prefix set
+        out_dir: Output directory (may be None)
+        filebase: Filebase from workflow settings
+        config_name: Configuration/variant name
+
+    Returns:
+        New config with parasail.prefix set to the computed value
+    """
+    from dataclasses import replace
+    from .llm.llm_config import ParasailBatchConfig
+
+    base_prefix = llm_config.parasail.llm_batch_prefix or ""
+    out_dir_part = _sanitize_path_for_prefix(out_dir)
+
+    # Build parts, filtering out empty strings
+    parts = [p for p in [base_prefix, out_dir_part, filebase, config_name] if p]
+    full_prefix = "_".join(parts)
+
+    # Create new parasail config with computed prefix
+    new_parasail = ParasailBatchConfig(
+        llm_batch_prefix=llm_config.parasail.llm_batch_prefix,
+        prefix=full_prefix,
+        state_dir=llm_config.parasail.state_dir,
+        poll_interval_s=llm_config.parasail.poll_interval_s,
+        max_poll_hours=llm_config.parasail.max_poll_hours,
+    )
+
+    click.echo(f"Batch prefix: {full_prefix}", err=True)
+    return replace(llm_config, parasail=new_parasail)
 
 
 def auto_judge_to_click_command(auto_judge: AutoJudge, cmd_name: str):
@@ -614,6 +676,17 @@ def auto_judge_to_click_command(auto_judge: AutoJudge, cmd_name: str):
                 if judge_output_path:
                     judge_output_path = out_dir / judge_output_path
 
+            # Compute full batch prefix if llm_batch_prefix is set
+            if effective_llm_config.parasail.llm_batch_prefix:
+                # Resolve {_name} template in filebase (same as output paths)
+                resolved_filebase = clean_settings.get("filebase", "").replace("{_name}", config.name)
+                effective_llm_config = _apply_batch_prefix(
+                    effective_llm_config,
+                    out_dir=out_dir,
+                    filebase=resolved_filebase,
+                    config_name=config.name,
+                )
+
             if nugget_output_path:
                 click.echo(f"Nugget output: {nugget_output_path}", err=True)
             if judge_output_path:
@@ -653,36 +726,37 @@ def auto_judge_to_click_command(auto_judge: AutoJudge, cmd_name: str):
 
     @cli.command("batch-status")
     @option_llm_config()
-    @click.option("--prefix", type=str, help="Batch prefix to check status for.")
-    @click.option("--list", "list_local", is_flag=True, help="List local batch state files.")
-    @click.option("--remote", is_flag=True, help="List batches from Parasail API.")
-    @click.option("--cancel", "cancel_id", type=str, help="Cancel a batch by ID.")
+    @click.option("--cancel", type=str, metavar="PREFIX", help="Cancel batch for PREFIX and delete local state.")
+    @click.option("--cancel-remote", type=str, metavar="BATCH_ID", help="Cancel a remote batch by ID.")
+    @click.option("--cancel-all", is_flag=True, help="Cancel ALL local batches.")
     def batch_status_cmd(
         llm_config: Optional[Path],
-        prefix: Optional[str],
-        list_local: bool,
-        remote: bool,
-        cancel_id: Optional[str],
+        cancel: Optional[str],
+        cancel_remote: Optional[str],
+        cancel_all: bool,
     ):
-        """Check Parasail batch status and populate cache if completed."""
+        """Show status of all Parasail batches.
+
+        By default, lists all local batch state files and checks remote status
+        for any active batches.
+        """
         from .llm.parasail_batch import (
-            check_and_populate_cache,
-            list_batch_states,
-            list_remote_batches,
+            batch_status_overview,
             cancel_batch,
+            cancel_all_batches,
+            cancel_all_local_batches,
         )
 
         resolved_config = _resolve_llm_config(llm_config, submission=False)
 
-        if list_local:
-            list_batch_states(resolved_config)
-        elif remote:
-            list_remote_batches(resolved_config)
-        elif cancel_id:
-            cancel_batch(cancel_id, resolved_config)
-        elif prefix:
-            check_and_populate_cache(prefix, resolved_config)
+        if cancel:
+            cancel_all_batches(resolved_config, prefix=cancel)
+        elif cancel_remote:
+            cancel_batch(cancel_remote, resolved_config)
+        elif cancel_all:
+            cancel_all_local_batches(resolved_config)
         else:
-            click.echo("Specify --prefix, --list, --remote, or --cancel", err=True)
+            # Default: show overview of all batches
+            batch_status_overview(resolved_config)
 
     return cli

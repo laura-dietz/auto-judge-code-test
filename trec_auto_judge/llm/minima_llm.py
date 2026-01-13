@@ -1161,6 +1161,11 @@ class OpenAIMinimaLlm(AsyncMinimaLlmBackend):
             self._batch_prefix = prefix
             self._batch_collector = BatchCollector(self.cfg, prefix, backend=self)
 
+            # IMPORTANT: Check for completed batch BEFORE collection starts.
+            # If batch is already completed, populate cache now so items
+            # hit cache during collection and aren't added to _pending.
+            await self._batch_collector.populate_cache_if_completed()
+
             try:
                 yield
             finally:
