@@ -740,7 +740,7 @@ def auto_judge_to_click_command(auto_judge: AutoJudge, cmd_name: str):
         By default, lists all local batch state files and checks remote status
         for any active batches.
         """
-        from .llm.parasail_batch import (
+        from .llm.batch import (
             batch_status_overview,
             cancel_batch,
             cancel_all_batches,

@@ -187,12 +187,15 @@ import urllib.error
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
-from typing import Any, Awaitable, Callable, Dict, Iterable, List, Optional, Tuple, TypeVar, Union
+from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple, TypeVar, Union, TYPE_CHECKING
 
 from contextlib import asynccontextmanager
 
 from .llm_config import BatchConfig, MinimaLlmConfig
 from .llm_protocol import AsyncMinimaLlmBackend, BatchPendingResponse, Json, MinimaLlmFailure, MinimaLlmRequest, MinimaLlmResponse, MinimaLlmResult
+
+if TYPE_CHECKING:
+    from .batch import BatchCollector
 
 
 # ----------------------------
@@ -1154,7 +1157,7 @@ class OpenAIMinimaLlm(AsyncMinimaLlmBackend):
             prefix: Identifier for batch state files (for resumption)
         """
         # Import here to avoid circular import
-        from .parasail_batch import BatchCollector
+        from .batch import BatchCollector
 
         @asynccontextmanager
         async def _batch_mode_context():

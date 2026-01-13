@@ -239,7 +239,7 @@ class TestBatchCollectorDownloadAndResolve:
     def test_download_and_resolve_populates_cache(self, config, tmp_path):
         """Verify _download_and_resolve writes responses to backend's cache."""
         import json
-        from trec_auto_judge.llm.parasail_batch import BatchCollector, BatchState
+        from trec_auto_judge.llm.batch import BatchCollector, BatchState
 
         # Create a backend to provide the cache
         backend = OpenAIMinimaLlm(config)
@@ -303,7 +303,7 @@ class TestBatchCollectorDownloadAndResolve:
     def test_download_and_resolve_handles_errors(self, config, tmp_path):
         """Verify _download_and_resolve handles error responses."""
         import json
-        from trec_auto_judge.llm.parasail_batch import BatchCollector, BatchState
+        from trec_auto_judge.llm.batch import BatchCollector, BatchState
 
         # Response with error
         jsonl_response = json.dumps({
@@ -339,7 +339,7 @@ class TestBatchCollectorDownloadAndResolve:
     def test_download_and_resolve_uses_backend_cache(self, config, tmp_path):
         """Verify _download_and_resolve uses backend's cache when provided."""
         import json
-        from trec_auto_judge.llm.parasail_batch import BatchCollector, BatchState
+        from trec_auto_judge.llm.batch import BatchCollector, BatchState
 
         # Create a backend to get its cache
         backend = OpenAIMinimaLlm(config)
