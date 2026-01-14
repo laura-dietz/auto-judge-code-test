@@ -649,12 +649,23 @@ class BatchCollector:
         )
 
     async def _upload_batch(self) -> BatchState:
-        """Create .jsonl file, upload to Parasail, create batch job."""
-        # Build .jsonl content
+        """Create .jsonl file, upload to Parasail, create batch job.
+
+        Deduplicates by cache_key - only uploads one request per unique prompt.
+        """
+        # Build .jsonl content, deduplicating by cache_key
         lines = []
         custom_id_to_cache_key = {}
+        seen_cache_keys: set[str] = set()
+        duplicate_count = 0
 
         for idx, (req, cache_key, _future) in enumerate(self._pending):
+            # Skip duplicates - they'll hit cache in Phase 3
+            if cache_key in seen_cache_keys:
+                duplicate_count += 1
+                continue
+            seen_cache_keys.add(cache_key)
+
             custom_id = self._make_custom_id(idx)
             custom_id_to_cache_key[custom_id] = cache_key
 
@@ -676,6 +687,9 @@ class BatchCollector:
                 "body": body,
             }
             lines.append(json.dumps(line))
+
+        if duplicate_count > 0:
+            print(f"Deduplicated: {duplicate_count} duplicate prompts skipped ({len(lines)} unique)")
 
         jsonl_content = "\n".join(lines)
 
