@@ -24,6 +24,7 @@ class AutoJudge(Protocol):
         rag_topics: Sequence["Request"],
         llm_config: MinimaLlmConfig,
         nugget_banks: Optional[NuggetBanksProtocol] = None,
+        qrels: Optional[Qrels] = None,
         **kwargs
     ) -> tuple["Leaderboard", Optional["Qrels"]]:
         """
@@ -34,6 +35,23 @@ class AutoJudge(Protocol):
             - Qrels: Optional fine-grained relevance judgments
         """
         ...
+        
+    # ToDo allow qrel generation as separate judge phase, will get 
+    # def create_qrels(
+    #     self,
+    #     rag_responses: Iterable["Report"],
+    #     rag_topics: Sequence["Request"],
+    #     llm_config: MinimaLlmConfig,
+    #     nugget_banks: Optional[NuggetBanksProtocol] = None,
+    #     **kwargs
+    # ) -> Optional["Qrels"]:
+    #     """
+    #     Judge qrels for RAG responses against topics.
+
+    #     Returns:
+    #         - Qrels: Optional fine-grained relevance judgments
+    #     """
+    #     ...
 
     def create_nuggets(
         self,

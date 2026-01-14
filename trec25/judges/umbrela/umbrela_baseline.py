@@ -134,23 +134,25 @@ def umbrela_to_qrels(
 
 
 class UmbrelaJudge(AutoJudge):
+    nugget_banks_type: Type[NuggetBanksProtocol] = NuggetBanks
+
     def create_nuggets(
         self,
         rag_responses: Sequence[Report],
         rag_topics: Sequence["Request"],
         llm_config: MinimaLlmConfig,
-        nugget_banks: Optional["NuggetBanks"] = None,
+        nugget_banks: Optional[NuggetBanksProtocol] = None,
         **kwargs
-    ) -> Optional["NuggetBanks"]:
+    ) -> Optional[NuggetBanksProtocol]:
         return None
 
-            
+
     def judge(
         self,
         rag_responses: Sequence[Report],
         rag_topics: Sequence[Request],
         llm_config: MinimaLlmConfig,
-        nugget_banks: Optional[NuggetBanks] = None,
+        nugget_banks: Optional[NuggetBanksProtocol] = None,
         **kwargs
     ) -> tuple[Leaderboard, Optional[Qrels]]:
         """

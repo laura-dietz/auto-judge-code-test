@@ -109,7 +109,7 @@ class PrefJudge(AutoJudge):
         # self.on_missing_evals: OnMissing = "fix_aggregate"
         pass
 
-    def create_nuggets(self, **args) -> Optional[NuggetBanks]:
+    def create_nuggets(self, **args) -> Optional[NuggetBanksProtocol]:
         return None   # We are not using nuggets
     
     def judge(

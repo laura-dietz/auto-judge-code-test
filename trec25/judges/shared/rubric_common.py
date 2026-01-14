@@ -175,6 +175,8 @@ def prepare_nugget_grade_data_for_documents(
     }
 
     grade_data: List[NuggetGradeData] = []
+    doc_counter = 0
+    unique_doc_ids:Set[str] = set()
 
     for response in rag_responses:
         metadata = response.metadata
@@ -196,12 +198,14 @@ def prepare_nugget_grade_data_for_documents(
             if document_ids is not None and doc_id not in document_ids:
                 continue
 
+            unique_doc_ids.add(doc_id)
             if use_paragraphs:
                 # Create grade data for each paragraph
                 paragraphs = document.get_paragraphs()
                 for para_idx, paragraph in enumerate(paragraphs):
                     if not paragraph.strip():
                         continue
+                    doc_counter+=1
                     for nugget in bank.nuggets_as_list():
                         if isinstance(nugget, NuggetQuestion):
                             data = NuggetGradeData(
@@ -217,6 +221,7 @@ def prepare_nugget_grade_data_for_documents(
             else:
                 # Use full document text
                 text = document.get_text()
+                doc_counter+=1
                 for nugget in bank.nuggets_as_list():
                     if isinstance(nugget, NuggetQuestion):
                         data = NuggetGradeData(
@@ -229,6 +234,7 @@ def prepare_nugget_grade_data_for_documents(
                         )
                         grade_data.append(data)
 
+    print(f"Grade data for {len(unique_doc_ids)} unique doc_ids and {doc_counter} many text chunks.")
     return grade_data, nuggets_per_topic
 
 

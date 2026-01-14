@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-from trec_auto_judge import Report, LeaderboardSpec, LeaderboardBuilder, LeaderboardVerification, mean_of_floats, MeasureSpec, AutoJudge, auto_judge_to_click_command, Leaderboard, Qrels, Sequence, Request, Optional, MinimaLlmConfig, NuggetBanks
+from typing import Type
+from trec_auto_judge import Report, LeaderboardSpec, LeaderboardBuilder, LeaderboardVerification, mean_of_floats, MeasureSpec, AutoJudge, auto_judge_to_click_command, Leaderboard, Qrels, Sequence, Request, Optional, MinimaLlmConfig, NuggetBanks, NuggetBanksProtocol
 from collections import defaultdict
 from tqdm import tqdm
 from tira.third_party_integrations import ensure_pyterrier_is_loaded
@@ -31,18 +32,20 @@ LEADERBOARD_SPEC = LeaderboardSpec(measures=(
 
 
 class RetrievalJudge(AutoJudge):
+    nugget_banks_type: Type[NuggetBanksProtocol] = NuggetBanks
+
     def create_nuggets(
         self,
         rag_responses: Sequence["Report"],
         rag_topics: Sequence["Request"],
         llm_config: MinimaLlmConfig,
-        nugget_banks: Optional["NuggetBanks"] = None,
+        nugget_banks: Optional[NuggetBanksProtocol] = None,
         **kwargs
-    ) -> Optional["NuggetBanks"]:
+    ) -> Optional[NuggetBanksProtocol]:
         return None
-            
-    
-    def judge(self, rag_responses: Sequence["Report"], rag_topics: Sequence["Request"], llm_cfg:MinimaLlmConfig, nugget_banks: Optional[NuggetBanks] = None, **kwargs) -> tuple["Leaderboard", Optional["Qrels"]]:
+
+
+    def judge(self, rag_responses: Sequence["Report"], rag_topics: Sequence["Request"], llm_cfg: MinimaLlmConfig, nugget_banks: Optional[NuggetBanksProtocol] = None, **kwargs) -> tuple["Leaderboard", Optional["Qrels"]]:
         ensure_pyterrier_is_loaded()
         tokeniser = pt.java.autoclass("org.terrier.indexing.tokenisation.Tokeniser").getTokeniser()
         def pt_tokenize(text):

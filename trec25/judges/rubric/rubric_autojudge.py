@@ -263,13 +263,13 @@ class RubricJudge(AutoJudge):
         
     def create_nuggets(
         self,
-        prompt:str,
-        rag_responses: Sequence[Report],
+        prompt: str,
         rag_topics: Sequence[Request],
         llm_config: MinimaLlmConfig,
-        nugget_banks: Optional[NuggetBanks] = None,
+        nugget_banks: Optional[NuggetBanksProtocol] = None,
+        rag_responses: Optional[Sequence[Report]] = None,
         **kwargs
-    ) -> Optional[NuggetBanks]:
+    ) -> Optional[NuggetBanksProtocol]:
         """Generate nugget questions for each topic using LLM."""
 
         # Prepare generation data
@@ -334,7 +334,7 @@ class RubricJudge(AutoJudge):
         rag_responses: Sequence[Report],
         rag_topics: Sequence[Request],
         llm_config: MinimaLlmConfig,
-        nugget_banks: Optional[NuggetBanks] = None,
+        nugget_banks: Optional[NuggetBanksProtocol] = None,
         grade_threshold: int = 3,
         filebase: str = "rubric",
         **kwargs

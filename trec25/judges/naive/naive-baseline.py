@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-from trec_auto_judge import AutoJudge, Sequence, Optional, Report, Request, LeaderboardSpec, LeaderboardBuilder, LeaderboardVerification, mean_of_floats, MeasureSpec, auto_judge_to_click_command, Leaderboard, Qrels, MinimaLlmConfig, NuggetBanks
+from typing import Type
+from trec_auto_judge import AutoJudge, Sequence, Optional, Report, Request, LeaderboardSpec, LeaderboardBuilder, LeaderboardVerification, mean_of_floats, MeasureSpec, auto_judge_to_click_command, Leaderboard, Qrels, MinimaLlmConfig, NuggetBanks, NuggetBanksProtocol
 import click
 from pathlib import Path
 from collections import defaultdict
@@ -20,20 +21,22 @@ NAIVE_LEADERBOARD_SPEC = LeaderboardSpec(measures=(
 
 
 class NaiveJudge(AutoJudge):
+    nugget_banks_type: Type[NuggetBanksProtocol] = NuggetBanks
+
     def create_nuggets(
         self,
         rag_responses: Sequence["Report"],
         rag_topics: Sequence["Request"],
         llm_config: MinimaLlmConfig,
-        nugget_banks: Optional["NuggetBanks"] = None,
+        nugget_banks: Optional[NuggetBanksProtocol] = None,
         **kwargs
-    ) -> Optional["NuggetBanks"]:
+    ) -> Optional[NuggetBanksProtocol]:
         return None
 
     def judge(self, rag_responses: Sequence["Report"]
               , rag_topics: Sequence["Request"]
-              , llm_config:MinimaLlmConfig
-              , nugget_banks: Optional[NuggetBanks] = None
+              , llm_config: MinimaLlmConfig
+              , nugget_banks: Optional[NuggetBanksProtocol] = None
               , **kwargs) -> tuple["Leaderboard", Optional["Qrels"]]:
         ret = LeaderboardBuilder(NAIVE_LEADERBOARD_SPEC)
 

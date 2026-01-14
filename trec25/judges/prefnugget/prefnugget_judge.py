@@ -19,7 +19,7 @@ from pydantic import BaseModel
 from trec_auto_judge import MinimaLlmConfig
 
 from trec_auto_judge import *
-from trec_auto_judge.nugget_data import NuggetBanks
+from trec_auto_judge.nugget_data import NuggetBanks, NuggetBanksProtocol
 
 
 # Import shared utilities
@@ -58,6 +58,13 @@ PREFNUGGET_SPEC = LeaderboardSpec(measures=(
 PREFNUGGET_QRELS: QrelsSpec[NuggetGradeData] = QrelsSpec[NuggetGradeData](
     topic_id=lambda r: r.query_id,
     doc_id=lambda r: doc_id_md5(r.passage),
+    grade=lambda r: float(r.grade),
+    on_duplicate="keep_max"
+)
+
+PREFNUGGET_CITE_QRELS: QrelsSpec[NuggetGradeData] = QrelsSpec[NuggetGradeData](
+    topic_id=lambda r: r.query_id,
+    doc_id=lambda r: r.doc_id,
     grade=lambda r: float(r.grade),
     on_duplicate="keep_max"
 )
@@ -524,7 +531,7 @@ class PrefNuggetJudge(AutoJudge):
         no_dupes:bool = True,
         # nugget_banks: Optional[NuggetBanks] = None,
         **kwargs,
-    ) -> Optional[NuggetBanks]:
+    ) -> Optional[NuggetBanksProtocol]:
         """
         Extract differentiating nuggets from pairwise preference comparisons.
 
@@ -662,10 +669,10 @@ class PrefNuggetJudge(AutoJudge):
         rag_responses: Sequence[Report],
         rag_topics: Sequence[Request],
         llm_config: MinimaLlmConfig,
-        nugget_banks: Optional[NuggetBanks] = None,
+        nugget_banks: Optional[NuggetBanksProtocol] = None,
         grade_threshold: int = 4,
         on_missing_evals: str = "fix_aggregate",
-        grade_text:Literal["response","document","document_paragraphs"] = "response",
+        grade_text: Literal["response", "document", "document_paragraphs"] = "response",
         filebase: str = "prefnugget",
         **kwargs
     ) -> tuple[Leaderboard, Optional[Qrels]]:
@@ -721,7 +728,10 @@ class PrefNuggetJudge(AutoJudge):
         leaderboard.verify(warn=True, expected_topic_ids=self.expected_topic_ids, on_missing=on_missing_evals)
 
         # Build qrels from grade data
-        qrels = build_qrels(records=grade_data, spec=PREFNUGGET_QRELS) if grade_data else None
+        if grade_text == "response":
+            qrels = build_qrels(records=grade_data, spec=PREFNUGGET_QRELS) if grade_data else None
+        else:
+            qrels = build_qrels(records=grade_data, spec=PREFNUGGET_CITE_QRELS) if grade_data else None
         if qrels is not None:
             qrels.verify(warn=True, expected_topic_ids=self.expected_topic_ids)
 
