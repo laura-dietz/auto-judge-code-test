@@ -177,6 +177,7 @@ def prepare_nugget_grade_data_for_documents(
     grade_data: List[NuggetGradeData] = []
     doc_counter = 0
     unique_doc_ids:Set[str] = set()
+    unique_text:Set[str] = set()
 
     for response in rag_responses:
         metadata = response.metadata
@@ -206,6 +207,7 @@ def prepare_nugget_grade_data_for_documents(
                     if not paragraph.strip():
                         continue
                     doc_counter+=1
+                    unique_text.add(paragraph.strip())
                     for nugget in bank.nuggets_as_list():
                         if isinstance(nugget, NuggetQuestion):
                             data = NuggetGradeData(
@@ -213,7 +215,7 @@ def prepare_nugget_grade_data_for_documents(
                                 query_id=topic_id,
                                 nugget_id=nugget.question_id or nugget.question,
                                 question=nugget.question,
-                                passage=paragraph,
+                                passage=paragraph.strip(),
                                 doc_id=doc_id,
                                 paragraph_idx=para_idx,
                             )
@@ -222,6 +224,7 @@ def prepare_nugget_grade_data_for_documents(
                 # Use full document text
                 text = document.get_text()
                 doc_counter+=1
+                unique_text.add(text.strip())
                 for nugget in bank.nuggets_as_list():
                     if isinstance(nugget, NuggetQuestion):
                         data = NuggetGradeData(
@@ -229,12 +232,12 @@ def prepare_nugget_grade_data_for_documents(
                             query_id=topic_id,
                             nugget_id=nugget.question_id or nugget.question,
                             question=nugget.question,
-                            passage=text,
+                            passage=text.strip(),
                             doc_id=doc_id,
                         )
                         grade_data.append(data)
 
-    print(f"Grade data for {len(unique_doc_ids)} unique doc_ids and {doc_counter} many text chunks.")
+    print(f"Grade data for {len(unique_doc_ids)} unique doc_ids, {len(unique_text)} unique texts and {doc_counter} many text chunks.")
     return grade_data, nuggets_per_topic
 
 
