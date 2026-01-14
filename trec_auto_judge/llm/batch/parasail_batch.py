@@ -21,11 +21,11 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, TYPE_CHECKING
 
-from .llm_config import MinimaLlmConfig
-from .llm_protocol import MinimaLlmRequest
+from ..llm_config import MinimaLlmConfig
+from ..llm_protocol import MinimaLlmRequest
 
 if TYPE_CHECKING:
-    from .minima_llm import OpenAIMinimaLlm
+    from ..minima_llm import OpenAIMinimaLlm
 
 # Type alias for JSON-serializable data
 Json = Dict[str, Any]
@@ -1018,7 +1018,7 @@ def check_and_populate_cache(prefix: str, config: MinimaLlmConfig) -> None:
         prefix: Batch prefix to check
         config: LLM config (required - use click command to get proper config from llm-config.yml)
     """
-    from .minima_llm import OpenAIMinimaLlm
+    from ..minima_llm import OpenAIMinimaLlm
 
     # Create backend to get the correct cache (uses minima_llm.db)
     backend = OpenAIMinimaLlm(config)
@@ -1292,7 +1292,7 @@ def _print_batch_info(state: BatchState, config: MinimaLlmConfig) -> None:
 
 def _count_cached_items(state: BatchState, config: MinimaLlmConfig) -> int:
     """Count how many batch items are already in the cache."""
-    from .minima_llm import OpenAIMinimaLlm
+    from ..minima_llm import OpenAIMinimaLlm
 
     try:
         backend = OpenAIMinimaLlm(config)

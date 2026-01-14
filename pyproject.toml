@@ -29,6 +29,7 @@ dependencies = [
     "tira>=0.0.192",
     "pydantic>=2.0",
     "ir_datasets",
+    "nltk",
 ]
 
 [project.optional-dependencies]
