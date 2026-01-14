@@ -9,9 +9,7 @@ import json
 from jsonschema import ValidationError
 from pydantic  import BaseModel, ConfigDict, PrivateAttr
 import requests
-import aiohttp
-from aiohttp import ClientError
-from aiolimiter import AsyncLimiter
+# aiohttp, aiolimiter imported lazily in async functions
 
 from .text_chunker import get_limit_length_chunks, get_sentence_chunks_on_newline, get_paragraph_chunks
 
@@ -161,8 +159,9 @@ LOGGER = logging.getLogger(__name__)
 # Limiter cache per event loop, keyed by (loop, max_rate)
 _limiter_cache: dict = {}
 
-def _get_limiter(max_rate: float = 3.0) -> AsyncLimiter:
+def _get_limiter(max_rate: float = 3.0):
     """Get or create a limiter for the current event loop and rate."""
+    from aiolimiter import AsyncLimiter
     loop = asyncio.get_running_loop()
     key = (id(loop), max_rate)
     if key not in _limiter_cache:
@@ -192,8 +191,8 @@ async def fetch_service_async( payload:Dict[str,str]=dict(),
                             timeout: float = 5.0,
                             rate_limit: float = 3.0,
                         ) -> Optional[Dict[str,Any]]:
-
-            # limiter = AsyncLimiter(max_rate=5, time_period=60.0)
+            import aiohttp
+            from aiohttp import ClientError
 
             url = f"{host}:{port}/{command}"
 
@@ -227,7 +226,6 @@ async def fetch_service_async( payload:Dict[str,str]=dict(),
 
             LOGGER.error(f"[{info_str}] Exhausted retries.")
             raise RuntimeError(f"Content Server Exception: Exhausted retries for obtaining {info_str} from {host}/{port}/{command} with payload  {payload}")
-            # return None
 
 
 async def fetch_document_content_async(
