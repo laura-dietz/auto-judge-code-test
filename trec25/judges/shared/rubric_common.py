@@ -32,6 +32,9 @@ class NuggetGradeData(BaseModel):
     nugget_id: str
     question: str
     passage: str
+    # Optional: document/paragraph identifiers
+    doc_id: Optional[str] = None
+    paragraph_idx: Optional[int] = None
     # Output fields (populated by LLM)
     grade: int = 0
     reasoning: Optional[str] = None
@@ -142,6 +145,93 @@ def prepare_nugget_grade_data(
     return grade_data, nuggets_per_topic
 
 
+def prepare_nugget_grade_data_for_documents(
+    rag_responses: Sequence[Report],
+    nugget_banks: NuggetBanks,
+    use_paragraphs: bool = False,
+    document_ids: Optional[Set[str]] = None,
+) -> tuple[List[NuggetGradeData], Dict[str, int]]:
+    """
+    Prepare grading data for document-nugget pairs.
+
+    Instead of grading the full response text, this creates grade data for
+    each document in response.documents, optionally at the paragraph level.
+
+    Args:
+        rag_responses: RAG responses containing documents to grade
+        nugget_banks: Nugget banks containing questions per topic
+        use_paragraphs: If True, create separate entries for each paragraph
+                        in each document. If False, use full document text.
+        document_ids: Optional set of document IDs to process. If None,
+                      all documents are processed.
+
+    Returns:
+        Tuple of (grade_data list, nuggets_per_topic dict)
+    """
+    # Pre-compute nugget counts per topic from the bank
+    nuggets_per_topic: Dict[str, int] = {
+        topic_id: len(bank.nuggets_as_list())
+        for topic_id, bank in nugget_banks.banks.items()
+    }
+
+    grade_data: List[NuggetGradeData] = []
+
+    for response in rag_responses:
+        metadata = response.metadata
+        run_id = metadata.run_id
+        topic_id = metadata.topic_id
+
+        bank = nugget_banks.banks.get(topic_id)
+        if bank is None:
+            print(f"Warning: No nugget bank for topic {topic_id}, skipping")
+            continue
+
+        if not response.documents:
+            print(f"Warning: No documents for topic {topic_id}, run {run_id}, skipping")
+            continue
+
+        # Iterate over documents
+        for doc_id, document in response.documents.items():
+            # Skip if document_ids filter is set and this doc is not in it
+            if document_ids is not None and doc_id not in document_ids:
+                continue
+
+            if use_paragraphs:
+                # Create grade data for each paragraph
+                paragraphs = document.get_paragraphs()
+                for para_idx, paragraph in enumerate(paragraphs):
+                    if not paragraph.strip():
+                        continue
+                    for nugget in bank.nuggets_as_list():
+                        if isinstance(nugget, NuggetQuestion):
+                            data = NuggetGradeData(
+                                run_id=run_id,
+                                query_id=topic_id,
+                                nugget_id=nugget.question_id or nugget.question,
+                                question=nugget.question,
+                                passage=paragraph,
+                                doc_id=doc_id,
+                                paragraph_idx=para_idx,
+                            )
+                            grade_data.append(data)
+            else:
+                # Use full document text
+                text = document.get_text()
+                for nugget in bank.nuggets_as_list():
+                    if isinstance(nugget, NuggetQuestion):
+                        data = NuggetGradeData(
+                            run_id=run_id,
+                            query_id=topic_id,
+                            nugget_id=nugget.question_id or nugget.question,
+                            question=nugget.question,
+                            passage=text,
+                            doc_id=doc_id,
+                        )
+                        grade_data.append(data)
+
+    return grade_data, nuggets_per_topic
+
+
 # =============================================================================
 # Grade Aggregation
 # =============================================================================
@@ -190,13 +280,104 @@ def compute_nugget_aggregates(
                 "grades_list": [],
             }
 
-        response_data[response_key]["nugget_grades"][data.nugget_id] = {
+        response_data[response_key]["nugget_grades"][data.nugget_id] = { # replace with higher grade
             "grade": data.grade,
             "reasoning": data.reasoning,
         }
-        response_data[response_key]["grades_list"].append(data.grade)
+        response_data[response_key]["grades_list"].append(data.grade) # keep document_id information
 
     # Compute aggregates using total nuggets in bank as denominator
+    aggregates: Dict[str, NuggetAggregateResult] = {}
+
+    for response_key, rd in response_data.items():
+        topic_id = rd["topic_id"]
+        total_in_bank = nuggets_per_topic.get(topic_id, 0)
+        grades = rd["grades_list"]
+
+        if total_in_bank > 0:
+            covered = sum(1 for g in grades if g >= grade_threshold)
+            aggregates[response_key] = NuggetAggregateResult(
+                run_id=rd["run_id"],
+                topic_id=topic_id,
+                coverage_score=covered / total_in_bank,
+                avg_grade=sum(grades) / total_in_bank if grades else 0.0,
+                max_grade=max(grades) if grades else 0,
+                covered_count=covered,
+                total_nuggets=total_in_bank,
+                graded_nuggets=len(grades),
+                nugget_grades=rd["nugget_grades"],
+            )
+        else:
+            aggregates[response_key] = NuggetAggregateResult(
+                run_id=rd["run_id"],
+                topic_id=topic_id,
+                coverage_score=0.0,
+                avg_grade=0.0,
+                max_grade=0,
+                covered_count=0,
+                total_nuggets=0,
+                graded_nuggets=0,
+                nugget_grades=rd["nugget_grades"],
+            )
+
+    return aggregates
+
+
+def compute_nugget_aggregates_for_documents(
+    grade_data: List[NuggetGradeData],
+    nuggets_per_topic: Dict[str, int],
+    grade_threshold: int = 3,
+) -> Dict[str, NuggetAggregateResult]:
+    """
+    Compute coverage aggregates from document-level nugget grading data.
+
+    For each (run_id, topic_id, nugget_id), takes the MAX grade across all
+    documents/paragraphs, then computes aggregates from those max grades.
+
+    Args:
+        grade_data: List of graded nugget-document pairs (with doc_id set)
+        nuggets_per_topic: Total nugget count per topic from the bank
+        grade_threshold: Minimum grade to count as "covered"
+
+    Returns:
+        Dict mapping "run_id:topic_id" -> NuggetAggregateResult
+    """
+    # Step 1: Group by (run_id, topic_id, nugget_id) and take max grade
+    # Key: (run_id, topic_id, nugget_id) -> {grade, reasoning, doc_id}
+    max_grades: Dict[tuple[str, str, str], Dict[str, Any]] = {}
+
+    for data in grade_data:
+        key = (data.run_id, data.query_id, data.nugget_id)
+        if key not in max_grades or data.grade > max_grades[key]["grade"]:
+            max_grades[key] = {
+                "grade": data.grade,
+                "reasoning": data.reasoning,
+                "doc_id": data.doc_id,
+                "paragraph_idx": data.paragraph_idx,
+            }
+
+    # Step 2: Group max grades by response (run_id, topic_id)
+    response_data: Dict[str, Dict[str, Any]] = {}
+
+    for (run_id, topic_id, nugget_id), grade_info in max_grades.items():
+        response_key = f"{run_id}:{topic_id}"
+        if response_key not in response_data:
+            response_data[response_key] = {
+                "run_id": run_id,
+                "topic_id": topic_id,
+                "nugget_grades": {},
+                "grades_list": [],
+            }
+
+        response_data[response_key]["nugget_grades"][nugget_id] = {
+            "grade": grade_info["grade"],
+            "reasoning": grade_info["reasoning"],
+            "doc_id": grade_info["doc_id"],
+            "paragraph_idx": grade_info["paragraph_idx"],
+        }
+        response_data[response_key]["grades_list"].append(grade_info["grade"])
+
+    # Step 3: Compute aggregates using total nuggets in bank as denominator
     aggregates: Dict[str, NuggetAggregateResult] = {}
 
     for response_key, rd in response_data.items():

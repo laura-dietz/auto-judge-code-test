@@ -1,7 +1,8 @@
 model_preferences:
+  - "openai/gpt-oss-120b"
   - "llama-3.3-70b-instruct"  # First choice
   - "llama-3.3-70b-instruct-tp"      # Fallback
 on_no_match: "use_default"
 
-parasail:
-  llm_batch_prefix: prefnugget-v1
+# parasail:
+#   llm_batch_prefix: prefnugget-v1

@@ -36,7 +36,9 @@ from trec25.judges.shared.rubric_common import (
     NuggetGradeData,
     GradeNuggetAnswer,
     prepare_nugget_grade_data,
+    prepare_nugget_grade_data_for_documents,
     compute_nugget_aggregates,
+    compute_nugget_aggregates_for_documents,
     build_nugget_banks,
 )
 
@@ -663,6 +665,7 @@ class PrefNuggetJudge(AutoJudge):
         nugget_banks: Optional[NuggetBanks] = None,
         grade_threshold: int = 4,
         on_missing_evals: str = "fix_aggregate",
+        grade_text:Literal["response","document","document_paragraphs"] = "response",
         filebase: str = "prefnugget",
         **kwargs
     ) -> tuple[Leaderboard, Optional[Qrels]]:
@@ -678,7 +681,8 @@ class PrefNuggetJudge(AutoJudge):
 
         # Prepare grading data using shared utility
         print("PrefNuggetJudge: Preparing grade data...")
-        grade_data, nuggets_per_topic = prepare_nugget_grade_data(rag_responses, nugget_banks)
+        # ToDo if flag then use `prepare_nugget_grade_data_for_documents` instead
+        grade_data, nuggets_per_topic = prepare_nugget_grade_data(rag_responses, nugget_banks)  if grade_text == "response" else     prepare_nugget_grade_data_for_documents(rag_responses, nugget_banks, use_paragraphs = grade_text == "document_paragraphs") 
 
         # Run LLM grading using shared utility
         print("PrefNuggetJudge: Grading responses...")
@@ -691,7 +695,11 @@ class PrefNuggetJudge(AutoJudge):
         print("PrefNuggetJudge: Finished grading")
 
         # Aggregate grades using shared utility
-        aggregates = compute_nugget_aggregates(grade_data, nuggets_per_topic, grade_threshold)
+        # For document/paragraph grading, take max grade per nugget across all docs/paragraphs first
+        if grade_text == "response":
+            aggregates = compute_nugget_aggregates(grade_data, nuggets_per_topic, grade_threshold)
+        else:
+            aggregates = compute_nugget_aggregates_for_documents(grade_data, nuggets_per_topic, grade_threshold)
 
         # Update Report.evaldata
         for response in rag_responses:
