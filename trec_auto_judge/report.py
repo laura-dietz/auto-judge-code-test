@@ -7,6 +7,7 @@ from io import StringIO
 from pathlib import Path
 import json
 from pydantic import BaseModel, ConfigDict, Field
+from trec_auto_judge.document.document import Document
 
 class TaskType(str, Enum):
     """Ragtime tasks"""
@@ -112,7 +113,9 @@ class Report(BaseModel):
     responses:Optional[List[NeuclirReportSentence]|List[RagtimeReportSentence]|List[Rag24ReportSentence]]=None
     answer:Optional[List[NeuclirReportSentence]|List[RagtimeReportSentence]|List[Rag24ReportSentence]]=None
     path:Optional[Path]=Field(default=None, exclude=True)
-    references:Optional[List[str]]=None
+    references:Optional[List[str]]=None  # index resolves to document id for `RAG25ReportSentence`
+    documents:Optional[Dict[str,Document]] = None
+    
     
     def model_post_init(self, __context__: dict | None = None) -> None:
         if self.responses is None:
