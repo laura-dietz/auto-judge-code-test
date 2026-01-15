@@ -1,48 +1,59 @@
 import pandas as pd
+import sys
 from pathlib import Path
-from tira.check_format import TrecEvalLeaderboard, _fmt
 from statistics import mean, stdev
-from typing import Optional
+from typing import Dict, Literal, Optional
+
+from trec_auto_judge.leaderboard import Leaderboard
+
+OnMissing = Literal["error", "warn", "skip"]
+
 
 class TrecLeaderboardEvaluation():
-    def __init__(self, truth_leaderboard: Optional[Path], truth_measure: Optional[str]):
+    def __init__(
+        self,
+        truth_leaderboard: Optional[Path],
+        truth_measure: Optional[str],
+        eval_measure: Optional[str],
+        on_missing: OnMissing = "error",
+    ):
+        self.on_missing = on_missing
+
+        # if only one measure is provided, assume both are the same.
+        if not eval_measure:
+            eval_measure = truth_measure
+        if not truth_measure:
+            truth_measure = eval_measure
+
         if truth_leaderboard and truth_measure:
             parsed_leaderboard = self.load_leaderboard(truth_leaderboard)
             self.ground_truth_ranking = self.extract_ranking(parsed_leaderboard, truth_measure)
         else:
             self.ground_truth_ranking = None
 
-    def load_leaderboard(self, leaderboard: Path):
-        if not leaderboard or not Path(leaderboard).is_file():
-            raise ValueError(f"I expected that {leaderboard} is a file.")
+    def load_leaderboard(self, leaderboard_path: Path) -> Leaderboard:
+        if not leaderboard_path or not Path(leaderboard_path).is_file():
+            raise ValueError(f"I expected that {leaderboard_path} is a file.")
+        return Leaderboard.load(Path(leaderboard_path))
 
-        reader = TrecEvalLeaderboard()
-        reader.apply_configuration_and_throw_if_invalid({})
-        c, m = reader.check_format(leaderboard)
-        if c != _fmt.OK:
-            raise ValueError(f"Can not load {leaderboard}. {m}")
-
-        return reader.all_lines(leaderboard)
-
-    def extract_ranking(self, leaderboard, measure):
+    def extract_ranking(self, leaderboard: Leaderboard, measure: str) -> Dict[str, float]:
+        """Extract run_id -> value mapping for aggregate rows (topic_id == all_topic_id)."""
         ret = {}
-        all_measuers = set()
-        for i in leaderboard:
-            if i["query"] != "all":
+        for entry in leaderboard.entries:
+            if entry.topic_id != leaderboard.all_topic_id:
                 continue
-            all_measuers.add(i["metric"])
-            if str(i["metric"]).strip() == str(measure).strip():
-                ret[i["run"]] = i["value"]
+            if measure in entry.values:
+                ret[entry.run_id] = float(entry.values[measure])
+
         if len(ret) == 0:
-            raise ValueError(f"Measure {measure} does not exist, I found: {sorted(list(all_measuers))}")
+            raise ValueError(f"Measure {measure} does not exist, I found: {sorted(leaderboard.measures)}")
         return ret
 
-    def evaluate(self, leaderboard_file):
+    def evaluate(self, leaderboard_file: Path) -> Dict[str, Dict]:
         leaderboard = self.load_leaderboard(leaderboard_file)
-        measures = set([i["metric"] for i in leaderboard])
         ret = {}
 
-        for m in measures:
+        for m in leaderboard.measures:
             if self.ground_truth_ranking:
                 ret[m] = self.correlation_to_truth(self.extract_ranking(leaderboard, m))
             else:
@@ -50,23 +61,44 @@ class TrecLeaderboardEvaluation():
 
         return ret
 
-    def basic_statistics(self, leaderboard, measure):
+    def basic_statistics(self, leaderboard: Leaderboard, measure: str) -> Dict[str, float]:
+        """Compute mean/stdev across all entries (including per-topic rows)."""
         vals = []
-
-        for i in leaderboard:
-            if str(i["metric"]).strip() == str(measure).strip():
-                vals.append(float(i["value"]))
+        for entry in leaderboard.entries:
+            if measure in entry.values:
+                vals.append(float(entry.values[measure]))
 
         if len(vals) == 0:
             raise ValueError(f"Measure {measure} does not exist.")
 
         return {"mean-value": mean(vals), "stdev-value": stdev(vals)}
 
-    def correlation_to_truth(self, ranking):
+    def correlation_to_truth(self, ranking: Dict[str, float]) -> Dict[str, float]:
         a, b = [], []
 
-        for system, truth_score in self.ground_truth_ranking.items():
-            a.append(float(truth_score))
+        truth_systems = set(self.ground_truth_ranking.keys())
+        eval_systems = set(ranking.keys())
+
+        missing_in_eval = truth_systems - eval_systems
+        missing_in_truth = eval_systems - truth_systems
+
+        if missing_in_eval or missing_in_truth:
+            msg_parts = []
+            if missing_in_eval:
+                msg_parts.append(f"missing in evaluated: {sorted(missing_in_eval)}")
+            if missing_in_truth:
+                msg_parts.append(f"missing in ground truth: {sorted(missing_in_truth)}")
+            msg = f"Run ID mismatch: {'; '.join(msg_parts)}"
+
+            if self.on_missing == "error":
+                raise ValueError(msg)
+            elif self.on_missing == "warn":
+                print(f"Warning: {msg}", file=sys.stderr)
+
+        # Only include systems present in both
+        common_systems = truth_systems & eval_systems
+        for system in common_systems:
+            a.append(float(self.ground_truth_ranking[system]))
             b.append(float(ranking[system]))
 
         return {

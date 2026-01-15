@@ -61,6 +61,43 @@ class Leaderboard:
         print(f"Writing leaderboard to {output.absolute()}")   # ToDo: use a logger
         output.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
+    @classmethod
+    def load(cls, path: Path) -> "Leaderboard":
+        """
+        Load a leaderboard from TSV file written by write().
+
+        Format: run_id <tab> measure <tab> topic_id <tab> value
+        """
+        text = path.read_text(encoding="utf-8")
+
+        # Collect values grouped by (run_id, topic_id)
+        entry_values: Dict[Tuple[str, str], Dict[str, str]] = defaultdict(dict)
+        measure_names: List[str] = []
+        measure_set: Set[str] = set()
+
+        for line in text.strip().split("\n"):
+            if not line:
+                continue
+            parts = line.split("\t")
+            if len(parts) != 4:
+                raise ValueError(f"Expected 4 tab-separated fields, got {len(parts)}: {line!r}")
+            run_id, measure, topic_id, value = parts
+            entry_values[(run_id, topic_id)][measure] = value
+            if measure not in measure_set:
+                measure_names.append(measure)
+                measure_set.add(measure)
+
+        # Build entries
+        entries = [
+            LeaderboardEntry(run_id=run_id, topic_id=topic_id, values=values)
+            for (run_id, topic_id), values in entry_values.items()
+        ]
+
+        return cls(
+            measures=tuple(measure_names),
+            entries=tuple(entries),
+        )
+
     def verify(self,  on_missing:OnMissing, expected_topic_ids: Sequence[str], warn:Optional[bool]=False):
         LeaderboardVerification(leaderboard = self, warn=warn, expected_topic_ids=expected_topic_ids, on_missing=on_missing) \
             .complete_measures(include_all_row=True) \

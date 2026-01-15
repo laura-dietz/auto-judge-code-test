@@ -23,10 +23,16 @@ def persist_output(df: pd.DataFrame, output: Path) -> None:
     help="The ground truth leaderboards congruent to 'trec_eval -q' format.",
 )
 @click.option(
-    "--truth-metric",
+    "--truth-measure",
     type=Path,
     required=False,
-    help="The metric from the ground truth leaderboard that .",
+    help="The measure from the ground truth leaderboard to evaluate against.",
+)
+@click.option(
+    "--eval-measure",
+    type=Path,
+    required=False,
+    help="The measure from the auto-judge leaderboard to evaluate.",
 )
 @click.option(
     "--input",
@@ -49,9 +55,9 @@ def persist_output(df: pd.DataFrame, output: Path) -> None:
     is_flag=True,
     help="Should only aggregates scores be reported.",
 )
-def evaluate(truth_leaderboard: Optional[Path], truth_metric: Optional[str], input: List[Path], output: Path, aggregate: bool) -> int:
+def evaluate(truth_leaderboard: Optional[Path], truth_measure: Optional[str], eval_measure:Optional[str],input: List[Path], output: Path, aggregate: bool) -> int:
     """Evaluate the input leaderboards against the ground-truth leaderboards."""
-    te = TrecLeaderboardEvaluation(truth_leaderboard, truth_metric)
+    te = TrecLeaderboardEvaluation(truth_leaderboard, truth_measure=truth_measure, eval_measure=eval_measure)
 
     df = []
 
