@@ -497,6 +497,17 @@ class PrefNuggetJudge(AutoJudge):
     def __init__(self):
         pass
 
+    def create_qrels(
+        self,
+        rag_responses: Sequence[Report],
+        rag_topics: Sequence[Request],
+        llm_config: MinimaLlmConfig,
+        nugget_banks: Optional[NuggetBanksProtocol] = None,
+        **kwargs
+    ) -> Optional[Qrels]:
+        """PrefNuggetJudge does not produce qrels."""
+        return None
+
     def filter_non_topic_responses(self, rag_responses: Sequence[Report], topic_ids:Set[str])->Sequence[Report]:
         broken:bool = False
         broken_run_ids = []
@@ -675,7 +686,7 @@ class PrefNuggetJudge(AutoJudge):
         grade_text: Literal["response", "document", "document_paragraphs"] = "response",
         filebase: str = "prefnugget",
         **kwargs
-    ) -> tuple[Leaderboard, Optional[Qrels]]:
+    ) -> Leaderboard:
         """
         Grade each response against all nuggets for its topic.
 
@@ -689,7 +700,7 @@ class PrefNuggetJudge(AutoJudge):
         # Prepare grading data using shared utility
         print("PrefNuggetJudge: Preparing grade data...")
         # ToDo if flag then use `prepare_nugget_grade_data_for_documents` instead
-        grade_data, nuggets_per_topic = prepare_nugget_grade_data(rag_responses, nugget_banks)  if grade_text == "response" else     prepare_nugget_grade_data_for_documents(rag_responses, nugget_banks, use_paragraphs = grade_text == "document_paragraphs") 
+        grade_data, nuggets_per_topic = prepare_nugget_grade_data(rag_responses, nugget_banks)  if grade_text == "response" else     prepare_nugget_grade_data_for_documents(rag_responses, nugget_banks, use_paragraphs = grade_text == "document_paragraphs")
 
         # Run LLM grading using shared utility
         print("PrefNuggetJudge: Grading responses...")
@@ -727,15 +738,15 @@ class PrefNuggetJudge(AutoJudge):
         leaderboard = self._build_leaderboard(aggregates, on_missing_evals)
         leaderboard.verify(warn=True, expected_topic_ids=self.expected_topic_ids, on_missing=on_missing_evals)
 
-        # Build qrels from grade data
-        if grade_text == "response":
-            qrels = build_qrels(records=grade_data, spec=PREFNUGGET_QRELS) if grade_data else None
-        else:
-            qrels = build_qrels(records=grade_data, spec=PREFNUGGET_CITE_QRELS) if grade_data else None
-        if qrels is not None:
-            qrels.verify(warn=True, expected_topic_ids=self.expected_topic_ids)
+        # # Build qrels from grade data
+        # if grade_text == "response":
+        #     qrels = build_qrels(records=grade_data, spec=PREFNUGGET_QRELS) if grade_data else None
+        # else:
+        #     qrels = build_qrels(records=grade_data, spec=PREFNUGGET_CITE_QRELS) if grade_data else None
+        # if qrels is not None:
+        #     qrels.verify(warn=True, expected_topic_ids=self.expected_topic_ids)
 
-        return (leaderboard, qrels)
+        return leaderboard
 
     def _build_leaderboard(self, aggregates: Dict[str, Any], on_missing_evals: str) -> Leaderboard:
         """Build leaderboard from aggregated response grades."""

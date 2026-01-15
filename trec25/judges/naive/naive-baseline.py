@@ -37,7 +37,7 @@ class NaiveJudge(AutoJudge):
               , rag_topics: Sequence["Request"]
               , llm_config: MinimaLlmConfig
               , nugget_banks: Optional[NuggetBanksProtocol] = None
-              , **kwargs) -> tuple["Leaderboard", Optional["Qrels"]]:
+              , **kwargs) -> "Leaderboard":
         ret = LeaderboardBuilder(NAIVE_LEADERBOARD_SPEC)
 
         for rag_response in tqdm(rag_responses, "Process RAG Responses"):
@@ -49,7 +49,7 @@ class NaiveJudge(AutoJudge):
 
         leaderboard = ret.build()
         LeaderboardVerification(leaderboard).all()
-        return leaderboard, None
+        return leaderboard
 
 
 if __name__ == '__main__':

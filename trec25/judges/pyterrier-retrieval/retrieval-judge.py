@@ -45,7 +45,7 @@ class RetrievalJudge(AutoJudge):
         return None
 
 
-    def judge(self, rag_responses: Sequence["Report"], rag_topics: Sequence["Request"], llm_cfg: MinimaLlmConfig, nugget_banks: Optional[NuggetBanksProtocol] = None, **kwargs) -> tuple["Leaderboard", Optional["Qrels"]]:
+    def judge(self, rag_responses: Sequence["Report"], rag_topics: Sequence["Request"], llm_cfg: MinimaLlmConfig, nugget_banks: Optional[NuggetBanksProtocol] = None, **kwargs) -> "Leaderboard":
         ensure_pyterrier_is_loaded()
         tokeniser = pt.java.autoclass("org.terrier.indexing.tokenisation.Tokeniser").getTokeniser()
         def pt_tokenize(text):
@@ -69,16 +69,16 @@ class RetrievalJudge(AutoJudge):
                 run_id_to_score = defaultdict(lambda: 0)
                 for _, i in rtr.iterrows():
                     run_id_to_score[i["docno"]] = max(0, 1000 - i["rank"])
-                
+
                 for system in all_systems:
                     system_to_wmodel_to_score[system][wmodel.name] = run_id_to_score.get(system)
-            
+
             for system in all_systems:
                 ret.add(run_id=system, topic_id=topic, values=system_to_wmodel_to_score[system])
 
         leaderboard = ret.build()
         LeaderboardVerification(leaderboard).all()
-        return leaderboard, None
+        return leaderboard
 
 
 if __name__ == '__main__':

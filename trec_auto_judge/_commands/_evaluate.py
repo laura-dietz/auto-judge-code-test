@@ -20,26 +20,49 @@ def persist_output(df: pd.DataFrame, output: Path) -> None:
     "--truth-leaderboard",
     type=Path,
     required=False,
-    help="The ground truth leaderboards congruent to 'trec_eval -q' format.",
+    help="The ground truth leaderboard file.",
 )
 @click.option(
     "--truth-measure",
-    type=Path,
+    type=str,
     required=False,
     help="The measure from the ground truth leaderboard to evaluate against.",
 )
 @click.option(
     "--eval-measure",
-    type=Path,
+    type=str,
     required=False,
     help="The measure from the auto-judge leaderboard to evaluate.",
+)
+@click.option(
+    "--truth-format",
+    type=click.Choice(["trec_eval", "ir_measures"]),
+    default="ir_measures",
+    help="Format of the ground truth leaderboard file, one of  \n trec_eval: run measure topic value \n ir_measures: run topic measure value",
+    
+)
+@click.option(
+    "--eval-format",
+    type=click.Choice(["trec_eval", "ir_measures"]),
+    default="trec_eval",
+    help="Format of the input leaderboard file(s), one of  \n trec_eval: run measure topic value \n ir_measures: run topic measure value",
+)
+@click.option(
+    "--on-missing",
+    type=click.Choice(["error", "warn", "skip", "default"]),
+    default="error",
+    help="How to handle run_id mismatches between truth and eval leaderboards: \n"
+         "error: raise an error \n"
+         "warn: print warning, use common systems only \n"
+         "skip: silently use common systems only \n"
+         "default: use 0.0 for missing values",
 )
 @click.option(
     "--input",
     type=Path,
     required=True,
     multiple=True,
-    help="The to-be-evaluated leaderboard(s) congruent to 'trec_eval -q' format.",
+    help="The to-be-evaluated leaderboard(s).",
 )
 @click.option(
     "--output",
@@ -55,9 +78,26 @@ def persist_output(df: pd.DataFrame, output: Path) -> None:
     is_flag=True,
     help="Should only aggregates scores be reported.",
 )
-def evaluate(truth_leaderboard: Optional[Path], truth_measure: Optional[str], eval_measure:Optional[str],input: List[Path], output: Path, aggregate: bool) -> int:
+def evaluate(
+    truth_leaderboard: Optional[Path],
+    truth_measure: Optional[str],
+    eval_measure: Optional[str],
+    truth_format: str,
+    eval_format: str,
+    on_missing: str,
+    input: List[Path],
+    output: Path,
+    aggregate: bool,
+) -> int:
     """Evaluate the input leaderboards against the ground-truth leaderboards."""
-    te = TrecLeaderboardEvaluation(truth_leaderboard, truth_measure=truth_measure, eval_measure=eval_measure)
+    te = TrecLeaderboardEvaluation(
+        truth_leaderboard,
+        truth_measure=truth_measure,
+        eval_measure=eval_measure,
+        truth_format=truth_format,
+        eval_format=eval_format,
+        on_missing=on_missing,
+    )
 
     df = []
 

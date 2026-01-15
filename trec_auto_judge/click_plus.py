@@ -554,10 +554,22 @@ def auto_judge_to_click_command(auto_judge: AutoJudge, cmd_name: str):
                   help="Override nugget settings: --nset key=value")
     @click.option("--jset", "-J", "judge_settings_overrides", multiple=True, type=KeyValueType(),
                   help="Override judge settings: --jset key=value")
+    @click.option("--qset", "-Q", "qrels_settings_overrides", multiple=True, type=KeyValueType(),
+                  help="Override qrels settings: --qset key=value (e.g., --qset grade_range=[0,3])")
     @click.option("--nugget-depends-on-responses/--no-nugget-depends-on-responses",
                   default=None, help="Override nugget_depends_on_responses lifecycle flag.")
     @click.option("--nugget-judge/--no-nugget-judge", "judge_uses_nuggets",
                   default=None, help="Judge uses nuggets (REQUIRED when --workflow omitted).")
+    @click.option("--create-qrels/--no-create-qrels", default=None,
+                  help="Override workflow create_qrels flag.")
+    @click.option("--judge-uses-qrels/--no-judge-uses-qrels", default=None,
+                  help="Override whether judge receives qrels from create_qrels phase.")
+    @click.option("--qrels-uses-nuggets/--no-qrels-uses-nuggets", default=None,
+                  help="Override whether create_qrels receives nuggets.")
+    @click.option("--qrels-input", type=ClickNuggetBanksPath(), default=None,
+                  help="Path to input qrels file (for refinement or judge input).")
+    @click.option("--qrels-output", type=ExpandedPath(path_type=Path), default=None,
+                  help="Path to store created qrels.")
     @click.option("--augment-report/--no-augment-report", "augment_report",
                   default=None, help="Save modified Report.evaldata to {filebase}.responses.jsonl.")
     @click.option("--limit-topics", type=int, default=None,
@@ -583,8 +595,14 @@ def auto_judge_to_click_command(auto_judge: AutoJudge, cmd_name: str):
         settings_overrides: tuple,
         nugget_settings_overrides: tuple,
         judge_settings_overrides: tuple,
+        qrels_settings_overrides: tuple,
         nugget_depends_on_responses: Optional[bool],
         judge_uses_nuggets: Optional[bool],
+        create_qrels: Optional[bool],
+        judge_uses_qrels: Optional[bool],
+        qrels_uses_nuggets: Optional[bool],
+        qrels_input: Optional[Path],
+        qrels_output: Optional[Path],
         augment_report: Optional[bool],
         limit_topics: Optional[int],
         limit_runs: Optional[int],
@@ -694,7 +712,24 @@ def auto_judge_to_click_command(auto_judge: AutoJudge, cmd_name: str):
 
             # CLI flags override workflow settings (None means use workflow default)
             effective_create_nuggets = create_nuggets if create_nuggets is not None else wf.create_nuggets
+            effective_create_qrels = create_qrels if create_qrels is not None else wf.create_qrels
             effective_do_judge = do_judge if do_judge is not None else wf.judge
+
+            # Determine qrels paths: CLI overrides, otherwise use resolved config
+            qrels_input_path = qrels_input or config.qrels_input_path
+            qrels_output_path = qrels_output or config.qrels_output_path
+
+            # Apply --out-dir prefix to qrels paths
+            if out_dir:
+                if qrels_input_path:
+                    qrels_input_path = out_dir / qrels_input_path
+                if qrels_output_path:
+                    qrels_output_path = out_dir / qrels_output_path
+
+            # Merge qrels settings: config.qrels_settings with CLI overrides
+            effective_qrels_settings = dict(config.qrels_settings)
+            for key, value in qrels_settings_overrides:
+                effective_qrels_settings[key] = value
 
             # each returns a JudgeResult object to contain Leaderboard, Qrels, Nuggets for meta-evaluation
             run_judge(
@@ -706,14 +741,22 @@ def auto_judge_to_click_command(auto_judge: AutoJudge, cmd_name: str):
                 judge_output_path=judge_output_path,
                 nugget_output_path=nugget_output_path,
                 do_create_nuggets=effective_create_nuggets,
+                do_create_qrels=effective_create_qrels,
                 do_judge=effective_do_judge,
                 settings=clean_settings,
                 nugget_settings=config.nugget_settings,
                 judge_settings=config.judge_settings,
+                qrels_settings=effective_qrels_settings,
+                # Qrels paths
+                qrels_input_path=qrels_input_path,
+                qrels_output_path=qrels_output_path,
                 # Lifecycle flags
                 force_recreate_nuggets=force_recreate_nuggets if force_recreate_nuggets is not None else wf.force_recreate_nuggets,
+                force_recreate_qrels=wf.force_recreate_qrels,
                 nugget_depends_on_responses=wf.nugget_depends_on_responses,
                 judge_uses_nuggets=wf.judge_uses_nuggets,
+                judge_uses_qrels=judge_uses_qrels if judge_uses_qrels is not None else wf.judge_uses_qrels,
+                qrels_uses_nuggets=qrels_uses_nuggets if qrels_uses_nuggets is not None else wf.qrels_uses_nuggets,
                 augment_report=augment_report if augment_report is not None else wf.augment_report,
                 config_name=config.name,
                 limit_topics=limit_topics,

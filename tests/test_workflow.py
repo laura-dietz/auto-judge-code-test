@@ -142,11 +142,13 @@ class TestWriteRunConfig(unittest.TestCase):
                 judge_output_path=output_path,
                 config_name="my-variant",
                 do_create_nuggets=True,
+                do_create_qrels=False,
                 do_judge=True,
                 llm_model="gpt-4o",
                 settings=None,
                 nugget_settings=None,
                 judge_settings=None,
+                qrels_settings=None,
             )
 
             config_path = Path(tmpdir) / "test.config.yml"
@@ -158,6 +160,7 @@ class TestWriteRunConfig(unittest.TestCase):
             # Required fields
             self.assertEqual(config["name"], "my-variant")
             self.assertEqual(config["create_nuggets"], True)
+            self.assertEqual(config["create_qrels"], False)
             self.assertEqual(config["judge"], True)
             self.assertEqual(config["llm_model"], "gpt-4o")
             self.assertIn("timestamp", config)
@@ -175,11 +178,13 @@ class TestWriteRunConfig(unittest.TestCase):
                 judge_output_path=output_path,
                 config_name="default",
                 do_create_nuggets=False,
+                do_create_qrels=False,
                 do_judge=True,
                 llm_model="llama-3",
                 settings=None,
                 nugget_settings=None,
                 judge_settings=None,
+                qrels_settings=None,
             )
 
             config_path = Path(tmpdir) / "test.config.yml"
@@ -189,6 +194,7 @@ class TestWriteRunConfig(unittest.TestCase):
             self.assertNotIn("settings", config)
             self.assertNotIn("nugget_settings", config)
             self.assertNotIn("judge_settings", config)
+            self.assertNotIn("qrels_settings", config)
 
     def test_includes_nonempty_settings(self):
         """Non-empty settings dicts are included in config."""
@@ -199,11 +205,13 @@ class TestWriteRunConfig(unittest.TestCase):
                 judge_output_path=output_path,
                 config_name="default",
                 do_create_nuggets=True,
+                do_create_qrels=True,
                 do_judge=True,
                 llm_model="gpt-4o",
                 settings={"top_k": 20, "filebase": "rubric"},
                 nugget_settings={"extraction_style": "thorough"},
                 judge_settings={"threshold": 0.5},
+                qrels_settings={"grade_range": [0, 3]},
             )
 
             config_path = Path(tmpdir) / "test.config.yml"
@@ -214,3 +222,4 @@ class TestWriteRunConfig(unittest.TestCase):
             self.assertEqual(config["settings"]["filebase"], "rubric")
             self.assertEqual(config["nugget_settings"]["extraction_style"], "thorough")
             self.assertEqual(config["judge_settings"]["threshold"], 0.5)
+            self.assertEqual(config["qrels_settings"]["grade_range"], [0, 3])

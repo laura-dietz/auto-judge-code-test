@@ -117,9 +117,15 @@ class NltkInitializer():
     from nltk.corpus import stopwords
     from nltk.stem import PorterStemmer
 
-    # Download necessary resources
-    nltk.download('punkt')
-    nltk.download('stopwords')
+    # Download necessary resources (only if not already present)
+    try:
+        nltk.data.find('tokenizers/punkt')
+    except LookupError:
+        nltk.download('punkt', quiet=True)
+    try:
+        nltk.data.find('corpora/stopwords')
+    except LookupError:
+        nltk.download('stopwords', quiet=True)
 
     STOP_WORDS = set(stopwords.words('english'))
     STEMMER = PorterStemmer()

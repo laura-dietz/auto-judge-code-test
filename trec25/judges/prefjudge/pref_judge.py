@@ -104,13 +104,24 @@ class PrefJudge(AutoJudge):
     """
 
     nugget_banks_type: Type[NuggetBanksProtocol] = NuggetBanks  # Does not matter
-    
+
     def __init__(self):
         # self.on_missing_evals: OnMissing = "fix_aggregate"
         pass
 
     def create_nuggets(self, **args) -> Optional[NuggetBanksProtocol]:
         return None   # We are not using nuggets
+
+    def create_qrels(
+        self,
+        rag_responses: Sequence[Report],
+        rag_topics: Sequence[Request],
+        llm_config: MinimaLlmConfig,
+        nugget_banks: Optional[NuggetBanksProtocol] = None,
+        **kwargs
+    ) -> Optional[Qrels]:
+        """PrefJudge does not produce qrels."""
+        return None
     
     def judge(
         self,
@@ -122,14 +133,14 @@ class PrefJudge(AutoJudge):
         on_missing_evals: str,
         no_dupes: bool = False,
         **kwargs
-    ) -> tuple[Leaderboard, Optional[Qrels]]:
+    ) -> Leaderboard:
         num_runs = len({r.metadata.run_id for r in rag_responses})
         expected_topic_ids = [t.request_id for t in rag_topics]
 
         for resp in rag_responses:
             if resp.metadata.topic_id is None:
                 print(f"Invalid reponse: {resp.metadata.run_id}")
-        
+
         # Hash topics
         rag_topic_dict: Dict[str, Request] = {r.request_id: r for r in rag_topics}
         rag_response_by_topic: Dict[str, List[Report]] = {
@@ -155,14 +166,14 @@ class PrefJudge(AutoJudge):
 
         # Include pairs also in reverse (p1 <-> p2)
         grade_data = grade_data + [data.flip() for data in grade_data]
-        
+
         # this changed reports
         b = read_results(rag_response_by_topic=rag_response_by_topic
                                         , grade_data=grade_data)
-        
+
         leaderboard = b.build(expected_topic_ids=expected_topic_ids, on_missing = on_missing_evals)
         leaderboard.verify(expected_topic_ids=expected_topic_ids, warn=False, on_missing = on_missing_evals)
-        return (leaderboard, None)
+        return leaderboard
 
 
 if __name__ == '__main__':

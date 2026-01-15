@@ -3,7 +3,8 @@ Path resolution utilities for AutoJudge workflow outputs.
 
 Provides consistent file naming conventions:
 - Nuggets: {filebase}.nuggets.jsonl
-- Judgment: {filebase}.judgment.json + {filebase}.judgment.qrels
+- Qrels: {filebase}.qrels.txt
+- Leaderboard: {filebase}.eval.txt
 - Config: {filebase}.config.yml
 """
 
@@ -22,22 +23,16 @@ def resolve_nugget_file_path(filebase: Path) -> Path:
     return filebase.parent / f"{filebase.name}.nuggets.jsonl"
 
 
-def resolve_judgment_file_paths(filebase: Path) -> tuple[Path, Path]:
+def resolve_leaderboard_file_path(filebase: Path) -> Path:
     """
-    Resolve leaderboard and qrels file paths from filebase.
+    Resolve leaderboard file path from filebase.
 
     Returns:
-        Tuple of (leaderboard_path, qrels_path):
-        - {filebase}.judgment.eval
-        - {filebase}.judgment.qrels
+        {filebase}.eval.txt
     """
-    if filebase.suffix in (".json",):
-        # Already has extension, derive qrels from it
-        return filebase, filebase.with_suffix(".qrels")
-    return (
-        filebase.parent / f"{filebase.name}.judgment.eval",
-        filebase.parent / f"{filebase.name}.judgment.qrels",
-    )
+    if filebase.name.endswith(".eval.txt"):
+        return filebase
+    return filebase.parent / f"{filebase.name}.eval.txt"
 
 
 def resolve_config_file_path(filebase: Path) -> Path:
@@ -52,6 +47,33 @@ def resolve_responses_file_path(filebase: Path) -> Path:
     if filebase.suffix in (".jsonl",):
         return filebase
     return filebase.parent / f"{filebase.name}.responses.jsonl"
+
+
+def resolve_qrels_file_path(filebase: Path) -> Path:
+    """
+    Resolve qrels file path from filebase.
+
+    Returns:
+        {filebase}.qrels.txt
+    """
+    if filebase.name.endswith(".qrels.txt"):
+        return filebase
+    return filebase.parent / f"{filebase.name}.qrels.txt"
+
+
+def load_qrels_from_path(path: Path):
+    """
+    Load qrels from file.
+
+    Args:
+        path: Path to qrels file (.qrels format)
+
+    Returns:
+        Loaded Qrels instance
+    """
+    from ..qrels.qrels import read_qrel_file
+
+    return read_qrel_file(path)
 
 
 def load_nugget_banks_from_path(path: Path, nugget_banks_type: type):

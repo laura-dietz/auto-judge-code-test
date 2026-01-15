@@ -23,11 +23,11 @@ class NaiveJudge(AutoJudge):
         return None
 
     def judge(self,
-              rag_responses: Sequence["Report"], 
+              rag_responses: Sequence["Report"],
               rag_topics: Sequence["Request"],
               llm_config: MinimaLlmConfig,
-              nugget_banks: Optional[NuggetBanks] = None,
-              **kwargs) -> tuple["Leaderboard", Optional["Qrels"]]:
+              nugget_banks: Optional[NuggetBanksProtocol] = None,
+              **kwargs) -> "Leaderboard":
         ret = LeaderboardBuilder(self.leaderboard_spec())
 
         for r in rag_responses:
@@ -37,7 +37,7 @@ class NaiveJudge(AutoJudge):
                 values={"measure-01": 1}
             )
 
-        return ret.build(), None
+        return ret.build()
 
     def leaderboard_spec(self) -> LeaderboardSpec:
         return LeaderboardSpec(measures=(
@@ -58,8 +58,8 @@ class TestAutoJudgeProtocoll(unittest.TestCase):
             print(result.exception)
             self.assertIsNone(result.exception)
             self.assertEqual(result.exit_code, 0)
-            # Output file gets .judgment.eval suffix added by resolve_judgment_file_paths()
-            leaderboard_file = filebase.parent / f"{filebase.name}.judgment.eval"
+            # Output file gets .eval.txt suffix added by resolve_leaderboard_file_path()
+            leaderboard_file = filebase.parent / f"{filebase.name}.eval.txt"
             self.assertTrue(leaderboard_file.is_file())
             actual_leaderboard = leaderboard_file.read_text()
             self.assertIn("measure-01\t28\t1", actual_leaderboard)

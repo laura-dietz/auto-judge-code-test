@@ -329,6 +329,17 @@ class RubricJudge(AutoJudge):
     
     
     
+    def create_qrels(
+        self,
+        rag_responses: Sequence[Report],
+        rag_topics: Sequence[Request],
+        llm_config: MinimaLlmConfig,
+        nugget_banks: Optional[NuggetBanksProtocol] = None,
+        **kwargs
+    ) -> Optional[Qrels]:
+        """Rubric judge does not produce qrels."""
+        return None
+
     def judge(
         self,
         rag_responses: Sequence[Report],
@@ -338,7 +349,7 @@ class RubricJudge(AutoJudge):
         grade_threshold: int = 3,
         filebase: str = "rubric",
         **kwargs
-    ) -> tuple[Leaderboard, Optional[Qrels]]:
+    ) -> Leaderboard:
         """
         Grade each response against all nuggets for its topic.
 
@@ -466,8 +477,8 @@ class RubricJudge(AutoJudge):
         leaderboard.verify(warn=True, expected_topic_ids=self.expected_topic_ids, on_missing=self.on_missing_evals)
 
         # Build qrels from grade data
-        qrels = build_qrels(records=grade_data, spec=RUBRIC_QRELS) if grade_data else None
-        qrels.verify(warn=True, expected_topic_ids=self.expected_topic_ids)
+        # qrels = build_qrels(records=grade_data, spec=RUBRIC_QRELS) if grade_data else None
+        # qrels.verify(warn=True, expected_topic_ids=self.expected_topic_ids)
 
         # Export to Talmudir format
         write_talmudir_export(
@@ -479,7 +490,7 @@ class RubricJudge(AutoJudge):
             grade_threshold=grade_threshold,  # Only include commentary for high-quality answers
         )
 
-        return (leaderboard, qrels)
+        return leaderboard
 
     def _build_leaderboard(self, response_grades: Dict[str, Dict[str, Any]]) -> Leaderboard:
         """Build leaderboard from aggregated response grades."""

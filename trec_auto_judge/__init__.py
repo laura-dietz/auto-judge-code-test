@@ -2,7 +2,7 @@ from typing import Iterable, Protocol, Sequence, Optional, Type
 
 from .report import Report, load_report
 from .request import Request, load_requests_from_irds, load_requests_from_file
-from .leaderboard.leaderboard import Leaderboard, LeaderboardEntry, MeasureSpec, LeaderboardSpec, LeaderboardBuilder, LeaderboardVerification, LeaderboardVerificationError, mean_of_bools, mean_of_floats, mean_of_ints
+from .leaderboard import Leaderboard, LeaderboardEntry, MeasureSpec, LeaderboardSpec, LeaderboardBuilder, LeaderboardVerification, LeaderboardVerificationError, mean_of_bools, mean_of_floats, mean_of_ints
 from .qrels.qrels import QrelsSpec, QrelRow, Qrels, build_qrels, QrelsVerification, QrelsVerificationError, write_qrel_file, doc_id_md5
 from .llm.minima_llm import MinimaLlmConfig, OpenAIMinimaLlm
 from .nugget_data import NuggetBanks, NuggetBanksProtocol
@@ -26,32 +26,45 @@ class AutoJudge(Protocol):
         nugget_banks: Optional[NuggetBanksProtocol] = None,
         qrels: Optional[Qrels] = None,
         **kwargs
-    ) -> tuple["Leaderboard", Optional["Qrels"]]:
+    ) -> "Leaderboard":
         """
-        Judge RAG responses against topics.
+        Judge RAG responses against topics and produce a leaderboard.
+
+        Args:
+            rag_responses: RAG system outputs to judge
+            rag_topics: Evaluation topics/queries
+            llm_config: LLM configuration
+            nugget_banks: Optional nuggets for judgment
+            qrels: Optional qrels from create_qrels() phase
+            **kwargs: Additional settings
 
         Returns:
-            - Leaderboard: Rankings/scores for runs
-            - Qrels: Optional fine-grained relevance judgments
+            Leaderboard with rankings/scores for runs
         """
         ...
         
-    # ToDo allow qrel generation as separate judge phase, will get 
-    # def create_qrels(
-    #     self,
-    #     rag_responses: Iterable["Report"],
-    #     rag_topics: Sequence["Request"],
-    #     llm_config: MinimaLlmConfig,
-    #     nugget_banks: Optional[NuggetBanksProtocol] = None,
-    #     **kwargs
-    # ) -> Optional["Qrels"]:
-    #     """
-    #     Judge qrels for RAG responses against topics.
+    def create_qrels(
+        self,
+        rag_responses: Iterable["Report"],
+        rag_topics: Sequence["Request"],
+        llm_config: MinimaLlmConfig,
+        nugget_banks: Optional[NuggetBanksProtocol] = None,
+        **kwargs
+    ) -> Optional["Qrels"]:
+        """
+        Create relevance judgments (qrels) for RAG responses.
 
-    #     Returns:
-    #         - Qrels: Optional fine-grained relevance judgments
-    #     """
-    #     ...
+        Args:
+            rag_responses: RAG system outputs to judge
+            rag_topics: Evaluation topics/queries
+            llm_config: LLM configuration for qrels generation
+            nugget_banks: Optional nuggets to use for judgment
+            **kwargs: Additional settings (e.g., grade_range=[0, 3])
+
+        Returns:
+            Qrels with relevance judgments, or None if not supported
+        """
+        ...
 
     def create_nuggets(
         self,

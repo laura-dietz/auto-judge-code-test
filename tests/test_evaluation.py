@@ -39,7 +39,7 @@ class TestEvaluation(unittest.TestCase):
             expected = {'ORACLE': {'kendall': 1.0, 'pearson': 1.0, 'spearman': 1.0, 'tauap_b': 1.0}}
             leaderboard = Path(d) / "leaderboard"
             leaderboard.write_text(EXAMPLE_01)
-            te = TrecLeaderboardEvaluation(leaderboard, "ORACLE")
+            te = TrecLeaderboardEvaluation(leaderboard, "ORACLE", eval_measure="ORACLE", truth_format="trec_eval", eval_format="trec_eval")
             actual = te.evaluate(leaderboard)
             self.assertEqual(expected, actual)
 
@@ -51,7 +51,7 @@ class TestEvaluation(unittest.TestCase):
             }
             leaderboard = Path(d) / "leaderboard"
             leaderboard.write_text(EXAMPLE_02)
-            te = TrecLeaderboardEvaluation(leaderboard, "M2")
+            te = TrecLeaderboardEvaluation(leaderboard, "M2", eval_measure="M2", truth_format="trec_eval", eval_format="trec_eval")
             actual = te.evaluate(leaderboard)
             self.assertIn("M1", actual)
             self.assertIn("M2", actual)
@@ -68,7 +68,7 @@ class TestEvaluation(unittest.TestCase):
             }
             leaderboard = Path(d) / "leaderboard"
             leaderboard.write_text(EXAMPLE_02)
-            te = TrecLeaderboardEvaluation(leaderboard, "M1")
+            te = TrecLeaderboardEvaluation(leaderboard, "M1", eval_measure="M1", truth_format="trec_eval", eval_format="trec_eval")
             actual = te.evaluate(leaderboard)
             self.assertIn("M1", actual)
             self.assertIn("M2", actual)
@@ -88,7 +88,7 @@ class TestEvaluation(unittest.TestCase):
             l2 = Path(d) / "leaderboard-2"
             l2.write_text(EXAMPLE_02)
 
-            te = TrecLeaderboardEvaluation(l1, "ORACLE")
+            te = TrecLeaderboardEvaluation(l1, "ORACLE", eval_measure="M1", truth_format="trec_eval", eval_format="trec_eval")
             actual = te.evaluate(l2)
             self.assertIn("M1", actual)
             self.assertIn("M2", actual)
@@ -107,7 +107,7 @@ class TestEvaluation(unittest.TestCase):
             l2 = Path(d) / "leaderboard-2"
             l2.write_text(EXAMPLE_02)
 
-            te = TrecLeaderboardEvaluation(l2, "M2")
+            te = TrecLeaderboardEvaluation(l2, "M2", eval_measure="M2", truth_format="trec_eval", eval_format="trec_eval")
             actual = te.evaluate(l1)
 
             self.assertEqual(expected, actual)
@@ -118,7 +118,7 @@ class TestEvaluation(unittest.TestCase):
             leaderboard.write_text(EXAMPLE_02)
 
             with self.assertRaises(ValueError):
-                TrecLeaderboardEvaluation(leaderboard, "measure-does-not-exist")
+                TrecLeaderboardEvaluation(leaderboard, "measure-does-not-exist", eval_measure="M1", truth_format="trec_eval")
 
     def test_evaluation_ground_truth_does_not_exist(self):
         expected = {
@@ -129,7 +129,7 @@ class TestEvaluation(unittest.TestCase):
             leaderboard = Path(d) / "leaderboard"
             leaderboard.write_text(EXAMPLE_02)
 
-            te = TrecLeaderboardEvaluation(None, None)
+            te = TrecLeaderboardEvaluation(None, None, eval_measure=None, eval_format="trec_eval")
             actual = te.evaluate(leaderboard)
 
             for m in expected.keys():

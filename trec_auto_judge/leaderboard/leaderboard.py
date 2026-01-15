@@ -14,6 +14,7 @@ MeasureName = str
 AggFn = Callable[[Sequence[Any]], Any]
 CastFn = Callable[[Any], Any]
 OnMissing = Literal["default", "warn", "error", "fix_aggregate"]
+LeaderboardFormat = Literal["trec_eval", "ir_measures"]
 
 
 #  ==== DataClasses for data storage and serialization ===  
@@ -45,9 +46,19 @@ class Leaderboard:
         """Return measure names in schema order."""
         return self.measures
 
-    def write(self, output: Path) -> None:
+    def write(
+        self,
+        output: Path,
+        format: LeaderboardFormat = "trec_eval",
+    ) -> None:
         """
-        Write the leaderboard as white-space separated lines: run_id <tab> measure <tab> topic_id <tab> value.
+        Write the leaderboard as tab-separated lines.
+
+        Args:
+            output: Path to write to
+            format: Column order
+                - "trec_eval": run measure topic value
+                - "ir_measures": run topic measure value
 
         Only measures present in each entry are written (allows sparse rows).
         """
@@ -55,18 +66,31 @@ class Leaderboard:
         for e in self.entries:
             for m in self.all_measure_names():
                 if m in e.values:
-                    lines.append("\t".join([e.run_id, m, e.topic_id, str(e.values[m])]))
+                    if format == "trec_eval":
+                        lines.append("\t".join([e.run_id, m, e.topic_id, str(e.values[m])]))
+                    elif format == "ir_measures":
+                        lines.append("\t".join([e.run_id, e.topic_id, m, str(e.values[m])]))
+                    else:
+                        raise ValueError(f"Unknown format: {format!r}")
 
         output.parent.mkdir(parents=True, exist_ok=True)
         print(f"Writing leaderboard to {output.absolute()}")   # ToDo: use a logger
         output.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
     @classmethod
-    def load(cls, path: Path) -> "Leaderboard":
+    def load(
+        cls,
+        path: Path,
+        format: LeaderboardFormat = "trec_eval",
+    ) -> "Leaderboard":
         """
-        Load a leaderboard from TSV file written by write().
+        Load a leaderboard from file.
 
-        Format: run_id <tab> measure <tab> topic_id <tab> value
+        Args:
+            path: Path to leaderboard file
+            format: Column order (whitespace-separated)
+                - "trec_eval": run measure topic value
+                - "ir_measures": run topic measure value
         """
         text = path.read_text(encoding="utf-8")
 
@@ -78,10 +102,17 @@ class Leaderboard:
         for line in text.strip().split("\n"):
             if not line:
                 continue
-            parts = line.split("\t")
+            parts = line.split()
             if len(parts) != 4:
-                raise ValueError(f"Expected 4 tab-separated fields, got {len(parts)}: {line!r}")
-            run_id, measure, topic_id, value = parts
+                raise ValueError(f"Expected 4 whitespace-separated fields, got {len(parts)}: {line!r}")
+
+            if format == "trec_eval":
+                run_id, measure, topic_id, value = parts
+            elif format == "ir_measures":
+                run_id, topic_id, measure, value = parts
+            else:
+                raise ValueError(f"Unknown format: {format!r}")
+
             entry_values[(run_id, topic_id)][measure] = value
             if measure not in measure_set:
                 measure_names.append(measure)

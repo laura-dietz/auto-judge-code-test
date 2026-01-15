@@ -24,10 +24,12 @@ from .report import Report
 from .request import Request
 from .workflow.paths import (
     resolve_nugget_file_path,
-    resolve_judgment_file_paths,
+    resolve_qrels_file_path,
+    resolve_leaderboard_file_path,
     resolve_config_file_path,
     resolve_responses_file_path,
     load_nugget_banks_from_path,
+    load_qrels_from_path,
 )
 
 
@@ -35,8 +37,8 @@ from .workflow.paths import (
 class JudgeResult:
     """Result of a judge run."""
     leaderboard: Optional[Leaderboard]
-    qrels: Optional[Qrels]
-    nuggets: Optional[NuggetBanksProtocol]
+    qrels: Optional[Qrels]  # Final qrels (from judge() if available, else from create_qrels())
+    nuggets: Optional[NuggetBanksProtocol]  # Final nuggets (created or loaded)
 
 
 def run_judge(
@@ -48,15 +50,23 @@ def run_judge(
     judge_output_path: Optional[Path] = None,
     nugget_output_path: Optional[Path] = None,
     do_create_nuggets: bool = False,
+    do_create_qrels: bool = False,
     do_judge: bool = True,
     # Settings dicts passed to AutoJudge methods as **kwargs
     settings: Optional[dict[str, Any]] = None,
     nugget_settings: Optional[dict[str, Any]] = None,
     judge_settings: Optional[dict[str, Any]] = None,
+    qrels_settings: Optional[dict[str, Any]] = None,
+    # Qrels paths
+    qrels_input_path: Optional[Path] = None,
+    qrels_output_path: Optional[Path] = None,
     # Lifecycle flags
     force_recreate_nuggets: Optional[bool] = None,
+    force_recreate_qrels: Optional[bool] = None,
     nugget_depends_on_responses: bool = True,
     judge_uses_nuggets: bool = True,
+    judge_uses_qrels: bool = True,
+    qrels_uses_nuggets: bool = True,
     augment_report: bool = False,
     # Configuration name for reproducibility tracking
     config_name: str = "default",
@@ -142,18 +152,32 @@ def run_judge(
         input_nuggets = load_nugget_banks_from_path(nugget_banks_path, nugget_banks_type)
 
     current_nuggets = input_nuggets
+    current_qrels: Optional[Qrels] = None
     leaderboard = None
-    qrels = None
-    
+
+    # Default force_recreate_qrels to do_create_qrels if not explicitly set
+    if force_recreate_qrels is None:
+        force_recreate_qrels = do_create_qrels
+
+    # Resolve qrels output file path (add .qrels extension if needed)
+    qrels_file_path = resolve_qrels_file_path(qrels_output_path) if qrels_output_path else None
+
+    # Load input qrels if provided
+    if qrels_input_path and qrels_input_path.exists():
+        print(f"[judge_runner] Loading input qrels: {qrels_input_path}", file=sys.stderr)
+        current_qrels = load_qrels_from_path(qrels_input_path)
+
     _write_run_config(
         judge_output_path=judge_output_path,
         config_name=config_name,
         do_create_nuggets=do_create_nuggets,
+        do_create_qrels=do_create_qrels,
         do_judge=do_judge,
         llm_model=llm_config.model,
         settings=settings,
         nugget_settings=nugget_settings,
         judge_settings=judge_settings,
+        qrels_settings=qrels_settings,
     )
 
 
@@ -196,7 +220,39 @@ def run_judge(
                     write_nugget_banks_generic(current_nuggets, nugget_file_path)
                     print(f"[judge_runner] Nuggets saved to: {nugget_file_path}", file=sys.stderr)
 
-    # Step 2: Judge if requested
+    # Step 2: Create or load qrels
+    if do_create_qrels:
+        # Check if output file exists and we can skip creation
+        if qrels_file_path and qrels_file_path.exists() and not force_recreate_qrels:
+            print(f"[judge_runner] Loading existing qrels (skipping creation): {qrels_file_path}", file=sys.stderr)
+            current_qrels = load_qrels_from_path(qrels_file_path)
+        else:
+            # Create qrels
+            qrels_kwargs = qrels_settings or settings or {}
+            if qrels_kwargs:
+                print(f"[judge_runner] create_qrels settings: {qrels_kwargs}", file=sys.stderr)
+
+            # Pass nuggets based on qrels_uses_nuggets flag
+            nuggets_for_qrels = current_nuggets if qrels_uses_nuggets else None
+
+            current_qrels = auto_judge.create_qrels(
+                rag_responses=rag_responses,
+                rag_topics=rag_topics,
+                llm_config=llm_config,
+                nugget_banks=nuggets_for_qrels,
+                **qrels_kwargs,
+            )
+
+            # Verify and save created qrels
+            if current_qrels is not None:
+                topic_ids = [t.request_id for t in rag_topics]
+                current_qrels.verify(expected_topic_ids=topic_ids)
+                # Save immediately for crash recovery
+                if qrels_file_path:
+                    write_qrel_file(qrel_out_file=qrels_file_path, qrels=current_qrels)
+                    print(f"[judge_runner] Qrels saved to: {qrels_file_path}", file=sys.stderr)
+
+    # Step 3: Judge leaderboard if requested
     if do_judge:
         judge_kwargs = dict(judge_settings or settings or {})
 
@@ -209,20 +265,22 @@ def run_judge(
 
         # Pass nuggets based on judge_uses_nuggets flag
         nuggets_for_judge = current_nuggets if judge_uses_nuggets else None
+        # Pass qrels based on judge_uses_qrels flag
+        qrels_for_judge = current_qrels if judge_uses_qrels else None
 
-        leaderboard, qrels = auto_judge.judge(
+        leaderboard = auto_judge.judge(
             rag_responses=rag_responses,
             rag_topics=rag_topics,
             llm_config=llm_config,
             nugget_banks=nuggets_for_judge,
+            qrels=qrels_for_judge,
             **judge_kwargs,
         )
 
-        # Step 3: Write outputs
+        # Write leaderboard output
         if judge_output_path:
-            _write_outputs(
+            _write_leaderboard(
                 leaderboard=leaderboard,
-                qrels=qrels,
                 rag_topics=rag_topics,
                 judge_output_path=judge_output_path,
             )
@@ -236,41 +294,37 @@ def run_judge(
 
     return JudgeResult(
         leaderboard=leaderboard,
-        qrels=qrels,
+        qrels=current_qrels,
         nuggets=current_nuggets,
     )
 
 
-def _write_outputs(
+def _write_leaderboard(
     leaderboard: Leaderboard,
-    qrels: Optional[Qrels],
     rag_topics: Sequence[Request],
     judge_output_path: Path,
 ) -> None:
-    """Verify and write leaderboard and qrels."""
+    """Verify and write leaderboard."""
     topic_ids = [t.request_id for t in rag_topics]
 
-    # Resolve output paths from filebase
-    leaderboard_path, qrels_path = resolve_judgment_file_paths(judge_output_path)
-    leaderboard.verify(expected_topic_ids=topic_ids, on_missing="fix_aggregate")  # Reconsider setting this to "fix_aggregate" if want to ensure all run/topic combinations have values.
+    # Resolve output path from filebase
+    leaderboard_path = resolve_leaderboard_file_path(judge_output_path)
+    leaderboard.verify(expected_topic_ids=topic_ids, on_missing="fix_aggregate")
     leaderboard.write(leaderboard_path)
     print(f"[judge_runner] Leaderboard saved to: {leaderboard_path}", file=sys.stderr)
-
-    if qrels is not None:
-        qrels.verify(expected_topic_ids=topic_ids)
-        write_qrel_file(qrel_out_file=qrels_path, qrels=qrels)
-        print(f"[judge_runner] Qrels saved to: {qrels_path}", file=sys.stderr)
 
 
 def _write_run_config(
     judge_output_path: Path,
     config_name: str,
     do_create_nuggets: bool,
+    do_create_qrels: bool,
     do_judge: bool,
     llm_model: str,
     settings: Optional[dict[str, Any]],
     nugget_settings: Optional[dict[str, Any]],
     judge_settings: Optional[dict[str, Any]],
+    qrels_settings: Optional[dict[str, Any]],
 ) -> None:
     """
     Write run configuration for reproducibility.
@@ -286,6 +340,7 @@ def _write_run_config(
     config: dict[str, Any] = {
         "name": config_name,
         "create_nuggets": do_create_nuggets,
+        "create_qrels": do_create_qrels,
         "judge": do_judge,
         "llm_model": llm_model,
         "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -299,6 +354,8 @@ def _write_run_config(
         config["nugget_settings"] = nugget_settings
     if judge_settings:
         config["judge_settings"] = judge_settings
+    if qrels_settings:
+        config["qrels_settings"] = qrels_settings
 
     config_path.parent.mkdir(parents=True, exist_ok=True)
     with open(config_path, "w") as f:

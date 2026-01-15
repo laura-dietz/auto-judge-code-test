@@ -10,12 +10,16 @@ Every judge implements the `AutoJudge` protocol with two methods:
 class AutoJudge(Protocol):
     nugget_banks_type: Type[NuggetBanksProtocol]  # Optional: declare nugget format
 
-    def judge(self, rag_responses, rag_topics, llm_config, nugget_banks=None, **kwargs):
-        """Score RAG responses. Returns (Leaderboard, Qrels)."""
+    def judge(self, rag_responses, rag_topics, llm_config, nugget_banks=None, qrels=None, **kwargs):
+        """Score RAG responses. Returns Leaderboard."""
         ...
 
     def create_nuggets(self, rag_responses, rag_topics, llm_config, nugget_banks=None, **kwargs):
         """Create or refine nugget banks based on RAG responses. Returns NuggetBanks or None."""
+        ...
+
+    def create_qrels(self, rag_responses, rag_topics, llm_config, nugget_banks=None, **kwargs):
+        """Create relevance judgments (qrels). Returns Qrels or None."""
         ...
 ```
 
@@ -29,9 +33,12 @@ from trec_auto_judge import Leaderboard
 class SimpleJudge:
     def judge(self, rag_responses, rag_topics, llm_config, **kwargs):
         leaderboard = ...  # Score responses
-        return leaderboard, None  # (Leaderboard, Qrels)
+        return leaderboard
 
     def create_nuggets(self, rag_responses, rag_topics, llm_config, **kwargs):
+        return None
+
+    def create_qrels(self, rag_responses, rag_topics, llm_config, **kwargs):
         return None
 ```
 
@@ -79,7 +86,7 @@ class MyJudge:
 ### Step 3: Implement judge()
 
 ```python
-def judge(self, rag_responses, rag_topics, llm_config, nugget_banks=None, **kwargs):
+def judge(self, rag_responses, rag_topics, llm_config, nugget_banks=None, qrels=None, **kwargs):
     scores = {}
 
     for response in rag_responses:
@@ -92,10 +99,14 @@ def judge(self, rag_responses, rag_topics, llm_config, nugget_banks=None, **kwar
         else:
             score = evaluate_without_nuggets(response, llm_config)
 
+        # Optionally use qrels from create_qrels() phase
+        if qrels:
+            score = adjust_score_with_qrels(score, qrels, topic_id)
+
         scores[topic_id] = score
 
     leaderboard = build_leaderboard(scores)
-    return leaderboard, None  # (Leaderboard, Qrels)
+    return leaderboard
 ```
 
 ### Step 4: Register the CLI
@@ -275,25 +286,131 @@ The `threshold-grid` sweep produces 6 configurations (2 x 3 cartesian product).
 
 ## Lifecycle Flags
 
-Control nugget creation and usage behavior:
+Control nugget/qrels creation and usage behavior:
 
 ```yaml
 create_nuggets: true
+create_qrels: false
 judge: true
 
 # Lifecycle flags
 nugget_depends_on_responses: true   # Pass responses to create_nuggets() (default: true)
 judge_uses_nuggets: true            # Pass nuggets to judge() (default: true)
-force_recreate_nuggets: false       # Recreate even if file exists (default: false)
-augment_report: false               # Save Report to file, when reports are modified (RAGE) or additional info is stored in `evaldata` (default: false)
+judge_uses_qrels: true              # Pass qrels to judge() (default: true)
+qrels_uses_nuggets: true            # Pass nuggets to create_qrels() (default: true)
+force_recreate_nuggets: false       # Recreate nuggets even if file exists (default: false)
+force_recreate_qrels: false         # Recreate qrels even if file exists (default: false)
+augment_report: false               # Save Report to file (default: false)
 ```
 
 | Flag | Default | Description |
 |------|---------|-------------|
 | `nugget_depends_on_responses` | `true` | If false, `create_nuggets()` receives `rag_responses=None` |
 | `judge_uses_nuggets` | `true` | If false, `judge()` receives `nugget_banks=None` |
+| `judge_uses_qrels` | `true` | If false, `judge()` receives `qrels=None` |
+| `qrels_uses_nuggets` | `true` | If false, `create_qrels()` receives `nugget_banks=None` |
 | `force_recreate_nuggets` | `false` | If true, recreate nuggets even if output file exists |
+| `force_recreate_qrels` | `false` | If true, recreate qrels even if output file exists |
 | `augment_report` | `false` | If true, save modified `Report.evaldata` to `{filebase}.responses.jsonl` |
+
+## Qrels Lifecycle
+
+The framework supports a separate qrels creation phase via `create_qrels()`. This allows creating relevance judgments independently from the final leaderboard computation.
+
+**Execution order**: (1) nuggets → (2) qrels → (3) leaderboard
+
+### Enabling Qrels Creation
+
+```yaml
+create_nuggets: true
+create_qrels: true
+judge: true
+
+qrels_settings:
+  grade_range: [0, 3]  # Valid relevance grades (min, max)
+```
+
+### Implementing create_qrels()
+
+```python
+from trec_auto_judge import Qrels
+
+def create_qrels(self, rag_responses, rag_topics, llm_config, nugget_banks=None, **kwargs):
+    grade_range = kwargs.get("grade_range", [0, 3])
+
+    qrels_entries = []
+    for response in rag_responses:
+        topic_id = response.metadata.topic_id
+
+        # Generate relevance judgment using nuggets
+        if nugget_banks:
+            relevance = judge_with_nuggets(response, nugget_banks.banks.get(topic_id))
+        else:
+            relevance = judge_without_nuggets(response)
+
+        # Clamp to grade range
+        relevance = max(grade_range[0], min(grade_range[1], relevance))
+        qrels_entries.append((topic_id, response.doc_id, relevance))
+
+    return Qrels.from_entries(qrels_entries)
+```
+
+### Qrels-Specific Settings
+
+Pass settings to `create_qrels()` via `qrels_settings`:
+
+```yaml
+create_qrels: true
+
+qrels_settings:
+  grade_range: [0, 3]
+  use_strict_matching: true
+```
+
+CLI override:
+```bash
+./judge.py run --workflow workflow.yml --qset grade_range=[0,4] ...
+```
+
+### Qrels Input/Output Paths
+
+Specify explicit paths for qrels files:
+
+```yaml
+create_qrels: true
+
+qrels_input: existing_qrels.qrels    # Load existing qrels for refinement
+qrels_output: output_qrels.qrels     # Where to save created qrels
+```
+
+### Common Qrels Configurations
+
+| Configuration | create_qrels | judge_uses_qrels | Description |
+|--------------|--------------|------------------|-------------|
+| No qrels | `false` | `true` | Default - judge produces leaderboard only |
+| Create qrels | `true` | `true` | Create qrels, then pass to judge |
+| Qrels only | `true` | `false` | Create qrels, don't pass to judge |
+
+### Workflow Example: Full Pipeline
+
+```yaml
+create_nuggets: true
+create_qrels: true
+judge: true
+
+# Nuggets flow to qrels, qrels flow to judge
+qrels_uses_nuggets: true
+judge_uses_qrels: true
+judge_uses_nuggets: true
+
+settings:
+  filebase: "{_name}"
+
+qrels_settings:
+  grade_range: [0, 3]
+```
+
+This runs: `create_nuggets()` → `create_qrels(nuggets)` → `judge(nuggets, qrels)`
 
 ### Augmented Responses
 
@@ -385,16 +502,16 @@ Given a `filebase` setting (e.g., `filebase: "rubric"`), the framework generates
 | Output | Filename | Condition |
 |--------|----------|-----------|
 | Nugget banks | `{filebase}.nuggets.jsonl` | `create_nuggets: true` |
+| Qrels | `{filebase}.qrels` | `create_qrels: true` |
 | Leaderboard | `{filebase}.judgment.json` | `judge: true` |
-| Qrels | `{filebase}.judgment.qrels` | `judge: true` |
 | Run config | `{filebase}.config.yml` | `judge: true` |
 | Augmented responses | `{filebase}.responses.jsonl` | `augment_report: true` |
 
-Example with `filebase: "rubric"`:
+Example with `filebase: "rubric"` and all phases enabled:
 ```
 rubric.nuggets.jsonl
+rubric.qrels
 rubric.judgment.json
-rubric.judgment.qrels
 rubric.config.yml
 ```
 

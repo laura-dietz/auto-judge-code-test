@@ -146,91 +146,90 @@ class UmbrelaJudge(AutoJudge):
     ) -> Optional[NuggetBanksProtocol]:
         return None
 
-
-    def judge(
+    def create_qrels(
         self,
         rag_responses: Sequence[Report],
         rag_topics: Sequence[Request],
         llm_config: MinimaLlmConfig,
         nugget_banks: Optional[NuggetBanksProtocol] = None,
         **kwargs
-    ) -> tuple[Leaderboard, Optional[Qrels]]:
-        """
-        Umbrela response assessor using MinimaLLM backend with DSPy.
-        """
+    ) -> Optional[Qrels]:
+        """Run Umbrela grading and produce qrels."""
         topic_dict = {request.request_id: request for request in rag_topics}
 
-        def prepare_prompts() -> List[UmbrelaAnnotation]:
-            alignment_input_list = list()
-            for rag_response in rag_responses:
-                # print("rag response", rag_response)
-
-                metadata = rag_response.metadata
-                run_id = metadata.run_id
-                topic_id = metadata.topic_id
-
-                # print("metadata", metadata)
-
-                text = rag_response.get_report_text()
-
-                topic = topic_dict[topic_id]
-                if topic is None:
-                    raise RuntimeError(f"Could not identify request object for topic {topic_id}")
-
-                query = (f"{topic.title} { topic.problem_statement} {topic.background}").strip()
-
-                if not query:
-                    raise RuntimeError(f"Missing fields in report request: title {topic.title}, background:{topic.background}, problem_statement: {topic.problem_statement}.")
-
-                problem_statement = topic.problem_statement if topic.problem_statement else f"Identify information that is relevant to the query {topic.title}"
-                background = topic.background if topic.background else f"I want to find relevant information on {topic.title}"
-
-                prompt_obj = UmbrelaAnnotation(
-                    query_id=topic_id,
-                    run_id=run_id,
-                    source_document=text,
-                    # metadata= metadata,  # why would one remove this?
-                    # title_query=topic.title,
-                    # background=background,
-                    # problem_statement=problem_statement
-                    query=query
-                )
-                alignment_input_list.append(prompt_obj)
-            return alignment_input_list
-
-        def umbrela_to_leaderboard(prompt_output):
-            b = LeaderboardBuilder(UMBRELA_SPEC)
-            b.add_records(
-                prompt_output,
-                run_id=lambda r: r.run_id,
-                topic_id=lambda r: r.query_id,
-                get_values=lambda r: {
-                    "GRADE": r.match_score,
-                    "IS_MATCH": r.is_match,
-                },
-            )
-
-            leaderboard = b.build()
-            LeaderboardVerification(leaderboard).complete_measures(include_all_row=False).same_topics_per_run()
-            return leaderboard
-
         # Prepare input prompts
-        prompt_input = prepare_prompts()
-        print("Debug in", "\n".join(str(p) for p in prompt_input[0:1]))
+        alignment_input_list = []
+        for rag_response in rag_responses:
+            metadata = rag_response.metadata
+            run_id = metadata.run_id
+            topic_id = metadata.topic_id
+            text = rag_response.get_report_text()
+
+            topic = topic_dict[topic_id]
+            if topic is None:
+                raise RuntimeError(f"Could not identify request object for topic {topic_id}")
+
+            query = (f"{topic.title} {topic.problem_statement} {topic.background}").strip()
+            if not query:
+                raise RuntimeError(f"Missing fields in report request: title {topic.title}, background:{topic.background}, problem_statement: {topic.problem_statement}.")
+
+            prompt_obj = UmbrelaAnnotation(
+                query_id=topic_id,
+                run_id=run_id,
+                source_document=text,
+                query=query
+            )
+            alignment_input_list.append(prompt_obj)
+
+        print("Debug in", "\n".join(str(p) for p in alignment_input_list[0:1]))
 
         # Execute with MinimaLLM backend using helper
         prompt_output = asyncio.run(run_dspy_batch(
             Umbrela,
-            prompt_input,
+            alignment_input_list,
             Umbrela.convert_output,
-
             backend=OpenAIMinimaLlm(llm_config)
         ))
         print("Debug out", "\n".join(str(p) for p in prompt_output[0:1]))
 
-        leaderboard = umbrela_to_leaderboard(prompt_output=prompt_output)
-        qrels = umbrela_to_qrels(prompt_output)
-        return (leaderboard, qrels)
+        return umbrela_to_qrels(prompt_output)
+
+    def judge(
+        self,
+        rag_responses: Sequence[Report],
+        rag_topics: Sequence[Request],
+        llm_config: MinimaLlmConfig,
+        qrels: Optional[Qrels],
+        nugget_banks: Optional[NuggetBanksProtocol] = None,
+        **kwargs
+    ) -> Leaderboard:
+        """
+        Build leaderboard from qrels grades.
+        """
+        if qrels is None:
+            raise ValueError("UmbrelaJudge requires qrels. Run create_qrels first.")
+
+        # Build lookup: (topic_id, doc_id) -> grade
+        grade_lookup = {(row.topic_id, row.doc_id): row.grade for row in qrels.rows}
+
+        b = LeaderboardBuilder(UMBRELA_SPEC)
+        for response in rag_responses:
+            topic_id = response.metadata.topic_id
+            run_id = response.metadata.run_id
+            doc_id = doc_id_md5(response.get_report_text())
+
+            grade = grade_lookup.get((topic_id, doc_id), 0.0)
+            is_match = grade >= 2.0
+
+            b.add(
+                run_id=run_id,
+                topic_id=topic_id,
+                values={"GRADE": grade, "IS_MATCH": is_match},
+            )
+
+        leaderboard = b.build()
+        LeaderboardVerification(leaderboard).complete_measures(include_all_row=False).same_topics_per_run()
+        return leaderboard
 
 
 if __name__ == '__main__':

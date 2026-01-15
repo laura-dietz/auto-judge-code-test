@@ -4,9 +4,10 @@ from pathlib import Path
 from statistics import mean, stdev
 from typing import Dict, Literal, Optional
 
-from trec_auto_judge.leaderboard import Leaderboard
+from trec_auto_judge import Leaderboard
 
-OnMissing = Literal["error", "warn", "skip"]
+OnMissing = Literal["error", "warn", "skip", "default"]
+LeaderboardFormat = Literal["trec_eval", "ir_measures"]
 
 
 class TrecLeaderboardEvaluation():
@@ -16,8 +17,12 @@ class TrecLeaderboardEvaluation():
         truth_measure: Optional[str],
         eval_measure: Optional[str],
         on_missing: OnMissing = "error",
+        truth_format: LeaderboardFormat = "ir_measures",
+        eval_format: LeaderboardFormat = "trec_eval",
     ):
         self.on_missing = on_missing
+        self.truth_format = truth_format
+        self.eval_format = eval_format
 
         # if only one measure is provided, assume both are the same.
         if not eval_measure:
@@ -26,15 +31,15 @@ class TrecLeaderboardEvaluation():
             truth_measure = eval_measure
 
         if truth_leaderboard and truth_measure:
-            parsed_leaderboard = self.load_leaderboard(truth_leaderboard)
+            parsed_leaderboard = self.load_leaderboard(truth_leaderboard, self.truth_format)
             self.ground_truth_ranking = self.extract_ranking(parsed_leaderboard, truth_measure)
         else:
             self.ground_truth_ranking = None
 
-    def load_leaderboard(self, leaderboard_path: Path) -> Leaderboard:
+    def load_leaderboard(self, leaderboard_path: Path, format: LeaderboardFormat) -> Leaderboard:
         if not leaderboard_path or not Path(leaderboard_path).is_file():
             raise ValueError(f"I expected that {leaderboard_path} is a file.")
-        return Leaderboard.load(Path(leaderboard_path))
+        return Leaderboard.load(Path(leaderboard_path), format=format)
 
     def extract_ranking(self, leaderboard: Leaderboard, measure: str) -> Dict[str, float]:
         """Extract run_id -> value mapping for aggregate rows (topic_id == all_topic_id)."""
@@ -50,7 +55,7 @@ class TrecLeaderboardEvaluation():
         return ret
 
     def evaluate(self, leaderboard_file: Path) -> Dict[str, Dict]:
-        leaderboard = self.load_leaderboard(leaderboard_file)
+        leaderboard = self.load_leaderboard(leaderboard_file, self.eval_format)
         ret = {}
 
         for m in leaderboard.measures:
@@ -88,18 +93,25 @@ class TrecLeaderboardEvaluation():
                 msg_parts.append(f"missing in evaluated: {sorted(missing_in_eval)}")
             if missing_in_truth:
                 msg_parts.append(f"missing in ground truth: {sorted(missing_in_truth)}")
-            msg = f"Run ID mismatch: {'; '.join(msg_parts)}"
+            msg = f"Run ID mismatch: {'; '.join(msg_parts)}. \nShared RunIDs: {sorted(truth_systems &
+            eval_systems)}"
+            
 
             if self.on_missing == "error":
                 raise ValueError(msg)
             elif self.on_missing == "warn":
                 print(f"Warning: {msg}", file=sys.stderr)
 
-        # Only include systems present in both
-        common_systems = truth_systems & eval_systems
-        for system in common_systems:
+        # Include all systems from ground truth
+        for system in truth_systems:
             a.append(float(self.ground_truth_ranking[system]))
-            b.append(float(ranking[system]))
+            if system in ranking:
+                b.append(float(ranking[system]))
+            elif self.on_missing == "default":
+                b.append(0.0)
+            else:
+                # skip: only include common systems
+                a.pop()  # remove the truth value we just added
 
         return {
             "kendall": correlation(a, b, "kendall"),

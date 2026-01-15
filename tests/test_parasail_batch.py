@@ -183,7 +183,7 @@ class TestBatchModeContextManager:
     def test_batch_mode_calls_submit_on_exit(self, backend):
         """Exiting batch_mode should call submit_and_wait if pending."""
         async def _test():
-            with patch('trec_auto_judge.llm.parasail_batch.BatchCollector') as MockCollector:
+            with patch('trec_auto_judge.llm.batch.parasail_batch.BatchCollector') as MockCollector:
                 mock_instance = MockCollector.return_value
                 mock_instance.has_pending.return_value = True
                 mock_instance.pending_count = 5
@@ -201,7 +201,7 @@ class TestBatchModeContextManager:
     def test_batch_mode_skips_submit_if_no_pending(self, backend):
         """Exiting batch_mode should NOT call submit if no pending requests."""
         async def _test():
-            with patch('trec_auto_judge.llm.parasail_batch.BatchCollector') as MockCollector:
+            with patch('trec_auto_judge.llm.batch.parasail_batch.BatchCollector') as MockCollector:
                 mock_instance = MockCollector.return_value
                 mock_instance.has_pending.return_value = False
                 mock_instance.submit_and_wait = AsyncMock()

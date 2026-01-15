@@ -130,11 +130,21 @@ class AutoJudgeTestDriver:
 
     def run_judge(self):
         """Run judge and store results."""
-        self.leaderboard, self.qrels = self.auto_judge.judge(
+        # Qrels now come from create_qrels(), not judge()
+        self.qrels = self.auto_judge.create_qrels(
             rag_responses=self.rag_responses,
             rag_topics=self.rag_topics,
             llm_config=self.llm_config,
             nugget_banks=None,  # PrefJudge doesn't use nuggets
+            **self.settings,
+        )
+
+        self.leaderboard = self.auto_judge.judge(
+            rag_responses=self.rag_responses,
+            rag_topics=self.rag_topics,
+            llm_config=self.llm_config,
+            nugget_banks=None,  # PrefJudge doesn't use nuggets,
+            qrels=self.qrels,
             **self.settings,
         )
 

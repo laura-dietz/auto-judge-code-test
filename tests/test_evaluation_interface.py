@@ -9,8 +9,10 @@ from tempfile import TemporaryDirectory
 
 EXAMPLE_LEADERBOARD = str((TREC_25_DATA / "spot-check-dataset" / "trec-leaderboard.txt").absolute())
 
-def evaluate_command(measure, truth=EXAMPLE_LEADERBOARD, inp=EXAMPLE_LEADERBOARD):
-    cmd = ["evaluate", "--truth-leaderboard", truth, "--input", inp, "--truth-metric", measure]
+def evaluate_command(measure, truth=EXAMPLE_LEADERBOARD, inp=EXAMPLE_LEADERBOARD, eval_measure=None):
+    cmd = ["evaluate", "--truth-leaderboard", truth, "--input", inp, "--truth-measure", measure, "--truth-format", "trec_eval", "--eval-format", "trec_eval"]
+    if eval_measure:
+        cmd.extend(["--eval-measure", eval_measure])
     return run_cmd_on_main(cmd)
     
 
@@ -52,7 +54,7 @@ class TestEvaluationInterface(unittest.TestCase):
             "trec-leaderboard Measure-02 2.0",
             "trec-leaderboard Measure-01 2.0"
         ]
-        cmd = ["evaluate", "--input", EXAMPLE_LEADERBOARD]
+        cmd = ["evaluate", "--input", EXAMPLE_LEADERBOARD, "--eval-format", "trec_eval"]
         result, stdout = run_cmd_on_main(cmd)
 
         self.assertIsNone(result.exception)
@@ -66,7 +68,7 @@ class TestEvaluationInterface(unittest.TestCase):
 
             self.assertFalse(target_file.is_file())
 
-            cmd = ["evaluate", "--truth-leaderboard", EXAMPLE_LEADERBOARD, "--input", EXAMPLE_LEADERBOARD, "--truth-metric", "Measure-01", "--output", target_file]
+            cmd = ["evaluate", "--truth-leaderboard", EXAMPLE_LEADERBOARD, "--input", EXAMPLE_LEADERBOARD, "--truth-measure", "Measure-01", "--truth-format", "trec_eval", "--eval-format", "trec_eval", "--output", target_file]
             result, stdout = run_cmd_on_main(cmd)
 
             self.assertIsNotNone(result.exception)
@@ -85,7 +87,7 @@ class TestEvaluationInterface(unittest.TestCase):
 
             self.assertFalse(target_file.is_file())
 
-            cmd = ["evaluate", "--truth-leaderboard", EXAMPLE_LEADERBOARD, "--input", EXAMPLE_LEADERBOARD, "--truth-metric", "Measure-01", "--output", target_file]
+            cmd = ["evaluate", "--truth-leaderboard", EXAMPLE_LEADERBOARD, "--input", EXAMPLE_LEADERBOARD, "--truth-measure", "Measure-01", "--truth-format", "trec_eval", "--eval-format", "trec_eval", "--output", target_file]
             result, stdout = run_cmd_on_main(cmd)
 
             self.assertIsNone(result.exception)
@@ -104,7 +106,7 @@ class TestEvaluationInterface(unittest.TestCase):
 
             self.assertFalse(target_file.is_file())
 
-            cmd = ["evaluate", "--input", EXAMPLE_LEADERBOARD, "--aggregate", "--output", target_file]
+            cmd = ["evaluate", "--input", EXAMPLE_LEADERBOARD, "--eval-format", "trec_eval", "--aggregate", "--output", target_file]
             result, stdout = run_cmd_on_main(cmd)
 
             self.assertIsNone(result.exception)

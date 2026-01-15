@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any, Optional, Union
 
 import yaml
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 # Built-in NuggetBanks type paths (for convenience)
@@ -58,11 +58,25 @@ class Workflow(BaseModel):
             top_k: [10, 20, 50]
     """
 
-    create_nuggets: bool = False
-    """Whether to call create_nuggets() to generate/refine nuggets."""
+    create_nuggets: Optional[bool] = None
+    """Whether to call create_nuggets(). Derived from judge_uses_nuggets | qrels_uses_nuggets if not set."""
+
+    create_qrels: Optional[bool] = None
+    """Whether to call create_qrels(). Derived from judge_uses_qrels if not set."""
 
     judge: bool = True
-    """Whether to call judge() to produce leaderboard/qrels."""
+    """Whether to call judge() to produce leaderboard."""
+
+    @model_validator(mode="after")
+    def derive_creation_flags(self) -> "Workflow":
+        """Derive create_nuggets and create_qrels from usage flags if not explicitly set."""
+        if self.create_nuggets is None:
+            # Need nuggets if judge or qrels creation uses them
+            self.create_nuggets = self.judge_uses_nuggets or self.qrels_uses_nuggets
+        if self.create_qrels is None:
+            # Need qrels if judge uses them
+            self.create_qrels = self.judge_uses_qrels
+        return self
 
     nugget_banks_type: str = DEFAULT_NUGGET_BANKS_TYPE
     """Dotted import path for NuggetBanks container class."""
@@ -103,6 +117,30 @@ class Workflow(BaseModel):
     augment_report: bool = False
     """If True, judge modifies Report.evaldata; save to {filebase}.responses.jsonl."""
 
+    # Qrels lifecycle flags
+    judge_uses_qrels: bool = True
+    """If True, pass qrels to judge(). If False, pass None."""
+
+    qrels_uses_nuggets: bool = True
+    """If True, pass nuggets to create_qrels(). If False, pass None."""
+
+    qrels_settings: dict[str, Any] = Field(default_factory=dict)
+    """Settings passed to create_qrels(), merged over shared settings.
+
+    Example:
+        qrels_settings:
+          grade_range: [0, 3]  # Valid relevance grades (min, max)
+    """
+
+    qrels_input: Optional[str] = None
+    """Path to existing qrels to load (for refinement or judge input)."""
+
+    qrels_output: Optional[str] = None
+    """Path to store created qrels."""
+
+    force_recreate_qrels: Optional[bool] = None
+    """If True, recreate qrels even if file exists. If None, defaults to create_qrels value."""
+
 
 @dataclass
 class ResolvedConfiguration:
@@ -112,13 +150,16 @@ class ResolvedConfiguration:
     """Variant/sweep name, or 'default' when running without variant."""
 
     settings: dict[str, Any]
-    """Shared settings (fallback for both phases)."""
+    """Shared settings (fallback for all phases)."""
 
     nugget_settings: dict[str, Any]
     """Merged settings for create_nuggets()."""
 
     judge_settings: dict[str, Any]
     """Merged settings for judge()."""
+
+    qrels_settings: dict[str, Any]
+    """Merged settings for create_qrels()."""
 
     nugget_input_path: Optional[Path]
     """Resolved path for nugget input (from workflow.nugget_input or None)."""
@@ -128,6 +169,12 @@ class ResolvedConfiguration:
 
     judge_output_path: Optional[Path]
     """Resolved path for judge output (from judge_settings.filebase)."""
+
+    qrels_input_path: Optional[Path]
+    """Resolved path for qrels input (from workflow.qrels_input or None)."""
+
+    qrels_output_path: Optional[Path]
+    """Resolved path for qrels output (workflow.qrels_output overrides filebase)."""
 
 
 # Reserved parameter names that would collide with AutoJudge protocol
@@ -170,6 +217,7 @@ def _validate_workflow(workflow: Workflow) -> None:
     _validate_settings(workflow.settings, "settings")
     _validate_settings(workflow.nugget_settings, "nugget_settings")
     _validate_settings(workflow.judge_settings, "judge_settings")
+    _validate_settings(workflow.qrels_settings, "qrels_settings")
 
     for name, variant in workflow.variants.items():
         _validate_settings(variant, f"variants.{name}")
@@ -177,6 +225,8 @@ def _validate_workflow(workflow: Workflow) -> None:
             _validate_settings(variant["nugget_settings"], f"variants.{name}.nugget_settings")
         if "judge_settings" in variant:
             _validate_settings(variant["judge_settings"], f"variants.{name}.judge_settings")
+        if "qrels_settings" in variant:
+            _validate_settings(variant["qrels_settings"], f"variants.{name}.qrels_settings")
 
     for name, sweep in workflow.sweeps.items():
         _validate_settings(sweep, f"sweeps.{name}")
@@ -184,6 +234,8 @@ def _validate_workflow(workflow: Workflow) -> None:
             _validate_settings(sweep["nugget_settings"], f"sweeps.{name}.nugget_settings")
         if "judge_settings" in sweep:
             _validate_settings(sweep["judge_settings"], f"sweeps.{name}.judge_settings")
+        if "qrels_settings" in sweep:
+            _validate_settings(sweep["qrels_settings"], f"sweeps.{name}.qrels_settings")
 
 
 def _substitute_template(template: str, variables: dict[str, Any]) -> str:
@@ -251,25 +303,41 @@ def _resolve_template_path(
     return Path(resolved) if resolved else None
 
 
+@dataclass
+class _ResolvedPaths:
+    """Internal container for resolved paths."""
+    nugget_input_path: Optional[Path]
+    nugget_output_path: Optional[Path]
+    judge_output_path: Optional[Path]
+    qrels_input_path: Optional[Path]
+    qrels_output_path: Optional[Path]
+
+
 def _resolve_output_paths(
     name: str,
     merged_nugget: dict[str, Any],
     merged_judge: dict[str, Any],
+    merged_qrels: dict[str, Any],
     nugget_input_override: Optional[str] = None,
     nugget_output_override: Optional[str] = None,
-) -> tuple[Optional[Path], Optional[Path], Optional[Path]]:
+    qrels_input_override: Optional[str] = None,
+    qrels_output_override: Optional[str] = None,
+) -> _ResolvedPaths:
     """
-    Resolve nugget input/output and judge output paths.
+    Resolve nugget, qrels, and judge paths.
 
     Args:
         name: Configuration name (used as _name variable)
         merged_nugget: Merged nugget settings
         merged_judge: Merged judge settings
+        merged_qrels: Merged qrels settings
         nugget_input_override: Explicit nugget input path (workflow.nugget_input)
         nugget_output_override: Explicit nugget output path (workflow.nugget_output)
+        qrels_input_override: Explicit qrels input path (workflow.qrels_input)
+        qrels_output_override: Explicit qrels output path (workflow.qrels_output)
 
     Returns:
-        Tuple of (nugget_input_path, nugget_output_path, judge_output_path)
+        _ResolvedPaths with all path fields
     """
     nugget_vars = {"_name": name, **merged_nugget}
 
@@ -282,14 +350,38 @@ def _resolve_output_paths(
     else:
         nugget_output_path = _resolve_filebase(merged_nugget, nugget_vars)
 
+    # Qrels variables include nugget filebase
+    qrels_vars = {
+        "_name": name,
+        "_nugget_filebase": str(nugget_output_path) if nugget_output_path else "",
+        **merged_qrels,
+    }
+
+    # Qrels input: explicit override only
+    qrels_input_path = _resolve_template_path(qrels_input_override, qrels_vars)
+
+    # Qrels output: explicit override, then filebase fallback
+    if qrels_output_override:
+        qrels_output_path = _resolve_template_path(qrels_output_override, qrels_vars)
+    else:
+        qrels_output_path = _resolve_filebase(merged_qrels, qrels_vars)
+
+    # Judge variables include both nugget and qrels filebases
     judge_vars = {
         "_name": name,
         "_nugget_filebase": str(nugget_output_path) if nugget_output_path else "",
+        "_qrels_filebase": str(qrels_output_path) if qrels_output_path else "",
         **merged_judge,
     }
     judge_output_path = _resolve_filebase(merged_judge, judge_vars)
 
-    return nugget_input_path, nugget_output_path, judge_output_path
+    return _ResolvedPaths(
+        nugget_input_path=nugget_input_path,
+        nugget_output_path=nugget_output_path,
+        judge_output_path=judge_output_path,
+        qrels_input_path=qrels_input_path,
+        qrels_output_path=qrels_output_path,
+    )
 
 
 def resolve_default(workflow: Workflow) -> ResolvedConfiguration:
@@ -307,11 +399,14 @@ def resolve_default(workflow: Workflow) -> ResolvedConfiguration:
     # Merge settings
     merged_nugget = _merge_settings(workflow.settings, workflow.nugget_settings)
     merged_judge = _merge_settings(workflow.settings, workflow.judge_settings)
+    merged_qrels = _merge_settings(workflow.settings, workflow.qrels_settings)
 
-    nugget_input_path, nugget_output_path, judge_output_path = _resolve_output_paths(
-        name, merged_nugget, merged_judge,
+    paths = _resolve_output_paths(
+        name, merged_nugget, merged_judge, merged_qrels,
         nugget_input_override=workflow.nugget_input,
         nugget_output_override=workflow.nugget_output,
+        qrels_input_override=workflow.qrels_input,
+        qrels_output_override=workflow.qrels_output,
     )
 
     return ResolvedConfiguration(
@@ -319,9 +414,12 @@ def resolve_default(workflow: Workflow) -> ResolvedConfiguration:
         settings=workflow.settings,
         nugget_settings=merged_nugget,
         judge_settings=merged_judge,
-        nugget_input_path=nugget_input_path,
-        nugget_output_path=nugget_output_path,
-        judge_output_path=judge_output_path,
+        qrels_settings=merged_qrels,
+        nugget_input_path=paths.nugget_input_path,
+        nugget_output_path=paths.nugget_output_path,
+        judge_output_path=paths.judge_output_path,
+        qrels_input_path=paths.qrels_input_path,
+        qrels_output_path=paths.qrels_output_path,
     )
 
 
@@ -347,8 +445,9 @@ def resolve_variant(workflow: Workflow, variant_name: str) -> ResolvedConfigurat
     # Extract variant's phase-specific settings if present
     variant_nugget = variant.get("nugget_settings", {})
     variant_judge = variant.get("judge_settings", {})
+    variant_qrels = variant.get("qrels_settings", {})
     # Remove phase-specific keys from variant for shared settings
-    variant_shared = {k: v for k, v in variant.items() if k not in ("nugget_settings", "judge_settings")}
+    variant_shared = {k: v for k, v in variant.items() if k not in ("nugget_settings", "judge_settings", "qrels_settings")}
 
     # Merge: base settings -> phase settings -> variant shared -> variant phase
     merged_nugget = _merge_settings(
@@ -357,11 +456,16 @@ def resolve_variant(workflow: Workflow, variant_name: str) -> ResolvedConfigurat
     merged_judge = _merge_settings(
         workflow.settings, workflow.judge_settings, variant_shared, variant_judge
     )
+    merged_qrels = _merge_settings(
+        workflow.settings, workflow.qrels_settings, variant_shared, variant_qrels
+    )
 
-    nugget_input_path, nugget_output_path, judge_output_path = _resolve_output_paths(
-        variant_name, merged_nugget, merged_judge,
+    paths = _resolve_output_paths(
+        variant_name, merged_nugget, merged_judge, merged_qrels,
         nugget_input_override=workflow.nugget_input,
         nugget_output_override=workflow.nugget_output,
+        qrels_input_override=workflow.qrels_input,
+        qrels_output_override=workflow.qrels_output,
     )
 
     return ResolvedConfiguration(
@@ -369,9 +473,12 @@ def resolve_variant(workflow: Workflow, variant_name: str) -> ResolvedConfigurat
         settings=_merge_settings(workflow.settings, variant_shared),
         nugget_settings=merged_nugget,
         judge_settings=merged_judge,
-        nugget_input_path=nugget_input_path,
-        nugget_output_path=nugget_output_path,
-        judge_output_path=judge_output_path,
+        qrels_settings=merged_qrels,
+        nugget_input_path=paths.nugget_input_path,
+        nugget_output_path=paths.nugget_output_path,
+        judge_output_path=paths.judge_output_path,
+        qrels_input_path=paths.qrels_input_path,
+        qrels_output_path=paths.qrels_output_path,
     )
 
 
@@ -398,7 +505,7 @@ def resolve_sweep(workflow: Workflow, sweep_name: str) -> list[ResolvedConfigura
     sweep_params = {}
     fixed_params = {}
     for key, value in sweep.items():
-        if isinstance(value, list) and key not in ("nugget_settings", "judge_settings"):
+        if isinstance(value, list) and key not in ("nugget_settings", "judge_settings", "qrels_settings"):
             sweep_params[key] = value
         else:
             fixed_params[key] = value
@@ -406,6 +513,7 @@ def resolve_sweep(workflow: Workflow, sweep_name: str) -> list[ResolvedConfigura
     # Extract phase-specific settings from sweep
     sweep_nugget = fixed_params.pop("nugget_settings", {})
     sweep_judge = fixed_params.pop("judge_settings", {})
+    sweep_qrels = fixed_params.pop("qrels_settings", {})
 
     # Generate cartesian product of sweep params
     if not sweep_params:
@@ -425,11 +533,16 @@ def resolve_sweep(workflow: Workflow, sweep_name: str) -> list[ResolvedConfigura
         merged_judge = _merge_settings(
             workflow.settings, workflow.judge_settings, fixed_params, sweep_judge, combo
         )
+        merged_qrels = _merge_settings(
+            workflow.settings, workflow.qrels_settings, fixed_params, sweep_qrels, combo
+        )
 
-        nugget_input_path, nugget_output_path, judge_output_path = _resolve_output_paths(
-            sweep_name, merged_nugget, merged_judge,
+        paths = _resolve_output_paths(
+            sweep_name, merged_nugget, merged_judge, merged_qrels,
             nugget_input_override=workflow.nugget_input,
             nugget_output_override=workflow.nugget_output,
+            qrels_input_override=workflow.qrels_input,
+            qrels_output_override=workflow.qrels_output,
         )
 
         results.append(ResolvedConfiguration(
@@ -437,9 +550,12 @@ def resolve_sweep(workflow: Workflow, sweep_name: str) -> list[ResolvedConfigura
             settings=_merge_settings(workflow.settings, fixed_params, combo),
             nugget_settings=merged_nugget,
             judge_settings=merged_judge,
-            nugget_input_path=nugget_input_path,
-            nugget_output_path=nugget_output_path,
-            judge_output_path=judge_output_path,
+            qrels_settings=merged_qrels,
+            nugget_input_path=paths.nugget_input_path,
+            nugget_output_path=paths.nugget_output_path,
+            judge_output_path=paths.judge_output_path,
+            qrels_input_path=paths.qrels_input_path,
+            qrels_output_path=paths.qrels_output_path,
         ))
 
     return results

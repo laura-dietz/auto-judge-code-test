@@ -18,9 +18,11 @@ from .workflow import (
 
 from .paths import (
     resolve_nugget_file_path,
-    resolve_judgment_file_paths,
+    resolve_leaderboard_file_path,
+    resolve_qrels_file_path,
     resolve_config_file_path,
     load_nugget_banks_from_path,
+    load_qrels_from_path,
 )
 
 from .settings import (
