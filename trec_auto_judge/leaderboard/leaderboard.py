@@ -14,7 +14,7 @@ MeasureName = str
 AggFn = Callable[[Sequence[Any]], Any]
 CastFn = Callable[[Any], Any]
 OnMissing = Literal["default", "warn", "error", "fix_aggregate"]
-LeaderboardFormat = Literal["trec_eval", "ir_measures"]
+LeaderboardFormat = Literal["trec_eval", "tot", "ir_measures"]
 
 
 #  ==== DataClasses for data storage and serialization ===  
@@ -49,7 +49,7 @@ class Leaderboard:
     def write(
         self,
         output: Path,
-        format: LeaderboardFormat = "trec_eval",
+        format: LeaderboardFormat = "tot",
     ) -> None:
         """
         Write the leaderboard as tab-separated lines.
@@ -57,7 +57,8 @@ class Leaderboard:
         Args:
             output: Path to write to
             format: Column order
-                - "trec_eval": run measure topic value
+                - "trec_eval": measure topic value
+                - "tot": run measure topic value
                 - "ir_measures": run topic measure value
 
         Only measures present in each entry are written (allows sparse rows).
@@ -66,8 +67,10 @@ class Leaderboard:
         for e in self.entries:
             for m in self.all_measure_names():
                 if m in e.values:
-                    if format == "trec_eval":
+                    if format == "tot":
                         lines.append("\t".join([e.run_id, m, e.topic_id, str(e.values[m])]))
+                    if format == "trec_eval":
+                        lines.append("\t".join([m, e.topic_id, str(e.values[m])]))
                     elif format == "ir_measures":
                         lines.append("\t".join([e.run_id, e.topic_id, m, str(e.values[m])]))
                     else:
@@ -89,8 +92,10 @@ class Leaderboard:
         Args:
             path: Path to leaderboard file
             format: Column order (whitespace-separated)
-                - "trec_eval": run measure topic value
+                - "trec_eval": measure topic value
+                - "tot": run measure topic value
                 - "ir_measures": run topic measure value
+
         """
         text = path.read_text(encoding="utf-8")
 
@@ -107,6 +112,9 @@ class Leaderboard:
                 raise ValueError(f"Expected 4 whitespace-separated fields, got {len(parts)}: {line!r}")
 
             if format == "trec_eval":
+                measure, topic_id, value = parts
+                run_id = path.name
+            elif format == "tot":
                 run_id, measure, topic_id, value = parts
             elif format == "ir_measures":
                 run_id, topic_id, measure, value = parts

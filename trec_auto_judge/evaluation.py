@@ -7,7 +7,7 @@ from typing import Dict, Literal, Optional
 from trec_auto_judge import Leaderboard
 
 OnMissing = Literal["error", "warn", "skip", "default"]
-LeaderboardFormat = Literal["trec_eval", "ir_measures"]
+LeaderboardFormat = Literal["trec_eval","tot", "ir_measures"]
 
 
 class TrecLeaderboardEvaluation():
@@ -18,7 +18,7 @@ class TrecLeaderboardEvaluation():
         eval_measure: Optional[str],
         on_missing: OnMissing = "error",
         truth_format: LeaderboardFormat = "ir_measures",
-        eval_format: LeaderboardFormat = "trec_eval",
+        eval_format: LeaderboardFormat = "tot",
     ):
         self.on_missing = on_missing
         self.truth_format = truth_format
