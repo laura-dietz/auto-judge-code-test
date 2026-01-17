@@ -161,6 +161,11 @@ def main():
         "--port",
         type=int,
         required=True
+    )   
+    parser.add_argument(
+        "--max-retries",
+        type=int,
+        default=5
     )
     parser.add_argument(
         "--rate-limit",
@@ -174,6 +179,17 @@ def main():
     if not args.input.is_dir():
         parser.error(f"Input path is not a directory: {args.input}")
 
+    
+    # doc_ids = ["msmarco_v2.1_doc_14_451442966#8_952051598", "msmarco_v2.1_doc_14_451442966"]
+    doc_ids =["msmarco_v2.1_doc_07_1499440455#17_2768952297","msmarco_v2.1_doc_37_169878285#8_339258694"]
+    # ds = fetch_document_service(doc_ids=doc_ids,
+    #                        collection_handle= args.collection,
+    #                         host=args.host,
+    #                         port=args.port,
+    #                         rate_limit=args.rate_limit,
+    #                         max_retries=args.max_retries)
+    # print(ds)
+
     process_directory(
         input_dir=args.input,
         output_dir=args.output,
@@ -181,6 +197,8 @@ def main():
         host=args.host,
         port=args.port,
         rate_limit=args.rate_limit,
+        max_retries=args.max_retries,
+        parallel = False
     )
 
 

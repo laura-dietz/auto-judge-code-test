@@ -181,10 +181,9 @@ def _to_jsonable(obj):
     else:
         return obj
 
-async def fetch_service_async( payload:Dict[str,str]=dict(),
-                            collection: str = "ragtime-mt",
-                            host: str = "10.162.95.158",
-                            port: int = 5000,
+async def fetch_service_async( payload:Dict[str,str],
+                            host: str,   #"10.162.95.158"
+                            port: int,   # 5000,
                             command:str = "content",
                             info_str:str = "",
                             max_retries: int = 10,
@@ -225,14 +224,14 @@ async def fetch_service_async( payload:Dict[str,str]=dict(),
                 await asyncio.sleep(0.5 * attempt)  # exponential backoff
 
             LOGGER.error(f"[{info_str}] Exhausted retries.")
-            raise RuntimeError(f"Content Server Exception: Exhausted retries for obtaining {info_str} from {host}/{port}/{command} with payload  {payload}")
+            return None
 
 
 async def fetch_document_content_async(
     doc_id: str,
-    collection: str = "ragtime-mt",
-    host: str = "http://10.162.95.158", # ENDPOINT = "https://scale25.hltcoe.org"
-    port: int = 5000,
+    collection: str, # = "ragtime-mt",
+    host: str, # = "http://10.162.95.158", # ENDPOINT = "https://scale25.hltcoe.org"
+    port: int, #= 5000,
     max_retries: int = 10,
     timeout: float = 5.0,
     rate_limit: float = 3.0,
@@ -256,18 +255,22 @@ from typing import Iterable, Union, Dict
 def fetch_document_service(
     doc_ids: Union[Iterable[str], str],
     collection_handle: str,
+    parallel: bool = True,
     **kwargs
 ) -> Dict[str, Document]:
     """
     Fetch content for a batch of document IDs.
     Returns a dictionary: {doc_id: Document}
+
+    Args:
+        parallel: If True, fetch all documents concurrently. If False, fetch sequentially.
     """
     if isinstance(doc_ids, str):
         doc_ids = [doc_ids]
 
-    async def fetch_all():
+    async def fetch_all_parallel():
         tasks = [
-            fetch_document_content_async(doc_id, collection=collection_handle,**kwargs)
+            fetch_document_content_async(doc_id, collection=collection_handle, **kwargs)
             for doc_id in doc_ids
         ]
         texts = await asyncio.gather(*tasks)
@@ -275,7 +278,15 @@ def fetch_document_service(
             doc_id: Document(id=doc_id, text=text) for doc_id, text in zip(doc_ids, texts) if text is not None
         }
 
-    return asyncio.run(fetch_all())
+    async def fetch_all_sequential():
+        results = {}
+        for doc_id in doc_ids:
+            text = await fetch_document_content_async(doc_id, collection=collection_handle, **kwargs)
+            if text is not None:
+                results[doc_id] = Document(id=doc_id, text=text)
+        return results
+
+    return asyncio.run(fetch_all_parallel() if parallel else fetch_all_sequential())
 
 
 
