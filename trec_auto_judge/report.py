@@ -138,7 +138,7 @@ class Report(BaseModel):
         return self.get_report_text()
     
     def get_paragraphs(self) ->List[str]:
-        from nuggety.text_chunker import  get_paragraph_chunks
+        from nuggety.text_chunker import  get_paragraph_chunks  # Todo this next
         return get_paragraph_chunks(self.get_text())
     
     def get_sentences(self) ->List[str]:
@@ -227,6 +227,48 @@ class Report(BaseModel):
         
         return True
      
+def extract_doc_ids_from_report(report: Report, cited_only: bool = False) -> Set[str]:
+    """Extract all unique document IDs from a Report's citations.
+
+    Args:
+        report: The report to extract doc IDs from.
+        cited_only: If True, only include documents actually cited in sentences.
+            If False, also include documents in report.references that aren't cited.
+
+    Returns:
+        Set of document IDs as strings.
+    """
+    doc_ids: Set[str] = set()
+
+    for sentence in report.responses or []:
+        if sentence.citations is None:
+            continue
+
+        if isinstance(sentence, RagtimeReportSentence):
+            # Dict[str, float] - keys are doc IDs
+            doc_ids.update(sentence.citations.keys())
+
+        elif isinstance(sentence, NeuclirReportSentence):
+            # List[str] - direct doc IDs (may be parsed as int from some corpora, hence str())
+            doc_ids.update(str(c) for c in sentence.citations)
+
+        elif isinstance(sentence, Rag24ReportSentence):
+            # List[int] - indices into report.references
+            if report.references:
+                for idx in sentence.citations:
+                    if 0 <= idx < len(report.references):
+                        doc_ids.add(report.references[idx])
+
+    # Add any references not already in doc_ids
+    if not cited_only and report.references:
+        for ref in report.references:
+            ref_str = str(ref)
+            if ref_str not in doc_ids:
+                doc_ids.add(ref_str)
+
+    return doc_ids
+
+
 def load_report(reports_path:Path)->List[Report]:
     reports = list()
     with open(file=reports_path) as f:
