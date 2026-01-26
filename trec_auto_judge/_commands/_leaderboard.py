@@ -16,18 +16,18 @@ from typing import List, Optional
 
 
 @click.option(
-    "--format",
+    "--eval-format",
     type=click.Choice(LEADERBOARD_FORMATS),
     required=True,
     help="Format of the input leaderboard file(s):\n" + LEADERBOARD_FORMAT_HELP,
 )
 @click.option(
-    "--header/--no-header",
+    "--eval-header/--no-eval-header",
     default=False,
     help="Input file(s) have header row to skip.",
 )
 @click.option(
-    "--measure",
+    "--eval-measure",
     type=str,
     multiple=True,
     help="Measure(s) to include. Repeatable. If omitted, uses all.",
@@ -46,9 +46,9 @@ from typing import List, Optional
 )
 @click.argument("input_files", nargs=-1, type=str)
 def leaderboard(
-    format: str,
-    header: bool,
-    measure: tuple,
+    eval_format: str,
+    eval_header: bool,
+    eval_measure: tuple,
     input: tuple,
     output: Optional[Path],
     input_files: tuple,
@@ -68,19 +68,19 @@ def leaderboard(
         raise click.ClickException("No input files specified. Use --input or positional arguments.")
 
     # Detect header interactively if not explicitly specified
-    has_header = header
-    if all_inputs and not header:
+    has_header = eval_header
+    if all_inputs and not eval_header:
         has_header = detect_header_interactive(
-            all_inputs[0], format, header, "input"
+            all_inputs[0], eval_format, eval_header, "eval"
         )
 
     # Filter measures if specified
-    measure_filter = set(measure) if measure else None
+    measure_filter = set(eval_measure) if eval_measure else None
 
     df_rows = []
 
     for input_path in all_inputs:
-        lb = Leaderboard.load(input_path, format=format, has_header=has_header)
+        lb = Leaderboard.load(input_path, format=eval_format, has_header=has_header)
 
         # Get measures to process
         measures = list(lb.measures)
