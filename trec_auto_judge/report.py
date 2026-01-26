@@ -269,6 +269,118 @@ def extract_doc_ids_from_report(report: Report, cited_only: bool = False) -> Set
     return doc_ids
 
 
+def remove_unavailable_citations(report: Report, unavailable_doc_ids: Set[str]) -> int:
+    """Remove citations for unavailable doc_ids from report in place.
+
+    Handles all sentence types:
+    - Rag24ReportSentence: Removes indices pointing to unavailable references,
+      then remaps remaining indices after references are pruned.
+    - NeuclirReportSentence: Removes doc_ids from citations list.
+    - RagtimeReportSentence: Removes doc_ids from citations dict.
+
+    Also removes unavailable doc_ids from report.references.
+
+    Args:
+        report: The report to modify in place.
+        unavailable_doc_ids: Set of doc_ids to remove.
+
+    Returns:
+        Count of citations removed.
+    """
+    if not unavailable_doc_ids:
+        return 0
+
+    removed_count = 0
+
+    # For Rag24: build index remapping before modifying references
+    # old_index -> new_index for references that will be kept
+    old_to_new_index: Dict[int, int] = {}
+    if report.references:
+        new_idx = 0
+        for old_idx, ref in enumerate(report.references):
+            if ref not in unavailable_doc_ids:
+                old_to_new_index[old_idx] = new_idx
+                new_idx += 1
+
+    # Clean sentences
+    for sentence in report.responses or []:
+        if sentence.citations is None:
+            continue
+
+        if isinstance(sentence, RagtimeReportSentence):
+            # Dict[str, float] - filter by key
+            original_len = len(sentence.citations)
+            sentence.citations = {
+                doc_id: conf
+                for doc_id, conf in sentence.citations.items()
+                if doc_id not in unavailable_doc_ids
+            }
+            removed_count += original_len - len(sentence.citations)
+
+        elif isinstance(sentence, NeuclirReportSentence):
+            # List[str] - filter by value
+            original_len = len(sentence.citations)
+            sentence.citations = [
+                doc_id for doc_id in sentence.citations
+                if str(doc_id) not in unavailable_doc_ids
+            ]
+            removed_count += original_len - len(sentence.citations)
+
+        elif isinstance(sentence, Rag24ReportSentence):
+            # List[int] - remap indices to new positions
+            # Indices not in old_to_new_index are filtered out (not set to None)
+            original_len = len(sentence.citations)
+            sentence.citations = [
+                old_to_new_index[idx]
+                for idx in sentence.citations
+                if idx in old_to_new_index
+            ]
+            removed_count += original_len - len(sentence.citations)
+
+    # Clean references
+    if report.references:
+        report.references = [
+            ref for ref in report.references
+            if ref not in unavailable_doc_ids
+        ]
+        if not report.references:
+            report.references = None
+
+    # Also clean report.answer if it differs from responses
+    if report.answer is not None and report.answer is not report.responses:
+        for sentence in report.answer:
+            if sentence.citations is None:
+                continue
+
+            if isinstance(sentence, RagtimeReportSentence):
+                original_len = len(sentence.citations)
+                sentence.citations = {
+                    doc_id: conf
+                    for doc_id, conf in sentence.citations.items()
+                    if doc_id not in unavailable_doc_ids
+                }
+                removed_count += original_len - len(sentence.citations)
+
+            elif isinstance(sentence, NeuclirReportSentence):
+                original_len = len(sentence.citations)
+                sentence.citations = [
+                    doc_id for doc_id in sentence.citations
+                    if str(doc_id) not in unavailable_doc_ids
+                ]
+                removed_count += original_len - len(sentence.citations)
+
+            elif isinstance(sentence, Rag24ReportSentence):
+                original_len = len(sentence.citations)
+                sentence.citations = [
+                    old_to_new_index[idx]
+                    for idx in sentence.citations
+                    if idx in old_to_new_index
+                ]
+                removed_count += original_len - len(sentence.citations)
+
+    return removed_count
+
+
 def load_report(reports_path:Path)->List[Report]:
     reports = list()
     with open(file=reports_path) as f:

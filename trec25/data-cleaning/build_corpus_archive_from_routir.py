@@ -67,12 +67,18 @@ def get_file_finder(corpus: str, corpus_path: str):
         return OffsetFile(corpus_path)
 
 
-def fetch_document(file_finder, doc_id: str) -> Dict[str, Any]:
-    """Fetch a document and return parsed JSON."""
+def fetch_document(file_finder, doc_id: str) -> Dict[str, Any] | None:
+    """Fetch a document and return parsed JSON. Returns None if not found or empty."""
     raw = file_finder[doc_id]
+    if not raw:
+        return None
     # MSMARCOSegOffset returns JSON string, OffsetFile may return parsed dict
     if isinstance(raw, str):
-        return json.loads(raw)
+        try:
+            return json.loads(raw)
+        except json.JSONDecodeError as e:
+            print(f"DEBUG: doc_id={doc_id}, type(raw)={type(raw)}, len={len(raw)}, raw={repr(raw)[:200]}", file=sys.stderr)
+            raise e
     return raw
 
 
@@ -205,4 +211,12 @@ def main():
 
 
 if __name__ == "__main__":
+    # # Quick debug: uncomment to test single docid lookup
+    # from routir.utils.file_io import MSMARCOSegOffset
+    # ff = MSMARCOSegOffset("/home/dietz/trec-auto-judge/datacleaning2/routir_corpora/msmarco_v2.1_doc_segmented")
+    # # raw = ff["msmarco_v2.1_doc_36_614618375#3_1234312863"]  # known good
+    # raw = ff["msmarco_v2.1_doc_22_1648697797#2_2364448606"]
+    # print(f"type={type(raw)}, raw={repr(raw)[:500]}")
+    # exit()
+
     main()

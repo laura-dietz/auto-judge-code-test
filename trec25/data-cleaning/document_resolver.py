@@ -29,6 +29,7 @@ from trec_auto_judge.report import (
     Report,
     extract_doc_ids_from_report,
     load_report,
+    remove_unavailable_citations,
     write_pydantic_json_list,
 )
 from trec_auto_judge.utils import format_preview
@@ -345,6 +346,9 @@ def process_directory_check(
     print(f"\nSummary: {total_reports} reports checked")
     if not all_missing:
         print("All documents present.")
+        if docno_out:
+            # Clear the file to indicate no missing docs
+            write_docnos([], docno_out)
         return True
     else:
         print(
@@ -380,6 +384,111 @@ def process_directory_export(input_dir: Path, docno_out: Path, cited_only: bool 
 
     write_docnos(sorted(list(collected_docnos)), docno_out)
     print(f"  Exported {len(collected_docnos)} docnos to {docno_out}")
+
+
+# Note: load_docids_from_file mirrors the pattern in build_corpus_archive_from_routir.py
+# which is kept standalone (no trec_auto_judge dependencies).
+# TODO: Consider proper docid file format utilities in trec_auto_judge.
+def load_docids_from_file(path: Path) -> Set[str]:
+    """Load doc_ids from a file (one per line)."""
+    with open(path) as f:
+        return {line.strip() for line in f if line.strip()}
+
+
+def load_corpus_docids(corpus_paths: list[Path]) -> Set[str]:
+    """Load all docnos from corpus archive files (keys only, not full docs)."""
+    docids: Set[str] = set()
+    for path in corpus_paths:
+        open_fn = gzip.open if str(path).endswith(".gz") else open
+        with open_fn(path, mode="rt", encoding="utf-8") as f:
+            for line in f:
+                doc = json.loads(line)
+                if "docno" in doc:
+                    docids.add(doc["docno"])
+    return docids
+
+
+def process_directory_clean(
+    input_dir: Path,
+    output_dir: Path,
+    remove_docids: Set[str] | None = None,
+    corpus_paths: list[Path] | None = None,
+    skip_existing_files: bool = False,
+) -> int:
+    """Clean citations from reports by removing unavailable doc_ids.
+
+    Identifies unavailable doc_ids using one of (in priority order):
+    1. remove_docids: Explicit set of doc_ids to remove
+    2. corpus_paths: Remove citations not in corpus
+    3. Default: Remove citations not in report.documents
+
+    Args:
+        input_dir: Input directory with .jsonl report files.
+        output_dir: Output directory for cleaned reports.
+        remove_docids: Explicit set of doc_ids to remove from citations.
+        corpus_paths: Corpus archive files - citations not in corpus are removed.
+        skip_existing_files: Skip files that already exist in output directory.
+
+    Returns:
+        Total count of citations removed.
+    """
+    input_files = [f for f in input_dir.iterdir() if f.is_file()]
+
+    if not input_files:
+        print(f"No files found in {input_dir}")
+        return 0
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    print(f"Found {len(input_files)} jsonl files to process")
+
+    # Load corpus docids if provided
+    corpus_docids: Set[str] | None = None
+    if corpus_paths:
+        print(f"Loading corpus from {len(corpus_paths)} files...")
+        corpus_docids = load_corpus_docids(corpus_paths)
+        print(f"  Loaded {len(corpus_docids)} docnos from corpus")
+
+    total_removed = 0
+
+    for input_file in input_files:
+        output_file = output_dir / input_file.name
+        if skip_existing_files and output_file.exists():
+            print(f"\nSkipping {input_file.name} (already exists in output)")
+            continue
+
+        print(f"\nProcessing {input_file.name}...")
+        reports = load_report(input_file)
+        print(f"  Loaded {len(reports)} reports")
+
+        file_removed = 0
+        for report in reports:
+            cited_doc_ids = extract_doc_ids_from_report(report, cited_only=True)
+
+            # Determine unavailable doc_ids
+            if remove_docids is not None:
+                # Explicit list: remove these doc_ids
+                unavailable = cited_doc_ids & remove_docids
+            elif corpus_docids is not None:
+                # Corpus mode: remove citations not in corpus
+                unavailable = cited_doc_ids - corpus_docids
+            else:
+                # Default: remove citations not in report.documents
+                present = set(report.documents.keys()) if report.documents else set()
+                unavailable = cited_doc_ids - present
+
+            if unavailable:
+                removed = remove_unavailable_citations(report, unavailable)
+                file_removed += removed
+
+        total_removed += file_removed
+        if file_removed > 0:
+            print(f"  Removed {file_removed} citations")
+
+        write_pydantic_json_list(reports, output_file)
+        print(f"  Wrote {len(reports)} reports to {output_file}")
+
+    print(f"\nSummary: Removed {total_removed} citations total")
+    return total_removed
 
 
 # =============================================================================
@@ -432,6 +541,33 @@ def docno_out_option(required: bool = False) -> Callable[[Callable], Callable]:
     return decorator
 
 
+def remove_docno_option(required: bool = False) -> Callable[[Callable], Callable]:
+    """--remove-docno for commands that remove specific doc_ids."""
+    def decorator(f: Callable) -> Callable:
+        f = click.option(
+            "--remove-docno",
+            type=click.Path(exists=True, dir_okay=False, path_type=Path),
+            required=required,
+            help="File with doc_ids to remove (one per line).",
+        )(f)
+        return f
+    return decorator
+
+
+def corpus_option(required: bool = False) -> Callable[[Callable], Callable]:
+    """--corpus for commands that use corpus archive files."""
+    def decorator(f: Callable) -> Callable:
+        f = click.option(
+            "--corpus", "-c",
+            type=click.Path(exists=True, path_type=Path),
+            multiple=True,
+            required=required,
+            help="Corpus archive file(s) (jsonl or jsonl.gz).",
+        )(f)
+        return f
+    return decorator
+
+
 # =============================================================================
 # CLI - Commands
 # =============================================================================
@@ -474,16 +610,18 @@ def pull(input: Path, output: Path, skip_existing_files: bool, cited_only: bool,
 @output_dir_option
 @docno_out_option(required=False)
 @click.option("--fail-fast", is_flag=True, default=False, help="Stop on first resolution failure.")
-@click.option("--corpus", "-c", type=click.Path(exists=True, path_type=Path), multiple=True, required=True, help="Corpus archive file(s) (jsonl or jsonl.gz).")
+@corpus_option(required=True)
 def ingest(input: Path, output: Path, skip_existing_files: bool, cited_only: bool, docno_out: Path | None, fail_fast: bool, corpus: tuple[Path, ...]):
-    """Enrich reports with document content from corpus archive."""
+    """Enrich reports with document content from corpus archive.
+
+    Missing documents are reported but do not cause an error exit.
+    Use --docno-out to capture failed doc_ids, then run 'clean' to remove them.
+    """
     resolver = ArchiveDocumentResolver(list(corpus))
     try:
-        ok = process_directory(input, output, resolver, cited_only=cited_only, fail_fast=fail_fast, docno_out=docno_out, skip_existing_files=skip_existing_files)
+        process_directory(input, output, resolver, cited_only=cited_only, fail_fast=fail_fast, docno_out=docno_out, skip_existing_files=skip_existing_files)
     finally:
         resolver.close()
-    if not ok:
-        raise SystemExit(1)
 
 
 @cli.command("export-docno")
@@ -505,6 +643,41 @@ def check(input: Path, cited_only: bool, docno_out: Path | None):
         docno_out=docno_out,
     )
     raise SystemExit(0 if ok else 1)
+
+
+@cli.command()
+@common_options
+@output_dir_option
+@remove_docno_option(required=False)
+@corpus_option(required=False)
+def clean(input: Path, cited_only: bool, output: Path, skip_existing_files: bool, remove_docno: Path | None, corpus: tuple[Path, ...]):
+    """Remove citations for unavailable documents.
+
+    Determines unavailable doc_ids using one of (in priority order):
+
+    1. --remove-docno: Explicit file listing doc_ids to remove
+
+    2. --corpus: Remove citations not found in corpus archive
+
+    3. Default: Remove citations not in report.documents
+
+    Note: --cited-only is accepted but ignored (clean always operates on cited docs).
+    """
+    if remove_docno and corpus:
+        raise click.UsageError("--remove-docno and --corpus are mutually exclusive")
+
+    docids_to_remove: Set[str] | None = None
+    if remove_docno:
+        docids_to_remove = load_docids_from_file(remove_docno)
+        print(f"Loaded {len(docids_to_remove)} doc_ids to remove from {remove_docno}")
+
+    process_directory_clean(
+        input_dir=input,
+        output_dir=output,
+        remove_docids=docids_to_remove,
+        corpus_paths=list(corpus) if corpus else None,
+        skip_existing_files=skip_existing_files,
+    )
 
 
 # =============================================================================
