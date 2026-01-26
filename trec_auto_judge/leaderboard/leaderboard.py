@@ -69,7 +69,7 @@ class Leaderboard:
                 if m in e.values:
                     if format == "tot":
                         lines.append("\t".join([e.run_id, m, e.topic_id, str(e.values[m])]))
-                    if format == "trec_eval":
+                    elif format == "trec_eval":
                         lines.append("\t".join([m, e.topic_id, str(e.values[m])]))
                     elif format == "ir_measures":
                         lines.append("\t".join([e.run_id, e.topic_id, m, str(e.values[m])]))
