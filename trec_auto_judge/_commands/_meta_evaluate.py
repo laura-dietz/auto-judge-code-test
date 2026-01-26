@@ -8,7 +8,7 @@ from ..click_plus import (
     LEADERBOARD_FORMATS,
     LEADERBOARD_FORMAT_HELP,
 )
-from typing import List, Optional
+from typing import List
 from tira.io_utils import to_prototext
 
 
@@ -25,20 +25,20 @@ def persist_output(df: pd.DataFrame, output: Path) -> None:
 @click.option(
     "--truth-leaderboard",
     type=Path,
-    required=False,
-    help="The ground truth leaderboard file.",
+    required=True,
+    help="The ground truth leaderboard file or directory.",
 )
 @click.option(
     "--truth-measure",
     type=str,
-    required=False,
-    help="The measure from the ground truth leaderboard to evaluate against.",
+    multiple=True,
+    help="Measure(s) from truth leaderboard to use. Repeatable. If omitted, uses all.",
 )
 @click.option(
     "--eval-measure",
     type=str,
-    required=False,
-    help="The measure from the auto-judge leaderboard to evaluate.",
+    multiple=True,
+    help="Measure(s) from eval leaderboard to use. Repeatable. If omitted, uses all.",
 )
 @click.option(
     "--truth-format",
@@ -93,10 +93,10 @@ def persist_output(df: pd.DataFrame, output: Path) -> None:
     help="Should only aggregates scores be reported.",
 )
 @click.argument("input_files", nargs=-1, type=str)
-def evaluate(
-    truth_leaderboard: Optional[Path],
-    truth_measure: Optional[str],
-    eval_measure: Optional[str],
+def meta_evaluate(
+    truth_leaderboard: Path,
+    truth_measure: tuple,
+    eval_measure: tuple,
     truth_format: str,
     truth_header: bool,
     eval_format: str,
@@ -107,7 +107,7 @@ def evaluate(
     aggregate: bool,
     input_files: tuple,
 ) -> int:
-    """Evaluate the input leaderboards against the ground-truth leaderboards."""
+    """Compute correlation between predicted leaderboards and ground-truth leaderboard."""
     # Combine --input options and positional arguments, expand globs
     all_inputs: List[Path] = []
     for pattern in list(input) + list(input_files):
@@ -133,10 +133,14 @@ def evaluate(
             all_inputs[0], eval_format, eval_header, "eval"
         )
 
+    # Convert tuples to lists (empty tuple means "all measures")
+    truth_measures = list(truth_measure) if truth_measure else None
+    eval_measures = list(eval_measure) if eval_measure else None
+
     te = TrecLeaderboardEvaluation(
         truth_leaderboard,
-        truth_measure=truth_measure,
-        eval_measure=eval_measure,
+        truth_measures=truth_measures,
+        eval_measures=eval_measures,
         truth_format=truth_format,
         truth_has_header=truth_has_header,
         eval_format=eval_format,
@@ -149,9 +153,13 @@ def evaluate(
     for c in all_inputs:
         result = te.evaluate(c)
 
-        for i in result:
-            tmp = {"Judge": c.name.replace(".txt", ""), "Metric": i}
-            for k, v in result[i].items():
+        for (truth_m, eval_m), metrics in result.items():
+            tmp = {
+                "Judge": c.name.replace(".txt", ""),
+                "TruthMeasure": truth_m,
+                "EvalMeasure": eval_m,
+            }
+            for k, v in metrics.items():
                 tmp[k] = v
             df.append(tmp)
 
@@ -160,7 +168,7 @@ def evaluate(
     if aggregate:
         df_aggr = {"Judges": len(df)}
         for k in df.columns:
-            if k in ("Judge", "Metric"):
+            if k in ("Judge", "TruthMeasure", "EvalMeasure"):
                 continue
             df_aggr[k] = df[k].mean()
         df = pd.DataFrame([df_aggr])

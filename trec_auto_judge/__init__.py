@@ -91,7 +91,8 @@ class AutoJudge(Protocol):
 
 # === The click interface to the trec-auto-judge command line ====
 
-from ._commands._evaluate import evaluate
+from ._commands._meta_evaluate import meta_evaluate
+from ._commands._leaderboard import leaderboard
 from ._commands._export_corpus import export_corpus
 from ._commands._list_models import list_models
 from click import group
@@ -102,7 +103,8 @@ def main():
     pass
 
 
-main.command()(evaluate)
+main.command("meta-evaluate")(meta_evaluate)
+main.command("leaderboard")(leaderboard)
 main.command()(export_corpus)
 main.add_command(list_models)
 

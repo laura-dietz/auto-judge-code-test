@@ -1,8 +1,7 @@
 import pandas as pd
 import sys
 from pathlib import Path
-from statistics import mean, stdev
-from typing import Dict, Literal, Optional
+from typing import Dict, List, Literal, Tuple
 
 from trec_auto_judge import Leaderboard
 
@@ -11,11 +10,13 @@ LeaderboardFormat = Literal["trec_eval", "tot", "ir_measures", "ranking"]
 
 
 class TrecLeaderboardEvaluation():
+    """Compute correlation between predicted leaderboards and ground truth."""
+
     def __init__(
         self,
-        truth_leaderboard: Optional[Path],
-        truth_measure: Optional[str],
-        eval_measure: Optional[str],
+        truth_leaderboard: Path,
+        truth_measures: List[str] | None = None,
+        eval_measures: List[str] | None = None,
         on_missing: OnMissing = "error",
         truth_format: LeaderboardFormat = "ir_measures",
         truth_has_header: bool = False,
@@ -27,18 +28,13 @@ class TrecLeaderboardEvaluation():
         self.truth_has_header = truth_has_header
         self.eval_format = eval_format
         self.eval_has_header = eval_has_header
+        self.truth_measures_filter = truth_measures  # None means all
+        self.eval_measures_filter = eval_measures    # None means all
 
-        # if only one measure is provided, assume both are the same.
-        if not eval_measure:
-            eval_measure = truth_measure
-        if not truth_measure:
-            truth_measure = eval_measure
-
-        if truth_leaderboard and truth_measure:
-            parsed_leaderboard = self.load_leaderboard(truth_leaderboard, self.truth_format, self.truth_has_header)
-            self.ground_truth_ranking = self.extract_ranking(parsed_leaderboard, truth_measure)
-        else:
-            self.ground_truth_ranking = None
+        # Load truth leaderboard (required)
+        self.truth_leaderboard = self.load_leaderboard(
+            truth_leaderboard, self.truth_format, self.truth_has_header
+        )
 
     def load_leaderboard(self, leaderboard_path: Path, format: LeaderboardFormat, has_header: bool = False) -> Leaderboard:
         if not leaderboard_path or not Path(leaderboard_path).exists():
@@ -58,35 +54,44 @@ class TrecLeaderboardEvaluation():
             raise ValueError(f"Measure {measure} does not exist, I found: {sorted(leaderboard.measures)}")
         return ret
 
-    def evaluate(self, leaderboard_file: Path) -> Dict[str, Dict]:
-        leaderboard = self.load_leaderboard(leaderboard_file, self.eval_format, self.eval_has_header)
+    def get_measure_pairs(
+        self, eval_leaderboard: Leaderboard
+    ) -> List[Tuple[str, str]]:
+        """Get list of (truth_measure, eval_measure) pairs to analyze."""
+        # Determine eval measures to use
+        eval_measures = list(eval_leaderboard.measures)
+        if self.eval_measures_filter:
+            eval_measures = [m for m in eval_measures if m in self.eval_measures_filter]
+
+        # Determine truth measures to use
+        truth_measures = list(self.truth_leaderboard.measures)
+        if self.truth_measures_filter:
+            truth_measures = [m for m in truth_measures if m in self.truth_measures_filter]
+
+        # Generate all pairs
+        return [(tm, em) for tm in truth_measures for em in eval_measures]
+
+    def evaluate(self, leaderboard_file: Path) -> Dict[Tuple[str, str], Dict]:
+        """Evaluate and return dict keyed by (truth_measure, eval_measure) pairs."""
+        eval_leaderboard = self.load_leaderboard(
+            leaderboard_file, self.eval_format, self.eval_has_header
+        )
         ret = {}
 
-        for m in leaderboard.measures:
-            if self.ground_truth_ranking:
-                ret[m] = self.correlation_to_truth(self.extract_ranking(leaderboard, m))
-            else:
-                ret[m] = self.basic_statistics(leaderboard, m)
+        for truth_m, eval_m in self.get_measure_pairs(eval_leaderboard):
+            truth_ranking = self.extract_ranking(self.truth_leaderboard, truth_m)
+            eval_ranking = self.extract_ranking(eval_leaderboard, eval_m)
+            ret[(truth_m, eval_m)] = self.correlation_to_truth(truth_ranking, eval_ranking)
 
         return ret
 
-    def basic_statistics(self, leaderboard: Leaderboard, measure: str) -> Dict[str, float]:
-        """Compute mean/stdev across all entries (including per-topic rows)."""
-        vals = []
-        for entry in leaderboard.entries:
-            if measure in entry.values:
-                vals.append(float(entry.values[measure]))
-
-        if len(vals) == 0:
-            raise ValueError(f"Measure {measure} does not exist.")
-
-        return {"mean-value": mean(vals), "stdev-value": stdev(vals)}
-
-    def correlation_to_truth(self, ranking: Dict[str, float]) -> Dict[str, float]:
+    def correlation_to_truth(
+        self, truth_ranking: Dict[str, float], eval_ranking: Dict[str, float]
+    ) -> Dict[str, float]:
         a, b = [], []
 
-        truth_systems = set(self.ground_truth_ranking.keys())
-        eval_systems = set(ranking.keys())
+        truth_systems = set(truth_ranking.keys())
+        eval_systems = set(eval_ranking.keys())
 
         missing_in_eval = truth_systems - eval_systems
         missing_in_truth = eval_systems - truth_systems
@@ -97,9 +102,7 @@ class TrecLeaderboardEvaluation():
                 msg_parts.append(f"missing in evaluated: {sorted(missing_in_eval)}")
             if missing_in_truth:
                 msg_parts.append(f"missing in ground truth: {sorted(missing_in_truth)}")
-            msg = f"Run ID mismatch: {'; '.join(msg_parts)}. \nShared RunIDs: {sorted(truth_systems &
-            eval_systems)}"
-            
+            msg = f"Run ID mismatch: {'; '.join(msg_parts)}. \nShared RunIDs: {sorted(truth_systems & eval_systems)}"
 
             if self.on_missing == "error":
                 raise ValueError(msg)
@@ -108,9 +111,9 @@ class TrecLeaderboardEvaluation():
 
         # Include all systems from ground truth
         for system in truth_systems:
-            a.append(float(self.ground_truth_ranking[system]))
-            if system in ranking:
-                b.append(float(ranking[system]))
+            a.append(float(truth_ranking[system]))
+            if system in eval_ranking:
+                b.append(float(eval_ranking[system]))
             elif self.on_missing == "default":
                 b.append(0.0)
             else:
