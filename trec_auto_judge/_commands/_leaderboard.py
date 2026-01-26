@@ -1,5 +1,6 @@
 """Leaderboard statistics command - compute statistics from leaderboard files."""
 
+from math import sqrt
 import click
 import glob
 from pathlib import Path
@@ -87,26 +88,38 @@ def leaderboard(
         if measure_filter:
             measures = [m for m in measures if m in measure_filter]
 
-        for m in measures:
-            # Collect values for this measure (aggregate rows only)
-            values = []
-            for entry in lb.entries:
-                if entry.topic_id == lb.all_topic_id and m in entry.values:
-                    values.append(float(entry.values[m]))
+        # Get unique run_ids from entries
+        run_ids = sorted(set(entry.run_id for entry in lb.entries))
 
-            if not values:
-                continue
+        # Group values by (run_id, measure), compute mean across topics
+        # run_id is the IR system being judged, topic_id varies
+        for run_id in run_ids:
+            for m in measures:
+                # Collect values across topics for this (run_id, measure)
+                values = []
+                for entry in lb.entries:
+                    if entry.run_id != run_id:
+                        continue
+                    if entry.topic_id == lb.all_topic_id:
+                        continue  # Skip aggregate rows, compute from per-topic
+                    if m in entry.values:
+                        values.append(float(entry.values[m]))
 
-            row = {
-                "File": input_path.name,
-                "Measure": m,
-                "Count": len(values),
-                "Mean": mean(values),
-                "Stdev": stdev(values) if len(values) > 1 else 0.0,
-                "Min": min(values),
-                "Max": max(values),
-            }
-            df_rows.append(row)
+                if not values:
+                    continue
+
+                row = {
+                    "Judge": input_path.name.replace(".txt", ""),
+                    "RunID": run_id,
+                    "Measure": m,
+                    "Topics": len(values),
+                    "Mean": mean(values),
+                    "Stderr": stdev(values)/sqrt(len(values)) if len(values) > 1 else 0.0,
+                    "Stdev": stdev(values) if len(values) > 1 else 0.0,
+                    "Min": min(values),
+                    "Max": max(values),
+                }
+                df_rows.append(row)
 
     df = pd.DataFrame(df_rows)
 
