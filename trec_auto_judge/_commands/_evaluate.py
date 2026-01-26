@@ -1,4 +1,5 @@
 import click
+import glob
 from pathlib import Path
 import pandas as pd
 from ..evaluation import TrecLeaderboardEvaluation
@@ -72,11 +73,10 @@ def persist_output(df: pd.DataFrame, output: Path) -> None:
          "default: use 0.0 for missing values",
 )
 @click.option(
-    "--input",
-    type=Path,
-    required=True,
+    "--input", "-i",
+    type=str,
     multiple=True,
-    help="The to-be-evaluated leaderboard(s).",
+    help="Input leaderboard file(s) or glob pattern (e.g., --input '*.txt').",
 )
 @click.option(
     "--output",
@@ -92,6 +92,7 @@ def persist_output(df: pd.DataFrame, output: Path) -> None:
     is_flag=True,
     help="Should only aggregates scores be reported.",
 )
+@click.argument("input_files", nargs=-1, type=str)
 def evaluate(
     truth_leaderboard: Optional[Path],
     truth_measure: Optional[str],
@@ -101,11 +102,25 @@ def evaluate(
     eval_format: str,
     eval_header: bool,
     on_missing: str,
-    input: List[Path],
+    input: tuple,
     output: Path,
     aggregate: bool,
+    input_files: tuple,
 ) -> int:
     """Evaluate the input leaderboards against the ground-truth leaderboards."""
+    # Combine --input options and positional arguments, expand globs
+    all_inputs: List[Path] = []
+    for pattern in list(input) + list(input_files):
+        matches = sorted(glob.glob(pattern, recursive=True))
+        if matches:
+            all_inputs.extend(Path(m) for m in matches)
+        else:
+            # No glob match - treat as literal path
+            all_inputs.append(Path(pattern))
+
+    if not all_inputs:
+        raise click.ClickException("No input files specified. Use --input or positional arguments.")
+
     # Detect headers interactively if not explicitly specified
     truth_has_header = detect_header_interactive(
         truth_leaderboard, truth_format, truth_header, "truth"
@@ -113,9 +128,9 @@ def evaluate(
 
     # For eval files, check the first one and apply to all
     eval_has_header = eval_header
-    if input and not eval_header:
+    if all_inputs and not eval_header:
         eval_has_header = detect_header_interactive(
-            input[0], eval_format, eval_header, "eval"
+            all_inputs[0], eval_format, eval_header, "eval"
         )
 
     te = TrecLeaderboardEvaluation(
@@ -131,7 +146,7 @@ def evaluate(
 
     df = []
 
-    for c in input:
+    for c in all_inputs:
         result = te.evaluate(c)
 
         for i in result:
