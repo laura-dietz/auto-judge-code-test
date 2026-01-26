@@ -14,7 +14,7 @@ MeasureName = str
 AggFn = Callable[[Sequence[Any]], Any]
 CastFn = Callable[[Any], Any]
 OnMissing = Literal["default", "warn", "error", "fix_aggregate"]
-LeaderboardFormat = Literal["trec_eval", "tot", "ir_measures"]
+LeaderboardFormat = Literal["trec_eval", "tot", "ir_measures", "ranking"]
 
 
 #  ==== DataClasses for data storage and serialization ===  
@@ -85,6 +85,7 @@ class Leaderboard:
         cls,
         path: Path,
         format: LeaderboardFormat = "trec_eval",
+        has_header: bool = False,
     ) -> "Leaderboard":
         """
         Load a leaderboard from file.
@@ -95,29 +96,53 @@ class Leaderboard:
                 - "trec_eval": measure topic value
                 - "tot": run measure topic value
                 - "ir_measures": run topic measure value
+                - "ranking": topic Q0 doc_id rank score run
+            has_header: If True, skip the first line (header row)
 
         """
         text = path.read_text(encoding="utf-8")
+        lines = text.strip().split("\n")
+
+        if has_header and lines:
+            lines = lines[1:]
 
         # Collect values grouped by (run_id, topic_id)
         entry_values: Dict[Tuple[str, str], Dict[str, str]] = defaultdict(dict)
         measure_names: List[str] = []
         measure_set: Set[str] = set()
 
-        for line in text.strip().split("\n"):
+        if format == "ranking":
+            print(
+                "Warning: Loading ranking format with semantic mapping:\n"
+                "  ranking doc_id -> leaderboard run_id\n"
+                "  ranking run_id -> leaderboard measure\n"
+                "  ranking score -> leaderboard value\n"
+                "  ranking rank -> ignored",
+                file=sys.stderr,
+            )
+
+        for line in lines:
             if not line:
                 continue
             parts = line.split()
-            if len(parts) != 4:
-                raise ValueError(f"Expected 4 whitespace-separated fields, got {len(parts)}: {line!r}")
 
             if format == "trec_eval":
+                if len(parts) != 3:
+                    raise ValueError(f"trec_eval format expects 3 fields (measure topic value), got {len(parts)}: {line!r}")
                 measure, topic_id, value = parts
                 run_id = path.name
             elif format == "tot":
+                if len(parts) != 4:
+                    raise ValueError(f"tot format expects 4 fields (run measure topic value), got {len(parts)}: {line!r}")
                 run_id, measure, topic_id, value = parts
             elif format == "ir_measures":
+                if len(parts) != 4:
+                    raise ValueError(f"ir_measures format expects 4 fields (run topic measure value), got {len(parts)}: {line!r}")
                 run_id, topic_id, measure, value = parts
+            elif format == "ranking":
+                if len(parts) != 6:
+                    raise ValueError(f"ranking format expects 6 fields (topic Q0 doc_id rank score run_id), got {len(parts)}: {line!r}")
+                topic_id, _q0, run_id, _rank, value, measure = parts
             else:
                 raise ValueError(f"Unknown format: {format!r}")
 

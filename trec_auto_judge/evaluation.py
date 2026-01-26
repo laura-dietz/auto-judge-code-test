@@ -7,7 +7,7 @@ from typing import Dict, Literal, Optional
 from trec_auto_judge import Leaderboard
 
 OnMissing = Literal["error", "warn", "skip", "default"]
-LeaderboardFormat = Literal["trec_eval","tot", "ir_measures"]
+LeaderboardFormat = Literal["trec_eval", "tot", "ir_measures", "ranking"]
 
 
 class TrecLeaderboardEvaluation():
@@ -18,11 +18,15 @@ class TrecLeaderboardEvaluation():
         eval_measure: Optional[str],
         on_missing: OnMissing = "error",
         truth_format: LeaderboardFormat = "ir_measures",
+        truth_has_header: bool = False,
         eval_format: LeaderboardFormat = "tot",
+        eval_has_header: bool = False,
     ):
         self.on_missing = on_missing
         self.truth_format = truth_format
+        self.truth_has_header = truth_has_header
         self.eval_format = eval_format
+        self.eval_has_header = eval_has_header
 
         # if only one measure is provided, assume both are the same.
         if not eval_measure:
@@ -31,15 +35,15 @@ class TrecLeaderboardEvaluation():
             truth_measure = eval_measure
 
         if truth_leaderboard and truth_measure:
-            parsed_leaderboard = self.load_leaderboard(truth_leaderboard, self.truth_format)
+            parsed_leaderboard = self.load_leaderboard(truth_leaderboard, self.truth_format, self.truth_has_header)
             self.ground_truth_ranking = self.extract_ranking(parsed_leaderboard, truth_measure)
         else:
             self.ground_truth_ranking = None
 
-    def load_leaderboard(self, leaderboard_path: Path, format: LeaderboardFormat) -> Leaderboard:
+    def load_leaderboard(self, leaderboard_path: Path, format: LeaderboardFormat, has_header: bool = False) -> Leaderboard:
         if not leaderboard_path or not Path(leaderboard_path).is_file():
             raise ValueError(f"I expected that {leaderboard_path} is a file.")
-        return Leaderboard.load(Path(leaderboard_path), format=format)
+        return Leaderboard.load(Path(leaderboard_path), format=format, has_header=has_header)
 
     def extract_ranking(self, leaderboard: Leaderboard, measure: str) -> Dict[str, float]:
         """Extract run_id -> value mapping for aggregate rows (topic_id == all_topic_id)."""
@@ -55,7 +59,7 @@ class TrecLeaderboardEvaluation():
         return ret
 
     def evaluate(self, leaderboard_file: Path) -> Dict[str, Dict]:
-        leaderboard = self.load_leaderboard(leaderboard_file, self.eval_format)
+        leaderboard = self.load_leaderboard(leaderboard_file, self.eval_format, self.eval_has_header)
         ret = {}
 
         for m in leaderboard.measures:

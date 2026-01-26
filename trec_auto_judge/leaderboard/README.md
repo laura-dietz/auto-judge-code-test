@@ -109,7 +109,10 @@ This is safe because measure names ("GRADE", "IS_MATCH") live in the spec. If ge
 
 ## Output format of Leaderboard.write
 
-`Leaderboard.write()` produces white-space separated lines akin to `trec_evals -q`:
+`Leaderboard.write()` produces white-space separated lines akin to `trec_evals -q`. 
+
+Format `tot`:
+
 
 ```
 run_id measure topic_id value
@@ -119,6 +122,19 @@ runA    GRADE    t1     0.9
 runA    IS_MATCH t1     True
 runA    GRADE    all    0.65
 runA    IS_MATCH all    0.5
+
+
+Format `ir_measures`:
+
+
+```
+run_id topic_id measure value
+```
+runA     1001    nugget_coverage_weighted        0.50
+runA     1001    f1      0.54
+runA     all     nugget_coverage_weighted_macro  0.47
+runA     all     f1_macro        0.51
+
 
 
 The leaderboard will automatically include an `all` topic based on the aggregator
