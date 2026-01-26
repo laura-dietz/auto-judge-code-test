@@ -47,6 +47,7 @@ test = [
 clean = [
     "rapidgzip",
     "routir",
+    "duckdb",
 ]
 
 [project.scripts]
