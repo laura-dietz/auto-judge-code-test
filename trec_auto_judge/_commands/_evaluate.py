@@ -1,56 +1,14 @@
 import click
 from pathlib import Path
 import pandas as pd
-import sys
 from ..evaluation import TrecLeaderboardEvaluation
+from ..click_plus import (
+    detect_header_interactive,
+    LEADERBOARD_FORMATS,
+    LEADERBOARD_FORMAT_HELP,
+)
 from typing import List, Optional
 from tira.io_utils import to_prototext
-
-
-def detect_header_interactive(path: Path, format: str, has_header: bool, label: str) -> bool:
-    """
-    Check if file has header and prompt user if detected but not specified.
-
-    Args:
-        path: Path to leaderboard file
-        format: Format string (trec_eval, tot, ir_measures, ranking)
-        has_header: User-specified header flag
-        label: Label for prompt (e.g., "truth" or "eval")
-
-    Returns:
-        has_header value to use
-    """
-    if has_header:
-        return True  # Already specified by user
-
-    if not path or not path.is_file():
-        return False
-
-    # Read first line and check if value column is numeric
-    try:
-        first_line = path.read_text().split("\n")[0].strip()
-    except Exception:
-        return False
-
-    if not first_line:
-        return False
-
-    parts = first_line.split()
-    if not parts:
-        return False
-
-    # Value is always last column for all formats
-    value_col = parts[-1]
-
-    try:
-        float(value_col)
-        return False  # Looks like data
-    except ValueError:
-        # Looks like header - prompt user
-        print(f"First line of {label} leaderboard looks like header:", file=sys.stderr)
-        print(f"  '{first_line}'", file=sys.stderr)
-        response = input(f"Skip this header line? [Y/n]: ")
-        return response.strip().lower() != 'n'
 
 
 def persist_output(df: pd.DataFrame, output: Path) -> None:
@@ -83,23 +41,15 @@ def persist_output(df: pd.DataFrame, output: Path) -> None:
 )
 @click.option(
     "--truth-format",
-    type=click.Choice(["trec_eval", "ir_measures", "tot", "ranking"]),
+    type=click.Choice(LEADERBOARD_FORMATS),
     required=True,
-    help="Format of the ground truth leaderboard file:\n"
-         "  trec_eval: measure topic value (3 cols, run from filename)\n"
-         "  ir_measures: run topic measure value (4 cols)\n"
-         "  tot: run measure topic value (4 cols)\n"
-         "  ranking: topic Q0 doc_id rank score run (6 cols)",
+    help="Format of the ground truth leaderboard file:\n" + LEADERBOARD_FORMAT_HELP,
 )
 @click.option(
     "--eval-format",
-    type=click.Choice(["trec_eval", "ir_measures", "tot", "ranking"]),
+    type=click.Choice(LEADERBOARD_FORMATS),
     required=True,
-    help="Format of the input leaderboard file(s):\n"
-         "  trec_eval: measure topic value (3 cols, run from filename)\n"
-         "  ir_measures: run topic measure value (4 cols)\n"
-         "  tot: run measure topic value (4 cols)\n"
-         "  ranking: topic Q0 doc_id rank score run (6 cols)",
+    help="Format of the input leaderboard file(s):\n" + LEADERBOARD_FORMAT_HELP,
 )
 @click.option(
     "--truth-header/--no-truth-header",

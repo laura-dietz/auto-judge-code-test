@@ -9,6 +9,7 @@ from typing import Any, Callable, Dict, Iterable, List, Literal, Mapping, Option
 
 from trec_auto_judge.utils import format_preview
 from .verification import LeaderboardVerification, LeaderboardVerificationError
+from .format_detection import format_error_with_hint
 
 MeasureName = str
 AggFn = Callable[[Sequence[Any]], Any]
@@ -84,22 +85,78 @@ class Leaderboard:
     def load(
         cls,
         path: Path,
-        format: LeaderboardFormat = "trec_eval",
+        format: LeaderboardFormat,
         has_header: bool = False,
     ) -> "Leaderboard":
         """
-        Load a leaderboard from file.
+        Load a leaderboard from file or directory.
 
         Args:
-            path: Path to leaderboard file
+            path: Path to leaderboard file or directory of files
             format: Column order (whitespace-separated)
-                - "trec_eval": measure topic value
-                - "tot": run measure topic value
-                - "ir_measures": run topic measure value
-                - "ranking": topic Q0 doc_id rank score run
+                - "trec_eval": measure topic value (3 cols, run_id from filename)
+                - "tot": run measure topic value (4 cols)
+                - "ir_measures": run topic measure value (4 cols)
+                - "ranking": topic Q0 doc_id rank score run (6 cols)
             has_header: If True, skip the first line (header row)
 
+        If path is a directory, all files are loaded and merged into a single
+        leaderboard. For trec_eval format, each file's name becomes the run_id.
         """
+        if path.is_dir():
+            return cls._load_directory(path, format, has_header)
+        else:
+            return cls._load_file(path, format, has_header)
+
+    @classmethod
+    def _load_directory(
+        cls,
+        directory: Path,
+        format: LeaderboardFormat,
+        has_header: bool,
+    ) -> "Leaderboard":
+        """Load and merge all leaderboard files from a directory."""
+        # Find all files (exclude hidden files and subdirectories)
+        files = sorted([f for f in directory.iterdir() if f.is_file() and not f.name.startswith(".")])
+
+        if not files:
+            raise ValueError(f"No files found in directory: {directory}")
+
+        print(f"Loading {len(files)} files from {directory}", file=sys.stderr)
+
+        # Collect all entries and measures across files
+        all_entry_values: Dict[Tuple[str, str], Dict[str, str]] = defaultdict(dict)
+        measure_names: List[str] = []
+        measure_set: Set[str] = set()
+
+        for file_path in files:
+            leaderboard = cls._load_file(file_path, format, has_header)
+            for entry in leaderboard.entries:
+                for measure, value in entry.values.items():
+                    all_entry_values[(entry.run_id, entry.topic_id)][measure] = value
+                    if measure not in measure_set:
+                        measure_names.append(measure)
+                        measure_set.add(measure)
+
+        # Build merged entries
+        entries = [
+            LeaderboardEntry(run_id=run_id, topic_id=topic_id, values=values)
+            for (run_id, topic_id), values in all_entry_values.items()
+        ]
+
+        return cls(
+            measures=tuple(measure_names),
+            entries=tuple(entries),
+        )
+
+    @classmethod
+    def _load_file(
+        cls,
+        path: Path,
+        format: LeaderboardFormat,
+        has_header: bool,
+    ) -> "Leaderboard":
+        """Load a leaderboard from a single file."""
         text = path.read_text(encoding="utf-8")
         lines = text.strip().split("\n")
 
@@ -128,20 +185,20 @@ class Leaderboard:
 
             if format == "trec_eval":
                 if len(parts) != 3:
-                    raise ValueError(f"trec_eval format expects 3 fields (measure topic value), got {len(parts)}: {line!r}")
+                    raise ValueError(format_error_with_hint("trec_eval", 3, len(parts), line, lines))
                 measure, topic_id, value = parts
                 run_id = path.name
             elif format == "tot":
                 if len(parts) != 4:
-                    raise ValueError(f"tot format expects 4 fields (run measure topic value), got {len(parts)}: {line!r}")
+                    raise ValueError(format_error_with_hint("tot", 4, len(parts), line, lines))
                 run_id, measure, topic_id, value = parts
             elif format == "ir_measures":
                 if len(parts) != 4:
-                    raise ValueError(f"ir_measures format expects 4 fields (run topic measure value), got {len(parts)}: {line!r}")
+                    raise ValueError(format_error_with_hint("ir_measures", 4, len(parts), line, lines))
                 run_id, topic_id, measure, value = parts
             elif format == "ranking":
                 if len(parts) != 6:
-                    raise ValueError(f"ranking format expects 6 fields (topic Q0 doc_id rank score run_id), got {len(parts)}: {line!r}")
+                    raise ValueError(format_error_with_hint("ranking", 6, len(parts), line, lines))
                 topic_id, _q0, run_id, _rank, value, measure = parts
             else:
                 raise ValueError(f"Unknown format: {format!r}")

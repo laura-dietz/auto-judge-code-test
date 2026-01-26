@@ -1,4 +1,5 @@
 from pathlib import Path
+import sys
 from typing import Optional
 from .io import load_runs_failsave
 from .request import load_requests_from_irds, load_requests_from_file
@@ -17,6 +18,63 @@ from .judge_runner import run_judge
 from .cli_default_group import DefaultGroup
 import click
 from . import AutoJudge
+
+
+# Leaderboard format constants for CLI options
+LEADERBOARD_FORMATS = ["trec_eval", "ir_measures", "tot", "ranking"]
+
+LEADERBOARD_FORMAT_HELP = (
+    "  trec_eval: measure topic value (3 cols, run from filename)\n"
+    "  ir_measures: run topic measure value (4 cols)\n"
+    "  tot: run measure topic value (4 cols)\n"
+    "  ranking: topic Q0 doc_id rank score run (6 cols)"
+)
+
+
+def detect_header_interactive(path: Path, format: str, has_header: bool, label: str) -> bool:
+    """
+    Check if file has header and prompt user if detected but not specified.
+
+    Args:
+        path: Path to leaderboard file
+        format: Format string (trec_eval, tot, ir_measures, ranking)
+        has_header: User-specified header flag
+        label: Label for prompt (e.g., "truth" or "eval")
+
+    Returns:
+        has_header value to use
+    """
+    if has_header:
+        return True  # Already specified by user
+
+    if not path or not path.is_file():
+        return False
+
+    # Read first line and check if value column is numeric
+    try:
+        first_line = path.read_text().split("\n")[0].strip()
+    except Exception:
+        return False
+
+    if not first_line:
+        return False
+
+    parts = first_line.split()
+    if not parts:
+        return False
+
+    # Value is always last column for all formats
+    value_col = parts[-1]
+
+    try:
+        float(value_col)
+        return False  # Looks like data
+    except ValueError:
+        # Looks like header - prompt user
+        print(f"First line of {label} leaderboard looks like header:", file=sys.stderr)
+        print(f"  '{first_line}'", file=sys.stderr)
+        response = input(f"Skip this header line? [Y/n]: ")
+        return response.strip().lower() != 'n'
 
 
 class ExpandedPath(click.Path):
