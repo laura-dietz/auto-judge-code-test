@@ -45,6 +45,11 @@ from typing import List, Optional
     required=False,
     help="Output file (.jsonl or .csv).",
 )
+@click.option(
+    "--sort/--no-sort",
+    default=False,
+    help="Sort run_ids by mean (descending) within each judge and measure.",
+)
 @click.argument("input_files", nargs=-1, type=str)
 def leaderboard(
     eval_format: str,
@@ -52,6 +57,7 @@ def leaderboard(
     eval_measure: tuple,
     input: tuple,
     output: Optional[Path],
+    sort: bool,
     input_files: tuple,
 ) -> int:
     """Compute statistics from leaderboard files."""
@@ -122,6 +128,12 @@ def leaderboard(
                 df_rows.append(row)
 
     df = pd.DataFrame(df_rows)
+
+    if sort:
+        df = df.sort_values(
+            by=["Judge", "Measure", "Mean"],
+            ascending=[True, True, False]
+        )
 
     print(df.to_string(index=False))
 
