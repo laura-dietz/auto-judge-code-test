@@ -41,8 +41,8 @@ class TrecLeaderboardEvaluation():
             self.ground_truth_ranking = None
 
     def load_leaderboard(self, leaderboard_path: Path, format: LeaderboardFormat, has_header: bool = False) -> Leaderboard:
-        if not leaderboard_path or not Path(leaderboard_path).is_file():
-            raise ValueError(f"I expected that {leaderboard_path} is a file.")
+        if not leaderboard_path or not Path(leaderboard_path).exists():
+            raise ValueError(f"Leaderboard path does not exist: {leaderboard_path}")
         return Leaderboard.load(Path(leaderboard_path), format=format, has_header=has_header)
 
     def extract_ranking(self, leaderboard: Leaderboard, measure: str) -> Dict[str, float]:
