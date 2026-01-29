@@ -452,37 +452,41 @@ def _sanitize_path_for_prefix(path: Optional[Path]) -> str:
 
 
 def execute_run_workflow(
-    auto_judge,
-    workflow: Optional[Path],
-    rag_responses,
-    rag_topics,
-    nugget_banks,
-    llm_config: Optional[Path],
-    submission: bool,
-    out_dir: Optional[Path],
-    filebase: Optional[str],
-    store_nuggets: Optional[Path],
-    variant: Optional[str],
-    sweep: Optional[str],
-    all_variants: bool,
-    force_recreate_nuggets: Optional[bool],
-    create_nuggets: Optional[bool],
-    do_judge: Optional[bool],
-    settings_overrides: tuple,
-    nugget_settings_overrides: tuple,
-    judge_settings_overrides: tuple,
-    qrels_settings_overrides: tuple,
-    nugget_depends_on_responses: Optional[bool],
-    judge_uses_nuggets: Optional[bool],
-    create_qrels: Optional[bool],
-    judge_uses_qrels: Optional[bool],
-    qrels_uses_nuggets: Optional[bool],
-    qrels_input: Optional[Path],
-    qrels_output: Optional[Path],
-    augment_report: Optional[bool],
-    limit_topics: Optional[int],
-    limit_runs: Optional[int],
+    auto_judge=None,
+    workflow: Optional[Path] = None,
+    rag_responses=None,
+    rag_topics=None,
+    nugget_banks=None,
+    llm_config: Optional[Path] = None,
+    submission: bool = False,
+    out_dir: Optional[Path] = None,
+    filebase: Optional[str] = None,
+    store_nuggets: Optional[Path] = None,
+    variant: Optional[str] = None,
+    sweep: Optional[str] = None,
+    all_variants: bool = False,
+    force_recreate_nuggets: Optional[bool] = None,
+    create_nuggets: Optional[bool] = None,
+    do_judge: Optional[bool] = None,
+    settings_overrides: tuple = (),
+    nugget_settings_overrides: tuple = (),
+    judge_settings_overrides: tuple = (),
+    qrels_settings_overrides: tuple = (),
+    nugget_depends_on_responses: Optional[bool] = None,
+    judge_uses_nuggets: Optional[bool] = None,
+    create_qrels: Optional[bool] = None,
+    judge_uses_qrels: Optional[bool] = None,
+    qrels_uses_nuggets: Optional[bool] = None,
+    qrels_input: Optional[Path] = None,
+    qrels_output: Optional[Path] = None,
+    augment_report: Optional[bool] = None,
+    limit_topics: Optional[int] = None,
+    limit_runs: Optional[int] = None,
     wf=None,
+    # Modular protocol implementations (alternative to auto_judge)
+    nugget_creator=None,  # NuggetCreatorProtocol
+    qrels_creator=None,   # QrelsCreatorProtocol
+    leaderboard_judge=None,  # LeaderboardJudgeProtocol
 ):
     """
     Core execution logic for running a judge workflow.
@@ -646,6 +650,10 @@ def execute_run_workflow(
             config_name=config.name,
             limit_topics=limit_topics,
             limit_runs=limit_runs,
+            # Modular protocol implementations
+            nugget_creator=nugget_creator,
+            qrels_creator=qrels_creator,
+            leaderboard_judge=leaderboard_judge,
         )
 
         click.echo(f"Done configuration: {config.name}", err=True)

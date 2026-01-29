@@ -11,12 +11,18 @@ __version__ = '0.0.1'
 
 
 # === The interface for AutoJudges to implement ====
+#
+# Three separate protocols allow mixing implementations:
+#   - LeaderboardJudgeProtocol: produces leaderboard scores
+#   - QrelsCreatorProtocol: creates relevance judgments
+#   - NuggetCreatorProtocol: creates nugget banks
+#
+# A single class can implement all three (common case), or different
+# classes can be used for each phase via workflow.yml configuration.
 
-class AutoJudge(Protocol):
-    """Protocol for AutoJudge implementations."""
 
-    nugget_banks_type: Type[NuggetBanksProtocol]
-    """The NuggetBanks container type this judge uses."""
+class LeaderboardJudgeProtocol(Protocol):
+    """Protocol for leaderboard generation."""
 
     def judge(
         self,
@@ -42,7 +48,11 @@ class AutoJudge(Protocol):
             Leaderboard with rankings/scores for runs
         """
         ...
-        
+
+
+class QrelsCreatorProtocol(Protocol):
+    """Protocol for qrels creation."""
+
     def create_qrels(
         self,
         rag_responses: Iterable["Report"],
@@ -66,6 +76,13 @@ class AutoJudge(Protocol):
         """
         ...
 
+
+class NuggetCreatorProtocol(Protocol):
+    """Protocol for nugget creation."""
+
+    nugget_banks_type: Type[NuggetBanksProtocol]
+    """The NuggetBanks container type this creator produces."""
+
     def create_nuggets(
         self,
         rag_responses: Iterable["Report"],
@@ -84,9 +101,24 @@ class AutoJudge(Protocol):
             nugget_banks: Optional existing nuggets to refine/extend
 
         Returns:
-            NuggetBanks container, or None if judge doesn't support nuggets
+            NuggetBanks container, or None if not supported
         """
         ...
+
+
+class AutoJudge(LeaderboardJudgeProtocol, QrelsCreatorProtocol, NuggetCreatorProtocol, Protocol):
+    """
+    Combined protocol for judges that implement all three phases.
+
+    This is a convenience protocol for the common case where a single class
+    handles nugget creation, qrels creation, and leaderboard generation.
+
+    For modular configurations, use the individual protocols:
+    - LeaderboardJudgeProtocol
+    - QrelsCreatorProtocol
+    - NuggetCreatorProtocol
+    """
+    pass
 
 
 # === The click interface to the trec-auto-judge command line ====

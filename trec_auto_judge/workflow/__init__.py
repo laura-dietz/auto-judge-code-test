@@ -5,6 +5,7 @@ from .workflow import (
     load_workflow,
     load_workflow_from_directory,
     load_judge_from_workflow,
+    LoadedJudgeComponents,
     DEFAULT_WORKFLOW,
     # Built-in NuggetBanks type paths
     NUGGET_BANKS_AUTOARGUE,

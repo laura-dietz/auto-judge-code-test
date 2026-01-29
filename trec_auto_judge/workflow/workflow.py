@@ -68,10 +68,24 @@ class Workflow(BaseModel):
     """Whether to call judge() to produce leaderboard."""
 
     judge_class: Optional[str] = None
-    """Dotted import path for AutoJudge class, e.g., 'trec25.judges.minimaljudge.MinimalJudge'.
+    """Dotted import path for LeaderboardJudgeProtocol class.
 
     When specified, the judge is loaded dynamically from this path.
-    If not specified, the judge must be provided programmatically.
+    If not specified, falls back to a single class that implements all protocols.
+    """
+
+    qrels_class: Optional[str] = None
+    """Dotted import path for QrelsCreatorProtocol class.
+
+    When specified, qrels creation uses this class.
+    If not specified, falls back to judge_class (assumes it implements QrelsCreatorProtocol).
+    """
+
+    nugget_class: Optional[str] = None
+    """Dotted import path for NuggetCreatorProtocol class.
+
+    When specified, nugget creation uses this class.
+    If not specified, falls back to judge_class (assumes it implements NuggetCreatorProtocol).
     """
 
     @model_validator(mode="after")
@@ -613,35 +627,72 @@ def load_workflow_from_directory(directory: Union[str, Path]) -> Optional[Workfl
 DEFAULT_WORKFLOW = Workflow()
 
 
-def load_judge_from_workflow(workflow: Workflow):
+@dataclass
+class LoadedJudgeComponents:
+    """Container for loaded judge protocol implementations."""
+    nugget_creator: Optional[object]  # NuggetCreatorProtocol
+    qrels_creator: Optional[object]   # QrelsCreatorProtocol
+    leaderboard_judge: Optional[object]  # LeaderboardJudgeProtocol
+
+
+def load_judge_from_workflow(workflow: Workflow) -> LoadedJudgeComponents:
     """
-    Load and instantiate the AutoJudge class specified in workflow.judge_class.
+    Load and instantiate judge classes from workflow configuration.
+
+    Supports three separate class fields for modular judge composition:
+    - nugget_class: NuggetCreatorProtocol implementation
+    - qrels_class: QrelsCreatorProtocol implementation
+    - judge_class: LeaderboardJudgeProtocol implementation
+
+    If only judge_class is set, it's used for all three protocols (assumes
+    the class implements all of them, like the combined AutoJudge protocol).
 
     Args:
-        workflow: Workflow configuration with judge_class set
+        workflow: Workflow configuration
 
     Returns:
-        Instantiated AutoJudge instance
+        LoadedJudgeComponents with instantiated protocol implementations
 
     Raises:
-        ValueError: If workflow.judge_class is not set
-        ImportError: If the judge class cannot be imported
-        TypeError: If the imported class cannot be instantiated
+        ValueError: If no judge classes are specified
+        ImportError: If a class cannot be imported
+        TypeError: If a class cannot be instantiated
 
-    Example workflow.yml:
+    Example workflow.yml (single class for all):
         judge_class: "trec25.judges.minimaljudge.MinimalJudge"
 
-    Example:
-        workflow = load_workflow("workflow.yml")
-        judge = load_judge_from_workflow(workflow)
+    Example workflow.yml (separate classes):
+        nugget_class: "trec25.judges.shared.NuggetGenerator"
+        qrels_class: "trec25.judges.umbrela.UmbrelaQrels"
+        judge_class: "trec25.judges.myjudge.MyLeaderboard"
     """
     from ..utils import import_class
 
-    if not workflow.judge_class:
+    # Check that at least one class is specified
+    if not workflow.judge_class and not workflow.nugget_class and not workflow.qrels_class:
         raise ValueError(
-            "workflow.judge_class is not set. "
-            "Specify judge_class in workflow.yml or provide the judge instance directly."
+            "No judge classes specified in workflow. "
+            "Set at least one of: judge_class, nugget_class, qrels_class"
         )
 
-    judge_cls = import_class(workflow.judge_class)
-    return judge_cls()
+    # Cache for instantiated classes (reuse if same class used for multiple protocols)
+    _instances: dict[str, object] = {}
+
+    def _get_instance(class_path: Optional[str]) -> Optional[object]:
+        if not class_path:
+            return None
+        if class_path not in _instances:
+            cls = import_class(class_path)
+            _instances[class_path] = cls()
+        return _instances[class_path]
+
+    # Resolve each protocol's class (fall back to judge_class if not specified)
+    nugget_class_path = workflow.nugget_class or workflow.judge_class
+    qrels_class_path = workflow.qrels_class or workflow.judge_class
+    judge_class_path = workflow.judge_class
+
+    return LoadedJudgeComponents(
+        nugget_creator=_get_instance(nugget_class_path),
+        qrels_creator=_get_instance(qrels_class_path),
+        leaderboard_judge=_get_instance(judge_class_path),
+    )

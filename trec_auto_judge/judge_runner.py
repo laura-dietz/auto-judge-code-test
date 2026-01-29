@@ -42,10 +42,10 @@ class JudgeResult:
 
 
 def run_judge(
-    auto_judge,
-    rag_responses: Iterable[Report],
-    rag_topics: Sequence[Request],
-    llm_config: MinimaLlmConfig,
+    auto_judge=None,
+    rag_responses: Iterable[Report] = None,
+    rag_topics: Sequence[Request] = None,
+    llm_config: MinimaLlmConfig = None,
     nugget_banks_path: Optional[Path] = None,
     judge_output_path: Optional[Path] = None,
     nugget_output_path: Optional[Path] = None,
@@ -73,6 +73,10 @@ def run_judge(
     # Testing flags to limit scope
     limit_topics: Optional[int] = None,
     limit_runs: Optional[int] = None,
+    # Modular protocol implementations (alternative to auto_judge)
+    nugget_creator=None,  # NuggetCreatorProtocol
+    qrels_creator=None,   # QrelsCreatorProtocol
+    leaderboard_judge=None,  # LeaderboardJudgeProtocol
 ) -> JudgeResult:
     """
     Execute judge workflow with nugget lifecycle management.
@@ -127,8 +131,8 @@ def run_judge(
     if force_recreate_nuggets is None:
         force_recreate_nuggets = do_create_nuggets
 
-    # Get nugget_banks_type from auto_judge (required for loading/saving nuggets)
-    nugget_banks_type = getattr(auto_judge, "nugget_banks_type", None)
+    # Get nugget_banks_type from nugget_creator or auto_judge (required for loading/saving nuggets)
+    nugget_banks_type = getattr(nugget_creator, "nugget_banks_type", None) or getattr(auto_judge, "nugget_banks_type", None)
 
     # Resolve nugget output file path (add .nuggets.jsonl extension if needed)
     nugget_file_path = resolve_nugget_file_path(nugget_output_path) if nugget_output_path else None
@@ -196,7 +200,9 @@ def run_judge(
             # Pass responses based on nugget_depends_on_responses flag
             responses_for_nuggets = rag_responses if nugget_depends_on_responses else None
 
-            current_nuggets = auto_judge.create_nuggets(
+            # Use nugget_creator if provided, otherwise fall back to auto_judge
+            _nugget_creator = nugget_creator or auto_judge
+            current_nuggets = _nugget_creator.create_nuggets(
                 rag_responses=responses_for_nuggets,
                 rag_topics=rag_topics,
                 llm_config=llm_config,
@@ -235,7 +241,9 @@ def run_judge(
             # Pass nuggets based on qrels_uses_nuggets flag
             nuggets_for_qrels = current_nuggets if qrels_uses_nuggets else None
 
-            current_qrels = auto_judge.create_qrels(
+            # Use qrels_creator if provided, otherwise fall back to auto_judge
+            _qrels_creator = qrels_creator or auto_judge
+            current_qrels = _qrels_creator.create_qrels(
                 rag_responses=rag_responses,
                 rag_topics=rag_topics,
                 llm_config=llm_config,
@@ -268,7 +276,9 @@ def run_judge(
         # Pass qrels based on judge_uses_qrels flag
         qrels_for_judge = current_qrels if judge_uses_qrels else None
 
-        leaderboard = auto_judge.judge(
+        # Use leaderboard_judge if provided, otherwise fall back to auto_judge
+        _leaderboard_judge = leaderboard_judge or auto_judge
+        leaderboard = _leaderboard_judge.judge(
             rag_responses=rag_responses,
             rag_topics=rag_topics,
             llm_config=llm_config,
