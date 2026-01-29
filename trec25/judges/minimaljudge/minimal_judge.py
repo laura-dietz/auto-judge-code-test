@@ -2,17 +2,20 @@
 """
 MinimalJudge: A simple example AutoJudge implementation.
 
-This judge demonstrates the AutoJudge protocol without using any LLM calls.
-It creates nuggets, qrels, and leaderboards using deterministic logic based
-on response text length and keyword matching.
+This judge demonstrates the modular protocol pattern with three separate classes:
+- MinimalNuggetCreator: Creates nugget questions for topics
+- MinimalQrelsCreator: Creates relevance judgments
+- MinimalLeaderboardJudge: Scores responses and produces leaderboard
 
-Use this as a starting template for building your own judge.
+Each class implements a single protocol, allowing flexible composition in workflow.yml.
+No LLM calls are used - all logic is deterministic based on text length and keywords.
+
+Use this as a starting template for building your own modular judge.
 """
 
 from typing import Iterable, Optional, Sequence, Type
 
 from trec_auto_judge import (
-    AutoJudge,
     MinimaLlmConfig,
     Report,
     Request,
@@ -26,7 +29,6 @@ from trec_auto_judge import (
     QrelsSpec,
     build_qrels,
     doc_id_md5,
-    auto_judge_to_click_command,
 )
 from trec_auto_judge.nugget_data import (
     NuggetBanks,
@@ -79,44 +81,31 @@ MINIMAL_QRELS_SPEC = QrelsSpec[GradeRecord](
 
 
 # =============================================================================
-# MinimalJudge Implementation
+# MinimalNuggetCreator - NuggetCreatorProtocol
 # =============================================================================
 
-class MinimalJudge(AutoJudge):
+class MinimalNuggetCreator:
     """
-    A minimal AutoJudge that demonstrates the protocol.
+    Creates nugget questions for each topic.
 
-    This judge:
-    - Creates nuggets: Generates questions from topic titles
-    - Creates qrels: Grades responses based on text length
-    - Judges: Scores responses based on keyword coverage
+    Implements NuggetCreatorProtocol. In a real judge, this would use an LLM
+    to generate meaningful questions. Here we create simple template questions.
     """
 
-    # Declare the nugget format this judge uses
+    # Declare the nugget format this creator produces
     nugget_banks_type: Type[NuggetBanksProtocol] = NuggetBanks
 
-    def __init__(self):
-        pass
-
-    # -------------------------------------------------------------------------
-    # create_nuggets(): Generate nugget questions for each topic
-    # -------------------------------------------------------------------------
     def create_nuggets(
         self,
         rag_responses: Iterable[Report],
         rag_topics: Sequence[Request],
         llm_config: MinimaLlmConfig,
         nugget_banks: Optional[NuggetBanksProtocol] = None,
-        # Judge-specific settings from workflow.yml
+        # Settings from workflow.yml nugget_settings
         questions_per_topic: int = 3,
         **kwargs,
     ) -> Optional[NuggetBanksProtocol]:
-        """
-        Create nugget questions for each topic.
-
-        In a real judge, this would use an LLM to generate meaningful questions.
-        Here we create simple template questions for demonstration.
-        """
+        """Create nugget questions for each topic."""
         banks = []
 
         for topic in rag_topics:
@@ -132,40 +121,42 @@ class MinimalJudge(AutoJudge):
                 question = NuggetQuestion.from_lazy(
                     query_id=topic.request_id,
                     question=f"Q{i+1}: What information about '{topic.title}' is provided?",
-                    gold_answers=[f"Answer about {topic.title}"],  # Optional gold answers
+                    gold_answers=[f"Answer about {topic.title}"],
                 )
                 questions.append(question)
 
-            # Add questions to the bank
             bank.add_nuggets(questions)
             banks.append(bank)
 
-        # Combine into multi-topic container
         nugget_banks = NuggetBanks.from_banks_list(banks)
-
-        print(f"MinimalJudge: Created nuggets for {len(banks)} topics")
+        print(f"MinimalNuggetCreator: Created nuggets for {len(banks)} topics")
         return nugget_banks
 
-    # -------------------------------------------------------------------------
-    # create_qrels(): Generate relevance judgments
-    # -------------------------------------------------------------------------
+
+# =============================================================================
+# MinimalQrelsCreator - QrelsCreatorProtocol
+# =============================================================================
+
+class MinimalQrelsCreator:
+    """
+    Creates relevance judgments (qrels) for responses.
+
+    Implements QrelsCreatorProtocol. In a real judge, this would use an LLM
+    to assess relevance. Here we use a simple length-based heuristic.
+    """
+
     def create_qrels(
         self,
         rag_responses: Iterable[Report],
         rag_topics: Sequence[Request],
         llm_config: MinimaLlmConfig,
         nugget_banks: Optional[NuggetBanksProtocol] = None,
-        # Judge-specific settings from workflow.yml
+        # Settings from workflow.yml qrels_settings
         grade_range: tuple = (0, 3),
         length_threshold: int = 100,
         **kwargs,
     ) -> Optional[Qrels]:
-        """
-        Create relevance judgments (qrels) for each response.
-
-        In a real judge, this would use an LLM to assess relevance.
-        Here we use a simple length-based heuristic.
-        """
+        """Create relevance judgments for each response."""
         grade_records = []
 
         for response in rag_responses:
@@ -185,15 +176,23 @@ class MinimalJudge(AutoJudge):
 
             grade_records.append(GradeRecord(topic_id, text, grade))
 
-        # Build qrels from records
         qrels = build_qrels(records=grade_records, spec=MINIMAL_QRELS_SPEC)
-
-        print(f"MinimalJudge: Created qrels for {len(grade_records)} responses")
+        print(f"MinimalQrelsCreator: Created qrels for {len(grade_records)} responses")
         return qrels
 
-    # -------------------------------------------------------------------------
-    # judge(): Score responses and produce leaderboard
-    # -------------------------------------------------------------------------
+
+# =============================================================================
+# MinimalLeaderboardJudge - LeaderboardJudgeProtocol
+# =============================================================================
+
+class MinimalLeaderboardJudge:
+    """
+    Scores responses and produces a leaderboard.
+
+    Implements LeaderboardJudgeProtocol. Scores are based on text length
+    and keyword matching from topic titles.
+    """
+
     def judge(
         self,
         rag_responses: Iterable[Report],
@@ -201,24 +200,15 @@ class MinimalJudge(AutoJudge):
         llm_config: MinimaLlmConfig,
         nugget_banks: Optional[NuggetBanksProtocol] = None,
         qrels: Optional[Qrels] = None,
-        # Judge-specific settings from workflow.yml
+        # Settings from workflow.yml judge_settings
         keyword_bonus: float = 0.2,
         on_missing_evals: str = "fix_aggregate",
         **kwargs,
     ) -> Leaderboard:
-        """
-        Judge RAG responses and produce a leaderboard.
-
-        This method scores each response and builds a leaderboard with
-        per-topic rows and aggregate "all" rows.
-        """
-        # Get expected topic IDs for verification
+        """Judge RAG responses and produce a leaderboard."""
         expected_topic_ids = [t.request_id for t in rag_topics]
-
-        # Build topic title lookup for keyword matching
         topic_titles = {t.request_id: (t.title or "").lower() for t in rag_topics}
 
-        # Create leaderboard builder
         builder = LeaderboardBuilder(MINIMAL_SPEC)
 
         for response in rag_responses:
@@ -226,7 +216,6 @@ class MinimalJudge(AutoJudge):
             topic_id = response.metadata.topic_id
             text = response.get_report_text().lower()
 
-            # Calculate SCORE (0.0 to 1.0)
             # Base score from text length (normalize to 0-1)
             base_score = min(len(text) / 1000.0, 1.0)
 
@@ -243,17 +232,14 @@ class MinimalJudge(AutoJudge):
             # Optionally use nuggets for additional scoring
             if nugget_banks and topic_id in nugget_banks.banks:
                 bank = nugget_banks.banks[topic_id]
-                # Example: bonus for having nuggets available
                 nugget_count = len(bank.nuggets_as_list())
                 if nugget_count > 0:
                     score = min(score + 0.05 * nugget_count, 1.0)
 
-            # Optionally use qrels
+            # Optionally use qrels (could adjust score based on grades)
             if qrels:
-                # Example: could adjust score based on qrels grades
                 pass
 
-            # Add row to leaderboard
             builder.add(
                 run_id=run_id,
                 topic_id=topic_id,
@@ -263,27 +249,49 @@ class MinimalJudge(AutoJudge):
                 },
             )
 
-        # Build leaderboard with aggregate rows
         leaderboard = builder.build(
             expected_topic_ids=expected_topic_ids,
             on_missing=on_missing_evals,
         )
 
-        # Verify the leaderboard
         leaderboard.verify(
             expected_topic_ids=expected_topic_ids,
             warn=True,
             on_missing=on_missing_evals,
         )
 
-        print(f"MinimalJudge: Built leaderboard with {len(leaderboard.entries)} entries")
+        print(f"MinimalLeaderboardJudge: Built leaderboard with {len(leaderboard.entries)} entries")
         return leaderboard
 
 
 # =============================================================================
-# CLI Entry Point
+# CLI Entry Point (optional - for direct execution)
 # =============================================================================
+# Note: With modular classes, prefer running via:
+#   trec-auto-judge run --workflow workflow.yml
+#
+# For backwards compatibility, we still support direct CLI execution
+# by combining all three protocols into a single object.
 
 if __name__ == "__main__":
-    # Register CLI with subcommands: nuggify, judge, run
-    auto_judge_to_click_command(MinimalJudge(), "minimal_judge")()
+    from trec_auto_judge import AutoJudge, auto_judge_to_click_command
+
+    class MinimalJudgeCombined(AutoJudge):
+        """Combined class for CLI compatibility."""
+        nugget_banks_type = NuggetBanks
+
+        def __init__(self):
+            self._nugget_creator = MinimalNuggetCreator()
+            self._qrels_creator = MinimalQrelsCreator()
+            self._leaderboard_judge = MinimalLeaderboardJudge()
+
+        def create_nuggets(self, *args, **kwargs):
+            return self._nugget_creator.create_nuggets(*args, **kwargs)
+
+        def create_qrels(self, *args, **kwargs):
+            return self._qrels_creator.create_qrels(*args, **kwargs)
+
+        def judge(self, *args, **kwargs):
+            return self._leaderboard_judge.judge(*args, **kwargs)
+
+    auto_judge_to_click_command(MinimalJudgeCombined(), "minimal_judge")()

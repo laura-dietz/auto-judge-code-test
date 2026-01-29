@@ -4,12 +4,23 @@
 # See trec_auto_judge/workflow/README.md for full documentation.
 
 # =============================================================================
-# Judge Class
+# Judge Classes
 # =============================================================================
-# Dotted import path to the AutoJudge implementation class.
+# Dotted import paths to protocol implementations.
 # This allows running the judge via: trec-auto-judge run --workflow workflow.yml
+#
+# Three protocols can be specified separately for modular composition:
+#   nugget_class: NuggetCreatorProtocol (creates nuggets)
+#   qrels_class:  QrelsCreatorProtocol (creates relevance judgments)
+#   judge_class:  LeaderboardJudgeProtocol (produces leaderboard)
+#
+# MinimalJudge demonstrates the modular pattern with three separate classes:
 
-judge_class: "trec25.judges.minimaljudge.minimal_judge.MinimalJudge"
+# judge_class: "trec25.judges.minimaljudge.minimal_judge.MinimalJudge"
+
+nugget_class: "trec25.judges.minimaljudge.minimal_judge.MinimalNuggetCreator"
+qrels_class: "trec25.judges.minimaljudge.minimal_judge.MinimalQrelsCreator"
+judge_class: "trec25.judges.minimaljudge.minimal_judge.MinimalLeaderboardJudge"
 
 # =============================================================================
 # Lifecycle Flags
