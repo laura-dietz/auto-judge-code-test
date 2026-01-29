@@ -1,7 +1,53 @@
 """Shared utility functions."""
 
+import importlib
 import subprocess
-from typing import Sequence
+from typing import Sequence, Type, TypeVar
+
+T = TypeVar("T")
+
+
+def import_class(dotted_path: str) -> Type:
+    """
+    Import a class from a dotted path string.
+
+    Supports two formats:
+    - "module.path.ClassName" (dot-separated)
+    - "module.path:ClassName" (colon-separated, common in entry points)
+
+    Args:
+        dotted_path: Import path like "trec25.judges.minimaljudge.MinimalJudge"
+                     or "trec25.judges.minimaljudge:MinimalJudge"
+
+    Returns:
+        The imported class
+
+    Raises:
+        ImportError: If module not found
+        AttributeError: If class not found in module
+        ValueError: If path format is invalid
+
+    Examples:
+        judge_cls = import_class("trec25.judges.minimaljudge.MinimalJudge")
+        judge = judge_cls()
+    """
+    if not dotted_path:
+        raise ValueError("Empty import path")
+
+    # Handle colon-separated format (module:class)
+    if ":" in dotted_path:
+        module_path, class_name = dotted_path.rsplit(":", 1)
+    else:
+        # Handle dot-separated format (module.class)
+        if "." not in dotted_path:
+            raise ValueError(
+                f"Invalid import path: {dotted_path!r}. "
+                "Expected 'module.path.ClassName' or 'module.path:ClassName'"
+            )
+        module_path, class_name = dotted_path.rsplit(".", 1)
+
+    module = importlib.import_module(module_path)
+    return getattr(module, class_name)
 
 
 def get_git_info() -> dict[str, str]:

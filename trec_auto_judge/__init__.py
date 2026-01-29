@@ -95,6 +95,7 @@ from ._commands._meta_evaluate import meta_evaluate
 from ._commands._leaderboard import leaderboard
 from ._commands._export_corpus import export_corpus
 from ._commands._list_models import list_models
+from ._commands._run import run_workflow
 from click import group
 from .click_plus import option_rag_responses, option_rag_topics, option_ir_dataset, auto_judge_to_click_command
 
@@ -107,6 +108,7 @@ main.command("meta-evaluate")(meta_evaluate)
 main.command("leaderboard")(leaderboard)
 main.command()(export_corpus)
 main.add_command(list_models)
+main.add_command(run_workflow)
 
 
 if __name__ == '__main__':

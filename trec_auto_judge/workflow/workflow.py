@@ -67,6 +67,13 @@ class Workflow(BaseModel):
     judge: bool = True
     """Whether to call judge() to produce leaderboard."""
 
+    judge_class: Optional[str] = None
+    """Dotted import path for AutoJudge class, e.g., 'trec25.judges.minimaljudge.MinimalJudge'.
+
+    When specified, the judge is loaded dynamically from this path.
+    If not specified, the judge must be provided programmatically.
+    """
+
     @model_validator(mode="after")
     def derive_creation_flags(self) -> "Workflow":
         """Derive create_nuggets and create_qrels from usage flags if not explicitly set."""
@@ -604,3 +611,37 @@ def load_workflow_from_directory(directory: Union[str, Path]) -> Optional[Workfl
 
 # Default workflow for judges that don't declare one (judge only, no nuggets)
 DEFAULT_WORKFLOW = Workflow()
+
+
+def load_judge_from_workflow(workflow: Workflow):
+    """
+    Load and instantiate the AutoJudge class specified in workflow.judge_class.
+
+    Args:
+        workflow: Workflow configuration with judge_class set
+
+    Returns:
+        Instantiated AutoJudge instance
+
+    Raises:
+        ValueError: If workflow.judge_class is not set
+        ImportError: If the judge class cannot be imported
+        TypeError: If the imported class cannot be instantiated
+
+    Example workflow.yml:
+        judge_class: "trec25.judges.minimaljudge.MinimalJudge"
+
+    Example:
+        workflow = load_workflow("workflow.yml")
+        judge = load_judge_from_workflow(workflow)
+    """
+    from ..utils import import_class
+
+    if not workflow.judge_class:
+        raise ValueError(
+            "workflow.judge_class is not set. "
+            "Specify judge_class in workflow.yml or provide the judge instance directly."
+        )
+
+    judge_cls = import_class(workflow.judge_class)
+    return judge_cls()

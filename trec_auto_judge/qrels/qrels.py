@@ -72,19 +72,50 @@ def build_qrels(*, records: Iterable[R], spec: QrelsSpec[R]) -> list[QrelRow]:
 # === serialization ===
 
 
+def read_qrel_file(qrel_file: Union[str, Path]) -> Qrels:
+    """
+    Read qrels from standard TREC format:
+
+        topic_id  iteration  doc_id  grade
+
+    The iteration field (second column) is ignored.
+
+    Args:
+        qrel_file: Path to qrels file
+
+    Returns:
+        Qrels instance with loaded rows
+    """
+    path = Path(qrel_file)
+    rows = []
+
+    with path.open("r", encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            parts = line.split()
+            if len(parts) < 4:
+                continue
+            topic_id, _ignored, doc_id, grade = parts[0], parts[1], parts[2], parts[3]
+            rows.append(QrelRow(topic_id=topic_id, doc_id=doc_id, grade=int(grade)))
+
+    return Qrels(rows=rows)
+
+
 def write_qrel_file(
     *,
     qrel_out_file: Union[str, Path],
     qrels: Qrels,
-    system_id: str = "0",
+    _ignored: str = "0",
 ) -> None:
     """
     Write qrels in standard TREC format:
 
-        topic_id  system_id  doc_id  grade
+        topic_id  iteration  doc_id  grade
 
     Notes:
-    - `system_id` is conventionally '0' for human or synthetic judgments.
+    - The iteration field is always '0' (historical artifact, ignored by TREC tools).
     - Ordering is deterministic (sorted by topic_id, then doc_id).
     """
     path = Path(qrel_out_file)
@@ -98,4 +129,4 @@ def write_qrel_file(
 
     with path.open("w", encoding="utf-8") as f:
         for r in rows:
-            f.write(f"{r.topic_id} {system_id} {r.doc_id} {r.grade}\n")
+            f.write(f"{r.topic_id} {_ignored} {r.doc_id} {r.grade}\n")

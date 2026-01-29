@@ -4,6 +4,44 @@ This directory contains a minimal, self-documented example of an AutoJudge imple
 
 ## Quick Start
 
+There are two ways to run a judge:
+
+### Option 1: Via `trec-auto-judge` CLI (Recommended)
+
+When `judge_class` is specified in `workflow.yml`, you can run directly with the framework CLI:
+
+```bash
+# Run with default settings
+trec-auto-judge run \
+    --workflow ./trec25/judges/minimaljudge/workflow.yml \
+    --rag-responses /path/to/responses/ \
+    --rag-topics /path/to/topics.jsonl \
+    --out-dir ./output/ \
+    --llm-config /path/to/llm-config.yml
+
+# Run a specific variant
+trec-auto-judge run --workflow workflow.yml --variant strict ...
+
+# Run a parameter sweep
+trec-auto-judge run --workflow workflow.yml --sweep keyword-sweep ...
+```
+
+### Option 2: Via Judge-Specific Script
+
+You can also run the judge directly via its Python script. This requires a small CLI wrapper:
+
+```python
+# minimal_judge.py (at the bottom of the file)
+if __name__ == "__main__":
+    from trec_auto_judge import auto_judge_to_click_command
+
+    judge = MinimalJudge()
+    cli = auto_judge_to_click_command(judge, "minimaljudge")
+    cli()
+```
+
+Then run:
+
 ```bash
 # Run with default settings
 python ./trec25/judges/minimaljudge/minimal_judge.py run \
@@ -15,17 +53,16 @@ python ./trec25/judges/minimaljudge/minimal_judge.py run \
 
 # Run a specific variant
 python ./minimal_judge.py run --workflow workflow.yml --variant strict ...
-
-# Run a parameter sweep
-python ./minimal_judge.py run --workflow workflow.yml --sweep keyword-sweep ...
 ```
+
+The `auto_judge_to_click_command` creates a CLI with `run`, `nuggify`, and `judge` subcommands.
 
 ## Files
 
 | File | Purpose |
 |------|---------|
 | `minimal_judge.py` | Judge implementation (this is what you modify) |
-| `workflow.yml` | Configuration: lifecycle flags, settings, variants, sweeps |
+| `workflow.yml` | Configuration: judge_class, lifecycle flags, settings, variants, sweeps |
 | `README.md` | This documentation |
 
 ## The AutoJudge Protocol
@@ -202,6 +239,16 @@ def create_qrels(self, rag_responses, rag_topics, llm_config, **kwargs):
 ```
 
 ## Configuring with workflow.yml
+
+### Judge Class
+
+To enable running via `trec-auto-judge run`, specify the judge class:
+
+```yaml
+judge_class: "trec25.judges.minimaljudge.minimal_judge.MinimalJudge"
+```
+
+This is a dotted import path to your AutoJudge class. When specified, the framework can dynamically load and run your judge without a separate script.
 
 ### Lifecycle Flags
 

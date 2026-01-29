@@ -451,6 +451,272 @@ def _sanitize_path_for_prefix(path: Optional[Path]) -> str:
     return s
 
 
+def execute_run_workflow(
+    auto_judge,
+    workflow: Optional[Path],
+    rag_responses,
+    rag_topics,
+    nugget_banks,
+    llm_config: Optional[Path],
+    submission: bool,
+    out_dir: Optional[Path],
+    filebase: Optional[str],
+    store_nuggets: Optional[Path],
+    variant: Optional[str],
+    sweep: Optional[str],
+    all_variants: bool,
+    force_recreate_nuggets: Optional[bool],
+    create_nuggets: Optional[bool],
+    do_judge: Optional[bool],
+    settings_overrides: tuple,
+    nugget_settings_overrides: tuple,
+    judge_settings_overrides: tuple,
+    qrels_settings_overrides: tuple,
+    nugget_depends_on_responses: Optional[bool],
+    judge_uses_nuggets: Optional[bool],
+    create_qrels: Optional[bool],
+    judge_uses_qrels: Optional[bool],
+    qrels_uses_nuggets: Optional[bool],
+    qrels_input: Optional[Path],
+    qrels_output: Optional[Path],
+    augment_report: Optional[bool],
+    limit_topics: Optional[int],
+    limit_runs: Optional[int],
+    wf=None,
+):
+    """
+    Core execution logic for running a judge workflow.
+
+    This function is shared between:
+    - auto_judge_to_click_command's run_cmd (auto_judge passed in, wf optional)
+    - standalone run command (auto_judge loaded from wf.judge_class)
+
+    Args:
+        auto_judge: The AutoJudge instance to run
+        wf: Pre-loaded Workflow (optional, loaded from workflow path if None)
+        ... all other CLI args ...
+    """
+    # Load workflow if not provided
+    if wf is None:
+        if workflow:
+            wf = load_workflow(workflow)
+            click.echo(f"Loaded workflow: create_nuggets={wf.create_nuggets}, judge={wf.judge}", err=True)
+        else:
+            # No workflow file - require --nugget-judge flag
+            if judge_uses_nuggets is None:
+                raise click.UsageError(
+                    "No --workflow file provided.\n\n"
+                    "When running without workflow.yml, you must specify:\n"
+                    "  --nugget-judge     (creates nuggets, then judges with them)\n"
+                    "  --no-nugget-judge  (judge only, no nugget creation)\n"
+                )
+            wf = create_cli_default_workflow(judge_uses_nuggets)
+            click.echo(f"Using CLI defaults: create_nuggets={wf.create_nuggets}, judge={wf.judge}", err=True)
+
+    # Apply CLI overrides to workflow
+    apply_cli_workflow_overrides(
+        wf,
+        settings_overrides,
+        nugget_settings_overrides,
+        judge_settings_overrides,
+        nugget_depends_on_responses,
+        judge_uses_nuggets,
+    )
+
+    # CLI --filebase overrides workflow settings.filebase
+    if filebase:
+        wf.settings["filebase"] = filebase
+        click.echo(f"Filebase override: {filebase}", err=True)
+
+    # If --limit-topics is set, prefix filebase with "tmp-" for test runs
+    if limit_topics is not None and limit_topics > 0:
+        current_filebase = wf.settings.get("filebase", "{_name}")
+        wf.settings["filebase"] = f"tmp-{current_filebase}"
+        click.echo(f"Limited topics mode: filebase changed to {wf.settings['filebase']}", err=True)
+
+    # Validate mutually exclusive options
+    options_set = sum([bool(variant), bool(sweep), all_variants])
+    if options_set > 1:
+        raise click.UsageError("--variant, --sweep, and --all-variants are mutually exclusive.")
+
+    # Resolve configurations based on CLI options
+    try:
+        if variant:
+            configs = [resolve_variant(wf, variant)]
+        elif sweep:
+            configs = resolve_sweep(wf, sweep)
+        elif all_variants:
+            if not wf.variants:
+                raise click.UsageError("No variants defined in workflow.")
+            configs = [resolve_variant(wf, name) for name in wf.variants]
+        else:
+            configs = [resolve_default(wf)]
+    except KeyError as e:
+        raise click.UsageError(str(e).strip("'\""))
+
+    # Load base LLM config from file/env
+    base_llm_config = _resolve_llm_config(llm_config, submission)
+
+    # Convert rag_topics to list once (it's an iterable)
+    topics_list = list(rag_topics)
+
+    # Run each configuration
+    for config in configs:
+        click.echo(f"\n=== Running configuration: {config.name} ===", err=True)
+
+        # Apply llm_model from settings, validate in submission mode, strip from settings
+        effective_llm_config, clean_settings = _apply_llm_model_override(
+            base_llm_config, config.settings, submission
+        )
+
+        # Determine output paths: --store-nuggets overrides, otherwise use resolved config
+        nugget_output_path = store_nuggets or config.nugget_output_path
+        judge_output_path = config.judge_output_path
+
+        # Apply --out-dir prefix to output paths
+        if out_dir:
+            out_dir.mkdir(parents=True, exist_ok=True)
+            if nugget_output_path:
+                nugget_output_path = out_dir / nugget_output_path
+            if judge_output_path:
+                judge_output_path = out_dir / judge_output_path
+
+        # Compute full batch prefix if llm_batch_prefix is set
+        if effective_llm_config.parasail.llm_batch_prefix:
+            resolved_filebase = clean_settings.get("filebase", "").replace("{_name}", config.name)
+            effective_llm_config = _apply_batch_prefix(
+                effective_llm_config,
+                out_dir=out_dir,
+                filebase=resolved_filebase,
+                config_name=config.name,
+            )
+
+        if nugget_output_path:
+            click.echo(f"Nugget output: {nugget_output_path}", err=True)
+        if judge_output_path:
+            click.echo(f"Judge output: {judge_output_path}", err=True)
+
+        # CLI flags override workflow settings (None means use workflow default)
+        effective_create_nuggets = create_nuggets if create_nuggets is not None else wf.create_nuggets
+        effective_create_qrels = create_qrels if create_qrels is not None else wf.create_qrels
+        effective_do_judge = do_judge if do_judge is not None else wf.judge
+
+        # Determine qrels paths: CLI overrides, otherwise use resolved config
+        qrels_input_path = qrels_input or config.qrels_input_path
+        qrels_output_path = qrels_output or config.qrels_output_path
+
+        # Apply --out-dir prefix to qrels paths
+        if out_dir:
+            if qrels_input_path:
+                qrels_input_path = out_dir / qrels_input_path
+            if qrels_output_path:
+                qrels_output_path = out_dir / qrels_output_path
+
+        # Merge qrels settings: config.qrels_settings with CLI overrides
+        effective_qrels_settings = dict(config.qrels_settings)
+        for key, value in qrels_settings_overrides:
+            effective_qrels_settings[key] = value
+
+        run_judge(
+            auto_judge=auto_judge,
+            rag_responses=rag_responses,
+            rag_topics=topics_list,
+            llm_config=effective_llm_config,
+            nugget_banks_path=nugget_banks,
+            judge_output_path=judge_output_path,
+            nugget_output_path=nugget_output_path,
+            do_create_nuggets=effective_create_nuggets,
+            do_create_qrels=effective_create_qrels,
+            do_judge=effective_do_judge,
+            settings=clean_settings,
+            nugget_settings=config.nugget_settings,
+            judge_settings=config.judge_settings,
+            qrels_settings=effective_qrels_settings,
+            # Qrels paths
+            qrels_input_path=qrels_input_path,
+            qrels_output_path=qrels_output_path,
+            # Lifecycle flags
+            force_recreate_nuggets=force_recreate_nuggets if force_recreate_nuggets is not None else wf.force_recreate_nuggets,
+            force_recreate_qrels=wf.force_recreate_qrels,
+            nugget_depends_on_responses=wf.nugget_depends_on_responses,
+            judge_uses_nuggets=wf.judge_uses_nuggets,
+            judge_uses_qrels=judge_uses_qrels if judge_uses_qrels is not None else wf.judge_uses_qrels,
+            qrels_uses_nuggets=qrels_uses_nuggets if qrels_uses_nuggets is not None else wf.qrels_uses_nuggets,
+            augment_report=augment_report if augment_report is not None else wf.augment_report,
+            config_name=config.name,
+            limit_topics=limit_topics,
+            limit_runs=limit_runs,
+        )
+
+        click.echo(f"Done configuration: {config.name}", err=True)
+
+    click.echo(f"\nAll configurations complete.", err=True)
+
+
+def options_run(workflow_required: bool = False):
+    """
+    Decorator that applies all common run command options.
+
+    Args:
+        workflow_required: If True, --workflow is required (for standalone CLI).
+                          If False, --workflow is optional (for judge-specific CLI).
+    """
+    def decorator(func):
+        # Apply options in reverse order (bottom-up)
+        func = click.option("--limit-runs", type=int, default=None,
+                          help="Limit to first N run_ids (for testing).")(func)
+        func = click.option("--limit-topics", type=int, default=None,
+                          help="Limit to first N topics (for testing).")(func)
+        func = click.option("--augment-report/--no-augment-report", "augment_report",
+                          default=None, help="Save modified Report.evaldata to {filebase}.responses.jsonl.")(func)
+        func = click.option("--qrels-output", type=ExpandedPath(path_type=Path), default=None,
+                          help="Path to store created qrels.")(func)
+        func = click.option("--qrels-input", type=ClickNuggetBanksPath(), default=None,
+                          help="Path to input qrels file (for refinement or judge input).")(func)
+        func = click.option("--qrels-uses-nuggets/--no-qrels-uses-nuggets", default=None,
+                          help="Override whether create_qrels receives nuggets.")(func)
+        func = click.option("--judge-uses-qrels/--no-judge-uses-qrels", default=None,
+                          help="Override whether judge receives qrels from create_qrels phase.")(func)
+        func = click.option("--create-qrels/--no-create-qrels", default=None,
+                          help="Override workflow create_qrels flag.")(func)
+        func = click.option("--nugget-judge/--no-nugget-judge", "judge_uses_nuggets",
+                          default=None, help="Judge uses nuggets (REQUIRED when --workflow omitted).")(func)
+        func = click.option("--nugget-depends-on-responses/--no-nugget-depends-on-responses",
+                          default=None, help="Override nugget_depends_on_responses lifecycle flag.")(func)
+        func = click.option("--qset", "-Q", "qrels_settings_overrides", multiple=True, type=KeyValueType(),
+                          help="Override qrels settings: --qset key=value (e.g., --qset grade_range=[0,3])")(func)
+        func = click.option("--jset", "-J", "judge_settings_overrides", multiple=True, type=KeyValueType(),
+                          help="Override judge settings: --jset key=value")(func)
+        func = click.option("--nset", "-N", "nugget_settings_overrides", multiple=True, type=KeyValueType(),
+                          help="Override nugget settings: --nset key=value")(func)
+        func = click.option("--set", "-S", "settings_overrides", multiple=True, type=KeyValueType(),
+                          help="Override shared settings: --set key=value")(func)
+        func = click.option("--judge/--no-judge", "do_judge", default=None, help="Override workflow judge flag.")(func)
+        func = click.option("--create-nuggets/--no-create-nuggets", default=None, help="Override workflow create_nuggets flag.")(func)
+        func = click.option("--force-recreate-nuggets/--no-force-recreate-nuggets", default=None,
+                          help="Recreate nuggets even if file exists. Default: same as create_nuggets.")(func)
+        func = click.option("--all-variants", is_flag=True, help="Run all variants defined in workflow.yml.")(func)
+        func = click.option("--sweep", type=str, help="Run a parameter sweep from workflow.yml (e.g., --sweep $name).", required=False)(func)
+        func = click.option("--variant", type=str, help="Run a named variant from workflow.yml (e.g., --variant $name).", required=False)(func)
+        func = click.option("--store-nuggets", type=ExpandedPath(path_type=Path), help="Override nugget output path.", required=False)(func)
+        func = click.option("--filebase", type=str, help="Override workflow filebase (e.g., 'my-run').", required=False)(func)
+        func = click.option("--out-dir", type=ExpandedPath(path_type=Path), help="Parent directory for all output files.", required=False)(func)
+        func = option_submission()(func)
+        func = option_llm_config()(func)
+        func = option_nugget_banks()(func)
+        func = option_rag_topics()(func)
+        func = option_rag_responses()(func)
+        func = click.option(
+            "--workflow", "-w",
+            type=ExpandedPath(exists=True, path_type=Path),
+            required=workflow_required,
+            default=None,
+            help="Path to workflow.yml declaring the judge workflow settings."
+        )(func)
+        return func
+    return decorator
+
+
 def _apply_batch_prefix(
     llm_config: MinimaLlmConfig,
     out_dir: Optional[Path],
@@ -573,257 +839,11 @@ def auto_judge_to_click_command(auto_judge: AutoJudge, cmd_name: str):
             do_judge=False,
         )
 
-    @click.option("--output", type=Path, help="The output file.", required=True)
-    def run(rag_topics:Iterable[Request], rag_responses:Iterable[Report], output:Path):
-        leaderboard, qrels = auto_judge.judge(rag_responses, rag_topics)
-        
-        topic_ids = {t.request_id for t in rag_topics}
-        verify_leaderboard_topics(expected_topic_ids=topic_ids,
-            entries=leaderboard.entries,
-            include_all_row=True,
-            require_no_extras=True
-        )
-
-        if result.nuggets is None:
-            click.echo("Warning: Judge doesn't create nuggets (create_nuggets returned None)", err=True)
-        else:
-            click.echo(f"Nuggets written to {store_nuggets}", err=True)
-
     @cli.command("run")
-    @option_workflow()
-    @option_rag_responses()
-    @option_rag_topics()
-    @option_nugget_banks()
-    @option_llm_config()
-    @option_submission()
-    @click.option("--out-dir", type=ExpandedPath(path_type=Path), help="Parent directory for all output files.", required=False)
-    @click.option("--filebase", type=str, help="Override workflow filebase (e.g., 'my-run').", required=False)
-    @click.option("--store-nuggets", type=ExpandedPath(path_type=Path), help="Override nugget output path.", required=False)
-    @click.option("--variant", type=str, help="Run a named variant from workflow.yml (e.g., --variant $name).", required=False)
-    @click.option("--sweep", type=str, help="Run a parameter sweep from workflow.yml (e.g., --sweep $name).", required=False)
-    @click.option("--all-variants", is_flag=True, help="Run all variants defined in workflow.yml.")
-    @click.option("--force-recreate-nuggets/--no-force-recreate-nuggets", default=None,
-                  help="Recreate nuggets even if file exists. Default: same as create_nuggets.")
-    @click.option("--create-nuggets/--no-create-nuggets", default=None, help="Override workflow create_nuggets flag.")
-    @click.option("--judge/--no-judge", "do_judge", default=None, help="Override workflow judge flag.")
-    @click.option("--set", "-S", "settings_overrides", multiple=True, type=KeyValueType(),
-                  help="Override shared settings: --set key=value")
-    @click.option("--nset", "-N", "nugget_settings_overrides", multiple=True, type=KeyValueType(),
-                  help="Override nugget settings: --nset key=value")
-    @click.option("--jset", "-J", "judge_settings_overrides", multiple=True, type=KeyValueType(),
-                  help="Override judge settings: --jset key=value")
-    @click.option("--qset", "-Q", "qrels_settings_overrides", multiple=True, type=KeyValueType(),
-                  help="Override qrels settings: --qset key=value (e.g., --qset grade_range=[0,3])")
-    @click.option("--nugget-depends-on-responses/--no-nugget-depends-on-responses",
-                  default=None, help="Override nugget_depends_on_responses lifecycle flag.")
-    @click.option("--nugget-judge/--no-nugget-judge", "judge_uses_nuggets",
-                  default=None, help="Judge uses nuggets (REQUIRED when --workflow omitted).")
-    @click.option("--create-qrels/--no-create-qrels", default=None,
-                  help="Override workflow create_qrels flag.")
-    @click.option("--judge-uses-qrels/--no-judge-uses-qrels", default=None,
-                  help="Override whether judge receives qrels from create_qrels phase.")
-    @click.option("--qrels-uses-nuggets/--no-qrels-uses-nuggets", default=None,
-                  help="Override whether create_qrels receives nuggets.")
-    @click.option("--qrels-input", type=ClickNuggetBanksPath(), default=None,
-                  help="Path to input qrels file (for refinement or judge input).")
-    @click.option("--qrels-output", type=ExpandedPath(path_type=Path), default=None,
-                  help="Path to store created qrels.")
-    @click.option("--augment-report/--no-augment-report", "augment_report",
-                  default=None, help="Save modified Report.evaldata to {filebase}.responses.jsonl.")
-    @click.option("--limit-topics", type=int, default=None,
-                  help="Limit to first N topics (for testing).")
-    @click.option("--limit-runs", type=int, default=None,
-                  help="Limit to first N run_ids (for testing).")
-    def run_cmd(
-        workflow: Optional[Path],
-        rag_responses: Iterable[Report],
-        rag_topics: Iterable[Request],
-        nugget_banks,
-        llm_config: Optional[Path],
-        submission: bool,
-        out_dir: Optional[Path],
-        filebase: Optional[str],
-        store_nuggets: Optional[Path],
-        variant: Optional[str],
-        sweep: Optional[str],
-        all_variants: bool,
-        force_recreate_nuggets: Optional[bool],
-        create_nuggets: Optional[bool],
-        do_judge: Optional[bool],
-        settings_overrides: tuple,
-        nugget_settings_overrides: tuple,
-        judge_settings_overrides: tuple,
-        qrels_settings_overrides: tuple,
-        nugget_depends_on_responses: Optional[bool],
-        judge_uses_nuggets: Optional[bool],
-        create_qrels: Optional[bool],
-        judge_uses_qrels: Optional[bool],
-        qrels_uses_nuggets: Optional[bool],
-        qrels_input: Optional[Path],
-        qrels_output: Optional[Path],
-        augment_report: Optional[bool],
-        limit_topics: Optional[int],
-        limit_runs: Optional[int],
-    ):
+    @options_run(workflow_required=False)
+    def run_cmd(**kwargs):
         """Run judge according to workflow.yml (default command)."""
-        # Load workflow or create default based on CLI flags
-        if workflow:
-            wf = load_workflow(workflow)
-            click.echo(f"Loaded workflow: create_nuggets={wf.create_nuggets}, judge={wf.judge}", err=True)
-        else:
-            # No workflow file - require --nugget-judge flag
-            if judge_uses_nuggets is None:
-                raise click.UsageError(
-                    "No --workflow file provided.\n\n"
-                    "When running without workflow.yml, you must specify:\n"
-                    "  --nugget-judge     (creates nuggets, then judges with them)\n"
-                    "  --no-nugget-judge  (judge only, no nugget creation)\n"
-                )
-            wf = create_cli_default_workflow(judge_uses_nuggets)
-            click.echo(f"Using CLI defaults: create_nuggets={wf.create_nuggets}, judge={wf.judge}", err=True)
-
-        # Apply CLI overrides to workflow
-        apply_cli_workflow_overrides(
-            wf,
-            settings_overrides,
-            nugget_settings_overrides,
-            judge_settings_overrides,
-            nugget_depends_on_responses,
-            judge_uses_nuggets,
-        )
-
-        # CLI --filebase overrides workflow settings.filebase
-        if filebase:
-            wf.settings["filebase"] = filebase
-            click.echo(f"Filebase override: {filebase}", err=True)
-
-        # If --limit-topics is set, prefix filebase with "tmp-" for test runs
-        if limit_topics is not None and limit_topics > 0:
-            current_filebase = wf.settings.get("filebase", "{_name}")
-            wf.settings["filebase"] = f"tmp-{current_filebase}"
-            click.echo(f"Limited topics mode: filebase changed to {wf.settings['filebase']}", err=True)
-
-        # Validate mutually exclusive options
-        options_set = sum([bool(variant), bool(sweep), all_variants])
-        if options_set > 1:
-            raise click.UsageError("--variant, --sweep, and --all-variants are mutually exclusive.")
-
-        # Resolve configurations based on CLI options
-        try:
-            if variant:
-                configs = [resolve_variant(wf, variant)]
-            elif sweep:
-                configs = resolve_sweep(wf, sweep)
-            elif all_variants:
-                if not wf.variants:
-                    raise click.UsageError("No variants defined in workflow.")
-                configs = [resolve_variant(wf, name) for name in wf.variants]
-            else:
-                configs = [resolve_default(wf)]
-        except KeyError as e:
-            raise click.UsageError(str(e).strip("'\""))
-
-
-        # Step 1: Load base LLM config from file/env
-        base_llm_config = _resolve_llm_config(llm_config, submission)
-
-        # Convert rag_topics to list once (it's an iterable)
-        topics_list = list(rag_topics)
-
-        # Run each configuration
-        for config in configs:
-            click.echo(f"\n=== Running configuration: {config.name} ===", err=True)
-
-            # Step 2-4: Apply llm_model from settings, validate in submission mode, strip from settings
-            effective_llm_config, clean_settings = _apply_llm_model_override(
-                base_llm_config, config.settings, submission
-            )
-
-            # Determine output paths: --store-nuggets overrides, otherwise use resolved config
-            # (--filebase was already injected into wf.settings before resolution)
-            nugget_output_path = store_nuggets or config.nugget_output_path
-            judge_output_path = config.judge_output_path
-
-            # Apply --out-dir prefix to output paths
-            if out_dir:
-                out_dir.mkdir(parents=True, exist_ok=True)
-                if nugget_output_path:
-                    nugget_output_path = out_dir / nugget_output_path
-                if judge_output_path:
-                    judge_output_path = out_dir / judge_output_path
-
-            # Compute full batch prefix if llm_batch_prefix is set
-            if effective_llm_config.parasail.llm_batch_prefix:
-                # Resolve {_name} template in filebase (same as output paths)
-                resolved_filebase = clean_settings.get("filebase", "").replace("{_name}", config.name)
-                effective_llm_config = _apply_batch_prefix(
-                    effective_llm_config,
-                    out_dir=out_dir,
-                    filebase=resolved_filebase,
-                    config_name=config.name,
-                )
-
-            if nugget_output_path:
-                click.echo(f"Nugget output: {nugget_output_path}", err=True)
-            if judge_output_path:
-                click.echo(f"Judge output: {judge_output_path}", err=True)
-
-            # CLI flags override workflow settings (None means use workflow default)
-            effective_create_nuggets = create_nuggets if create_nuggets is not None else wf.create_nuggets
-            effective_create_qrels = create_qrels if create_qrels is not None else wf.create_qrels
-            effective_do_judge = do_judge if do_judge is not None else wf.judge
-
-            # Determine qrels paths: CLI overrides, otherwise use resolved config
-            qrels_input_path = qrels_input or config.qrels_input_path
-            qrels_output_path = qrels_output or config.qrels_output_path
-
-            # Apply --out-dir prefix to qrels paths
-            if out_dir:
-                if qrels_input_path:
-                    qrels_input_path = out_dir / qrels_input_path
-                if qrels_output_path:
-                    qrels_output_path = out_dir / qrels_output_path
-
-            # Merge qrels settings: config.qrels_settings with CLI overrides
-            effective_qrels_settings = dict(config.qrels_settings)
-            for key, value in qrels_settings_overrides:
-                effective_qrels_settings[key] = value
-
-            # each returns a JudgeResult object to contain Leaderboard, Qrels, Nuggets for meta-evaluation
-            run_judge(
-                auto_judge=auto_judge,
-                rag_responses=rag_responses,
-                rag_topics=topics_list,
-                llm_config=effective_llm_config,
-                nugget_banks_path=nugget_banks,
-                judge_output_path=judge_output_path,
-                nugget_output_path=nugget_output_path,
-                do_create_nuggets=effective_create_nuggets,
-                do_create_qrels=effective_create_qrels,
-                do_judge=effective_do_judge,
-                settings=clean_settings,
-                nugget_settings=config.nugget_settings,
-                judge_settings=config.judge_settings,
-                qrels_settings=effective_qrels_settings,
-                # Qrels paths
-                qrels_input_path=qrels_input_path,
-                qrels_output_path=qrels_output_path,
-                # Lifecycle flags
-                force_recreate_nuggets=force_recreate_nuggets if force_recreate_nuggets is not None else wf.force_recreate_nuggets,
-                force_recreate_qrels=wf.force_recreate_qrels,
-                nugget_depends_on_responses=wf.nugget_depends_on_responses,
-                judge_uses_nuggets=wf.judge_uses_nuggets,
-                judge_uses_qrels=judge_uses_qrels if judge_uses_qrels is not None else wf.judge_uses_qrels,
-                qrels_uses_nuggets=qrels_uses_nuggets if qrels_uses_nuggets is not None else wf.qrels_uses_nuggets,
-                augment_report=augment_report if augment_report is not None else wf.augment_report,
-                config_name=config.name,
-                limit_topics=limit_topics,
-                limit_runs=limit_runs,
-            )
-
-            click.echo(f"Done configuration: {config.name}", err=True)
-
-        click.echo(f"\nAll configurations complete.", err=True)
+        execute_run_workflow(auto_judge=auto_judge, **kwargs)
 
     @cli.command("batch-status")
     @option_llm_config()

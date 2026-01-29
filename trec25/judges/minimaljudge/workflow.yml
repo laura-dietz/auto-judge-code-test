@@ -4,6 +4,14 @@
 # See trec_auto_judge/workflow/README.md for full documentation.
 
 # =============================================================================
+# Judge Class
+# =============================================================================
+# Dotted import path to the AutoJudge implementation class.
+# This allows running the judge via: trec-auto-judge run --workflow workflow.yml
+
+judge_class: "trec25.judges.minimaljudge.minimal_judge.MinimalJudge"
+
+# =============================================================================
 # Lifecycle Flags
 # =============================================================================
 # Control which phases of the judge run and how data flows between them.
