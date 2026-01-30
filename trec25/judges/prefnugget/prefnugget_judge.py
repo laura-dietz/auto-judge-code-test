@@ -9,6 +9,7 @@ This judge is primarily a nugget creator - judge() returns (None, None).
 """
 import collections
 from itertools import groupby
+from random import shuffle, Random
 import sys
 from textwrap import dedent
 from typing import Any, Dict, List, Literal, Set
@@ -249,7 +250,7 @@ def _print_tracker(tracker: QuestionTracker) -> str:
 def _chunk_by_query_both(
     lst: List[PrefNuggetData],
     borda_scores: Dict[str, int],
-    nugget_gen_order: Literal["winner", "both"],
+    nugget_gen_order: Literal["both", "winner","as_provided"],
     num_per_query: int = 2, 
     max_pairs_considered: int = -1
 ) -> List[List[PrefNuggetData]]:
@@ -295,6 +296,8 @@ def _chunk_by_query_both(
                 key=lambda x: borda_scores.get(f"{x.winner_run_id}:{x.query_id}", 0),
                 reverse=True,
             )
+        elif nugget_gen_order == 'as_provided':
+            topic_lst = topic_lst
 
         # Limit to top-k pairs per topic (if max_pairs_considered > 0)
         if max_pairs_considered > 0:
@@ -324,7 +327,7 @@ def _chunk_by_query_both(
 def _chunk_by_query(
     lst: List[PrefNuggetData],
     borda_scores: Dict[str, int],
-    nugget_gen_order: Literal["both", "winner"],
+    nugget_gen_order: Literal["both", "winner","as_provided"],
     num_per_query: int = 2,
     max_pairs_considered: int = -1
     ):
@@ -369,7 +372,7 @@ def run_preference_phase(
     num_others: int,
     no_dupes: bool,
     pref_judge: Literal['must_decide', 'ties_allowed'] = 'must_decide',
-) -> Optional[tuple[List, Dict]]:
+) -> Optional[tuple[List[PrefNuggetData], Dict[str, PrefAggregateResult]]]:
     """Run pairwise preference comparisons and compute aggregates.
 
     Returns:
@@ -404,6 +407,64 @@ def run_preference_phase(
 
     return grade_data, aggregates
 
+
+def extract_random_pairs(
+    # aggregates: Dict[str, PrefAggregateResult],
+    rag_responses: Sequence[Report],
+    rag_topic_dict: Dict[str, Request],
+) -> List[PrefNuggetData]:
+    """Use random pairs to (null hypothesis that winner/loser pairs are not helping).
+
+    Args:
+        aggregates: Dict of computed aggregates with better_than/worse_than lists
+        rag_responses: RAG responses (used to build responses_by_key)
+        rag_topic_dict: topic_id -> Request mapping
+
+    Returns:
+        List of PrefNuggetData objects ready for LLM extraction
+    """
+    responses_by_topic: Dict[str,List[Report]] = collections.defaultdict(list)
+    for r in rag_responses:
+        responses_by_topic[r.metadata.topic_id].append(r)
+    
+    extraction_data: List[PrefNuggetData] = []
+
+    for topic_id, responses in responses_by_topic.items():
+        rng = Random(topic_id)
+        rng.shuffle(responses) # make this pseudo-random
+        for i in range(len(responses)):
+            for j in range(i+1, len(responses)):
+                winner_response = responses[i]
+                loser_response = responses[j]
+        
+                if not winner_response:
+                    continue
+
+                winner_run_id = winner_response.metadata.run_id
+                # winner_key = f"{winner_run_id}:{topic_id}"
+                # winner_response = responses_by_key.get(winner_key)
+
+                loser_run_id = loser_response.metadata.run_id
+                # looser_key = f"{loser_run_id}:{topic_id}"
+
+                request = rag_topic_dict.get(topic_id)
+                if not request:
+                    continue
+
+                # This response beat these runs
+                extraction_data.append(
+                    PrefNuggetData(
+                        query_id=topic_id,
+                        query_title=request.title or "",
+                        query_background=request.background or "",
+                        winner_run_id=winner_run_id,
+                        loser_run_id=loser_run_id,
+                        winner_passage=winner_response.get_report_text(),
+                        loser_passage=loser_response.get_report_text(),
+                    )
+                )
+
+    return extraction_data
 
 def extract_winner_loser_pairs(
     aggregates: Dict[str, PrefAggregateResult],
@@ -540,6 +601,7 @@ class PrefNuggetJudge(AutoJudge):
         num_pivot: int = 0,
         num_others: int = 8,
         no_dupes:bool = True,
+        random_pairs:bool = False,
         # nugget_banks: Optional[NuggetBanks] = None,
         **kwargs,
     ) -> Optional[NuggetBanksProtocol]:
@@ -567,22 +629,31 @@ class PrefNuggetJudge(AutoJudge):
         rag_topic_dict, rag_response_by_topic = build_response_lookups(rag_responses, rag_topics)
         rag_responses = self.filter_non_topic_responses(rag_responses, rag_topic_dict.keys())
 
-        # Step 1: Run pairwise preference comparisons
-        result = run_preference_phase(
-            rag_topic_dict=rag_topic_dict,
-            rag_response_by_topic=rag_response_by_topic,
-            llm_config=llm_config,
-            num_pivot=num_pivot,
-            num_others=num_others,
-            no_dupes=no_dupes,
-            pref_judge=pref_judge,
-        )
-        if result is None:
-            return None
-        _, aggregates = result
+        extraction_data: List[PrefNuggetData]
+        borda_scores: Dict[str, int]
+        if not random_pairs:
+            # Step 1: Run pairwise preference comparisons
+            result = run_preference_phase(
+                rag_topic_dict=rag_topic_dict,
+                rag_response_by_topic=rag_response_by_topic,
+                llm_config=llm_config,
+                num_pivot=num_pivot,
+                num_others=num_others,
+                no_dupes=no_dupes,
+                pref_judge=pref_judge,
+            )
+            if result is None:
+                return None
+            _, aggregates = result
 
-        # Step 2: Extract comparison pairs from aggregates
-        extraction_data = extract_winner_loser_pairs(aggregates, rag_responses, rag_topic_dict)
+            # Step 2: Extract comparison pairs from aggregates
+            extraction_data = extract_winner_loser_pairs(aggregates, rag_responses=rag_responses, rag_topic_dict=rag_topic_dict)
+            # Build borda_scores lookup for prioritizing best-performing responses
+            borda_scores = {key: agg.borda_score for key, agg in aggregates.items()}
+        else:
+            extraction_data = extract_random_pairs(rag_responses=rag_responses, rag_topic_dict=rag_topic_dict)
+            borda_scores = dict()
+            
         # Initialize given_exam_questions for iterative extraction (filled in per-chunk later)
         for data in extraction_data:
             data.given_exam_questions = []
@@ -608,15 +679,13 @@ class PrefNuggetJudge(AutoJudge):
             ][:max_questions_per_pair]
 
         if iterative_nuggets:
-            # Build borda_scores lookup for prioritizing best-performing responses
-            borda_scores: Dict[str, int] = {key: agg.borda_score for key, agg in aggregates.items()}
 
             # Spread out elements with same query_id (round-robin interleave)
             # Within each topic, pairs are sorted by winner's borda_score (best performers first)
             extraction_data_chunks = _chunk_by_query(
                 extraction_data,
                 borda_scores=borda_scores,
-                nugget_gen_order=nugget_gen_order,
+                nugget_gen_order="as_provided" if random_pairs else nugget_gen_order,
                 num_per_query=gen_batch_num_per_query,
                 max_pairs_considered=max_pairs_considered,
             )
