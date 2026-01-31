@@ -42,7 +42,8 @@ class Leaderboard:
     measures: Tuple[MeasureName, ...]
     entries: Tuple[LeaderboardEntry, ...]
     all_topic_id: str = "all"
-    
+    spec: Optional["LeaderboardSpec"] = None
+
     def all_measure_names(self) -> Tuple[MeasureName, ...]:
         """Return measure names in schema order."""
         return self.measures
@@ -104,9 +105,24 @@ class Leaderboard:
         leaderboard. For trec_eval format, each file's name becomes the run_id.
         """
         if path.is_dir():
-            return cls._load_directory(path, format, has_header)
+            lb = cls._load_directory(path, format, has_header)
         else:
-            return cls._load_file(path, format, has_header)
+            lb = cls._load_file(path, format, has_header)
+
+        # Create default spec for loaded leaderboard (single place for this logic)
+        spec = LeaderboardSpec(
+            measures=tuple(
+                MeasureSpec(name=m, aggregate=mean_of_floats, default=0.0)
+                for m in lb.measures
+            ),
+        )
+
+        return cls(
+            measures=lb.measures,
+            entries=lb.entries,
+            all_topic_id=lb.all_topic_id,
+            spec=spec,
+        )
 
     @classmethod
     def _load_directory(
@@ -223,6 +239,93 @@ class Leaderboard:
         LeaderboardVerification(leaderboard = self, warn=warn, expected_topic_ids=expected_topic_ids, on_missing=on_missing) \
             .complete_measures(include_all_row=True) \
             .complete_topics()
+
+    # =========================================================================
+    # Filtering and Transformation Methods
+    # =========================================================================
+
+    @property
+    def run_ids(self) -> Set[str]:
+        """Unique run_ids in entries."""
+        return {e.run_id for e in self.entries}
+
+    @property
+    def topic_ids(self) -> Set[str]:
+        """Unique topic_ids (excluding 'all')."""
+        return {e.topic_id for e in self.entries if e.topic_id != self.all_topic_id}
+
+    def filter_and_recompute(
+        self,
+        run_ids: Optional[Set[str]] = None,
+        topic_ids: Optional[Set[str]] = None,
+    ) -> "Leaderboard":
+        """
+        Filter leaderboard and recompute 'all' aggregates.
+
+        Args:
+            run_ids: Keep only these run_ids. None = keep all.
+            topic_ids: Keep only these topic_ids. None = keep all.
+                Also used as expected topics for aggregation defaults.
+
+        Returns:
+            New Leaderboard with filtered entries and fresh 'all' rows.
+        """
+        builder = LeaderboardBuilder(self.spec)
+
+        for e in self.entries:
+            if e.topic_id == self.all_topic_id:
+                continue
+            if run_ids is not None and e.run_id not in run_ids:
+                continue
+            if topic_ids is not None and e.topic_id not in topic_ids:
+                continue
+            builder.add(run_id=e.run_id, topic_id=e.topic_id, values=e.values)
+
+        expected = list(topic_ids) if topic_ids is not None else list(self.topic_ids)
+        return builder.build(expected_topic_ids=expected, on_missing="fix_aggregate")
+
+    def get_aggregate_ranking(self, measure: str) -> Dict[str, float]:
+        """
+        Extract run_id -> value mapping from 'all' aggregate rows.
+
+        Args:
+            measure: Measure name to extract
+
+        Returns:
+            Dict mapping run_id to measure value
+
+        Raises:
+            ValueError: If measure not found in aggregate rows
+        """
+        ranking: Dict[str, float] = {}
+        for e in self.entries:
+            if e.topic_id == self.all_topic_id and measure in e.values:
+                ranking[e.run_id] = float(e.values[measure])
+
+        if not ranking:
+            raise ValueError(f"Measure '{measure}' not found in aggregate rows")
+
+        return ranking
+
+    def top_k_run_ids(self, measure: str, k: int) -> List[str]:
+        """
+        Get top k run_ids by measure value from 'all' aggregate rows.
+
+        Args:
+            measure: Measure name to sort by
+            k: Number of top run_ids to return
+
+        Returns:
+            List of top k run_ids sorted by measure value (descending)
+
+        Raises:
+            ValueError: If measure not found in aggregate rows
+        """
+        ranking = self.get_aggregate_ranking(measure)
+        sorted_runs = sorted(ranking.items(), key=lambda x: x[1], reverse=True)
+        return [run_id for run_id, _ in sorted_runs[:k]]
+
+
 @dataclass(frozen=True)
 class MeasureSpec:
     """
@@ -467,6 +570,7 @@ class LeaderboardBuilder:
             measures=self.spec.names,
             entries=tuple(all_entries + all_rows),
             all_topic_id=self.spec.all_topic_id,
+            spec=self.spec,
         )
 
 

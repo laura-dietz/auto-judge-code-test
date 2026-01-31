@@ -2,7 +2,7 @@ import click
 import glob
 from pathlib import Path
 import pandas as pd
-from ..evaluation import TrecLeaderboardEvaluation
+from ..evaluation import TrecLeaderboardEvaluation, CORRELATION_METHODS
 from ..click_plus import (
     detect_header_interactive,
     LEADERBOARD_FORMATS,
@@ -92,6 +92,12 @@ def persist_output(df: pd.DataFrame, output: Path) -> None:
     is_flag=True,
     help="Should only aggregates scores be reported.",
 )
+@click.option(
+    "--correlation",
+    type=click.Choice(CORRELATION_METHODS),
+    multiple=True,
+    help="Correlation method(s) to compute. Repeatable. If omitted, computes all.",
+)
 @click.argument("input_files", nargs=-1, type=str)
 def meta_evaluate(
     truth_leaderboard: Path,
@@ -105,6 +111,7 @@ def meta_evaluate(
     input: tuple,
     output: Path,
     aggregate: bool,
+    correlation: tuple,
     input_files: tuple,
 ) -> int:
     """Compute correlation between predicted leaderboards and ground-truth leaderboard."""
@@ -136,6 +143,7 @@ def meta_evaluate(
     # Convert tuples to lists (empty tuple means "all measures")
     truth_measures = list(truth_measure) if truth_measure else None
     eval_measures = list(eval_measure) if eval_measure else None
+    correlation_methods = list(correlation) if correlation else None
 
     te = TrecLeaderboardEvaluation(
         truth_leaderboard,
@@ -146,6 +154,7 @@ def meta_evaluate(
         eval_format=eval_format,
         eval_has_header=eval_has_header,
         on_missing=on_missing,
+        correlation_methods=correlation_methods,
     )
 
     df = []

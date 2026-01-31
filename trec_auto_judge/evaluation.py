@@ -7,6 +7,8 @@ from trec_auto_judge import Leaderboard
 
 OnMissing = Literal["error", "warn", "skip", "default"]
 LeaderboardFormat = Literal["trec_eval", "tot", "ir_measures", "ranking"]
+CorrelationMethod = Literal["kendall", "pearson", "spearman", "tauap_b"]
+CORRELATION_METHODS: List[CorrelationMethod] = ["kendall", "pearson", "spearman", "tauap_b"]
 
 
 class TrecLeaderboardEvaluation():
@@ -22,6 +24,7 @@ class TrecLeaderboardEvaluation():
         truth_has_header: bool = False,
         eval_format: LeaderboardFormat = "tot",
         eval_has_header: bool = False,
+        correlation_methods: List[CorrelationMethod] | None = None,
     ):
         self.on_missing = on_missing
         self.truth_format = truth_format
@@ -30,6 +33,7 @@ class TrecLeaderboardEvaluation():
         self.eval_has_header = eval_has_header
         self.truth_measures_filter = truth_measures  # None means all
         self.eval_measures_filter = eval_measures    # None means all
+        self.correlation_methods = correlation_methods if correlation_methods else CORRELATION_METHODS
 
         # Load truth leaderboard (required)
         self.truth_leaderboard = self.load_leaderboard(
@@ -43,16 +47,7 @@ class TrecLeaderboardEvaluation():
 
     def extract_ranking(self, leaderboard: Leaderboard, measure: str) -> Dict[str, float]:
         """Extract run_id -> value mapping for aggregate rows (topic_id == all_topic_id)."""
-        ret = {}
-        for entry in leaderboard.entries:
-            if entry.topic_id != leaderboard.all_topic_id:
-                continue
-            if measure in entry.values:
-                ret[entry.run_id] = float(entry.values[measure])
-
-        if len(ret) == 0:
-            raise ValueError(f"Measure {measure} does not exist, I found: {sorted(leaderboard.measures)}")
-        return ret
+        return leaderboard.get_aggregate_ranking(measure)
 
     def get_measure_pairs(
         self, eval_leaderboard: Leaderboard
@@ -61,26 +56,64 @@ class TrecLeaderboardEvaluation():
         # Determine eval measures to use
         eval_measures = list(eval_leaderboard.measures)
         if self.eval_measures_filter:
+            missing = set(self.eval_measures_filter) - set(eval_leaderboard.measures)
+            if missing:
+                raise ValueError(f"Eval measures not found in eval leaderboard: {sorted(missing)}")
             eval_measures = [m for m in eval_measures if m in self.eval_measures_filter]
 
         # Determine truth measures to use
         truth_measures = list(self.truth_leaderboard.measures)
         if self.truth_measures_filter:
+            missing = set(self.truth_measures_filter) - set(self.truth_leaderboard.measures)
+            if missing:
+                raise ValueError(f"Truth measures not found in truth leaderboard: {sorted(missing)}")
             truth_measures = [m for m in truth_measures if m in self.truth_measures_filter]
 
         # Generate all pairs
         return [(tm, em) for tm in truth_measures for em in eval_measures]
 
-    def evaluate(self, leaderboard_file: Path) -> Dict[Tuple[str, str], Dict]:
-        """Evaluate and return dict keyed by (truth_measure, eval_measure) pairs."""
+    def evaluate(
+        self,
+        leaderboard_file: Path,
+        top_k: int | None = None,
+    ) -> Dict[Tuple[str, str], Dict]:
+        """
+        Evaluate and return dict keyed by (truth_measure, eval_measure) pairs.
+
+        Args:
+            leaderboard_file: Path to the evaluated leaderboard file
+            top_k: If set, compute correlation only for top k run_ids from truth.
+                The truth leaderboard is first cleaned to match eval's run_ids,
+                then top k are selected based on each truth measure.
+
+        Returns:
+            Dict mapping (truth_measure, eval_measure) pairs to correlation results.
+        """
         eval_leaderboard = self.load_leaderboard(
             leaderboard_file, self.eval_format, self.eval_has_header
         )
+
+        # Clean truth to match eval's run_ids and recompute aggregates
+        cleaned_truth = self.truth_leaderboard.filter_and_recompute(
+            run_ids=eval_leaderboard.run_ids
+        )
+
         ret = {}
 
         for truth_m, eval_m in self.get_measure_pairs(eval_leaderboard):
-            truth_ranking = self.extract_ranking(self.truth_leaderboard, truth_m)
-            eval_ranking = self.extract_ranking(eval_leaderboard, eval_m)
+            # Get the appropriate leaderboards for this measure pair
+            truth_for_measure = cleaned_truth
+            eval_for_measure = eval_leaderboard
+
+            if top_k is not None:
+                # Get top k run_ids from cleaned truth
+                top_run_ids = set(cleaned_truth.top_k_run_ids(truth_m, top_k))
+                # Filter both to top k and recompute
+                truth_for_measure = cleaned_truth.filter_and_recompute(run_ids=top_run_ids)
+                eval_for_measure = eval_leaderboard.filter_and_recompute(run_ids=top_run_ids)
+
+            truth_ranking = self.extract_ranking(truth_for_measure, truth_m)
+            eval_ranking = self.extract_ranking(eval_for_measure, eval_m)
             ret[(truth_m, eval_m)] = self.correlation_to_truth(truth_ranking, eval_ranking)
 
         return ret
@@ -120,12 +153,13 @@ class TrecLeaderboardEvaluation():
                 # skip: only include common systems
                 a.pop()  # remove the truth value we just added
 
-        return {
-            "kendall": correlation(a, b, "kendall"),
-            "pearson": correlation(a, b, "pearson"),
-            "spearman": correlation(a, b, "spearman"),
-            "tauap_b": tauap_b(a, b)
-        }
+        result = {}
+        for method in self.correlation_methods:
+            if method == "tauap_b":
+                result[method] = tauap_b(a, b)
+            else:
+                result[method] = correlation(a, b, method)
+        return result
 
 
 def _check_input_or_raise(a, b):

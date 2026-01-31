@@ -9,10 +9,8 @@ from tempfile import TemporaryDirectory
 
 EXAMPLE_LEADERBOARD = str((TREC_25_DATA / "spot-check-dataset" / "trec-leaderboard.txt").absolute())
 
-def evaluate_command(measure, truth=EXAMPLE_LEADERBOARD, inp=EXAMPLE_LEADERBOARD, eval_measure=None):
-    cmd = ["evaluate", "--truth-leaderboard", truth, "--input", inp, "--truth-measure", measure, "--truth-format", "trec_eval", "--eval-format", "trec_eval"]
-    if eval_measure:
-        cmd.extend(["--eval-measure", eval_measure])
+def evaluate_command(measure, truth=EXAMPLE_LEADERBOARD, inp=EXAMPLE_LEADERBOARD, eval_measure="Measure-01", correlation="kendall"):
+    cmd = ["meta-evaluate", "--truth-leaderboard", truth, "--input", inp, "--truth-measure", measure, "--eval-measure", eval_measure or measure, "--truth-format", "tot", "--eval-format", "tot", "--correlation", correlation]
     return run_cmd_on_main(cmd)
     
 
@@ -25,10 +23,10 @@ def run_cmd_on_main(cmd):
 class TestEvaluationInterface(unittest.TestCase):
     def test_trec25_spot_check_runs_measure_01(self):
         expected_lines = [
-            "trec-leaderboard Measure-02 -1.0",
-            "trec-leaderboard Measure-01 1.0"
+            # "trec-leaderboard Measure-02 Measure-02 -1.0",
+            "trec-leaderboard Measure-01 Measure-01 1.0"
         ]
-        result, stdout = evaluate_command("Measure-01")
+        result, stdout = evaluate_command("Measure-01",eval_measure="Measure-01")
 
         self.assertIsNone(result.exception)
         self.assertEqual(result.exit_code, 0)
@@ -38,24 +36,10 @@ class TestEvaluationInterface(unittest.TestCase):
 
     def test_trec25_spot_check_runs_measure_02(self):
         expected_lines = [
-            "trec-leaderboard Measure-02 1.0",
-            "trec-leaderboard Measure-01 -1.0"
+            "trec-leaderboard Measure-02 Measure-02 1.0",
+            # "trec-leaderboard Measure-01 Measure-01 -1.0"
         ]
-        result, stdout = evaluate_command("Measure-02")
-
-        self.assertIsNone(result.exception)
-        self.assertEqual(result.exit_code, 0)
-
-        for l in expected_lines:
-            self.assertIn(l, stdout)
-
-    def test_trec25_spot_check_runs_without_truth(self):
-        expected_lines = [
-            "trec-leaderboard Measure-02 2.0",
-            "trec-leaderboard Measure-01 2.0"
-        ]
-        cmd = ["evaluate", "--input", EXAMPLE_LEADERBOARD, "--eval-format", "trec_eval"]
-        result, stdout = run_cmd_on_main(cmd)
+        result, stdout = evaluate_command("Measure-02", eval_measure="Measure-02")
 
         self.assertIsNone(result.exception)
         self.assertEqual(result.exit_code, 0)
@@ -68,18 +52,17 @@ class TestEvaluationInterface(unittest.TestCase):
 
             self.assertFalse(target_file.is_file())
 
-            cmd = ["evaluate", "--truth-leaderboard", EXAMPLE_LEADERBOARD, "--input", EXAMPLE_LEADERBOARD, "--truth-measure", "Measure-01", "--truth-format", "trec_eval", "--eval-format", "trec_eval", "--output", target_file]
+            cmd = ["meta-evaluate", "--truth-leaderboard", EXAMPLE_LEADERBOARD, "--input", EXAMPLE_LEADERBOARD, "--truth-measure", "Measure-02", "--eval-measure", "Measure-01", "--truth-format", "tot", "--eval-format", "tot", "--correlation", "kendall", "--output", target_file]
             result, stdout = run_cmd_on_main(cmd)
 
             self.assertIsNotNone(result.exception)
             self.assertEqual(result.exit_code, 1)
             self.assertFalse(target_file.is_file())
-            self.assertIn("trec-leaderboard Measure-02 -1.0", stdout)
+            self.assertIn("trec-leaderboard Measure-02 Measure-01 -1.0", stdout)
 
     def test_trec25_spot_check_runs_measure_01_and_produces_output(self):
         expected_lines = [
-            "trec-leaderboard Measure-02 -1.0",
-            "trec-leaderboard Measure-01 1.0"
+            "trec-leaderboard Measure-01 Measure-01 1.0"
         ]
 
         with TemporaryDirectory() as tmp_dir:
@@ -87,7 +70,7 @@ class TestEvaluationInterface(unittest.TestCase):
 
             self.assertFalse(target_file.is_file())
 
-            cmd = ["evaluate", "--truth-leaderboard", EXAMPLE_LEADERBOARD, "--input", EXAMPLE_LEADERBOARD, "--truth-measure", "Measure-01", "--truth-format", "trec_eval", "--eval-format", "trec_eval", "--output", target_file]
+            cmd = ["meta-evaluate", "--truth-leaderboard", EXAMPLE_LEADERBOARD, "--input", EXAMPLE_LEADERBOARD, "--truth-measure", "Measure-01", "--eval-measure", "Measure-01", "--truth-format", "tot", "--eval-format", "tot", "--correlation", "kendall", "--output", target_file]
             result, stdout = run_cmd_on_main(cmd)
 
             self.assertIsNone(result.exception)
@@ -97,21 +80,26 @@ class TestEvaluationInterface(unittest.TestCase):
                 self.assertIn(l, stdout)
 
             self.assertTrue(target_file.is_file())
-            self.assertIn('"Metric":"Measure-01","kendall":1.0', target_file.read_text())
+            self.assertIn('"TruthMeasure":"Measure-01","EvalMeasure":"Measure-01","kendall":1.0', target_file.read_text())  
 
+    def test_trec25_spot_check_runs_measure_02_and_produces_output(self):
+        expected_lines = [
+            "trec-leaderboard Measure-02 Measure-02 1.0",
+        ]
 
-    def test_trec25_spot_check_runs_measure_01_and_produces_aggregated_protetextoutput(self):
         with TemporaryDirectory() as tmp_dir:
-            target_file = (Path(tmp_dir) / "results.prototext").absolute()
+            target_file = (Path(tmp_dir) / "results.jsonl").absolute()
 
             self.assertFalse(target_file.is_file())
 
-            cmd = ["evaluate", "--input", EXAMPLE_LEADERBOARD, "--eval-format", "trec_eval", "--aggregate", "--output", target_file]
+            cmd = ["meta-evaluate", "--truth-leaderboard", EXAMPLE_LEADERBOARD, "--input", EXAMPLE_LEADERBOARD, "--truth-measure", "Measure-02", "--eval-measure", "Measure-02", "--truth-format", "tot", "--eval-format", "tot", "--correlation", "kendall", "--output", target_file]
             result, stdout = run_cmd_on_main(cmd)
 
             self.assertIsNone(result.exception)
             self.assertEqual(result.exit_code, 0)
-            self.assertIn("stdev-value 2 2.0", stdout)
+
+            for l in expected_lines:
+                self.assertIn(l, stdout)
 
             self.assertTrue(target_file.is_file())
-            self.assertIn('measure{\n  key: "Judges"\n  value: "2.0"\n}\n', target_file.read_text())
+            self.assertIn('"TruthMeasure":"Measure-02","EvalMeasure":"Measure-02","kendall":1.0', target_file.read_text())

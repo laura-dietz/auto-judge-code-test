@@ -1,4 +1,5 @@
 # This code is copied from https://github.com/eldrin/pyircore, as pyircore is not pip-installable at the moment for modern python versions.
+import sys
 import numpy as np
 from scipy import stats
 from collections.abc import Iterable
@@ -107,17 +108,21 @@ def _tauap_b_ties(rx, ry, p):
         if p[i] == 0:
             continue
         n_not_top += 1
-        
+
         # count concordants above the pivot's tie group
         c_above = 0
         for j in range(len(p)):
             if p[j] >= p[i]:
                 continue
-    
+
             sx = np.sign(rx[i] - rx[j])
             sy = np.sign(ry[i] - ry[j])
 
             if sx == sy:
                 c_above += 1
         c_all += c_above / p[i]  # divide by p-1 instead of i-1
+    if n_not_top == 0:
+        # All elements are tied at the top rank - no meaningful ranking to compare
+        print("Warning: tauap_b cannot compute correlation when all elements are tied (returning 0.0)", file=sys.stderr)
+        return 0.0
     return 2 / n_not_top * c_all - 1
