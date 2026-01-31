@@ -54,13 +54,13 @@ class TrecLeaderboardEvaluation():
 
         # Load truth leaderboard (required)
         self.truth_leaderboard = self.load_leaderboard(
-            truth_leaderboard, self.truth_format, self.truth_has_header
+            truth_leaderboard, self.truth_format, self.truth_has_header, self.on_missing
         )
 
-    def load_leaderboard(self, leaderboard_path: Path, format: LeaderboardFormat, has_header: bool = False) -> Leaderboard:
+    def load_leaderboard(self, leaderboard_path: Path, format: LeaderboardFormat, has_header: bool = False, on_missing: OnMissing = "error") -> Leaderboard:
         if not leaderboard_path or not Path(leaderboard_path).exists():
             raise ValueError(f"Leaderboard path does not exist: {leaderboard_path}")
-        return Leaderboard.load(Path(leaderboard_path), format=format, has_header=has_header)
+        return Leaderboard.load(Path(leaderboard_path), format=format, has_header=has_header, on_missing=on_missing)
 
     def extract_ranking(self, leaderboard: Leaderboard, measure: str) -> Dict[str, float]:
         """Extract run_id -> value mapping for aggregate rows (topic_id == all_topic_id)."""
@@ -105,7 +105,7 @@ class TrecLeaderboardEvaluation():
             top-k filtering based on the @k suffix.
         """
         eval_leaderboard = self.load_leaderboard(
-            leaderboard_file, self.eval_format, self.eval_has_header
+            leaderboard_file, self.eval_format, self.eval_has_header, self.on_missing
         )
 
         # Clean truth to match eval's run_ids and recompute aggregates

@@ -88,6 +88,7 @@ class Leaderboard:
         path: Path,
         format: LeaderboardFormat,
         has_header: bool = False,
+        on_missing: OnMissing = "error",
     ) -> "Leaderboard":
         """
         Load a leaderboard from file or directory.
@@ -125,7 +126,7 @@ class Leaderboard:
         )
 
         # Verify all entries have all measures
-        LeaderboardVerification(result, on_missing="error", warn=True).complete_measures(include_all_row=False)
+        LeaderboardVerification(result, on_missing=on_missing, warn=(on_missing != "error")).complete_measures(include_all_row=False)
 
         return result
 
