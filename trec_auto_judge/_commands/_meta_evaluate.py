@@ -82,7 +82,7 @@ def persist_output(df: pd.DataFrame, output: Path) -> None:
     "--output",
     type=Path,
     required=False,
-    help="The file where the evaluation should be persisted.",
+    help="Output file path. Format determined by extension: .jsonl for JSON Lines, .prototext for Prototext.",
 )
 @click.option(
     "--aggregate",

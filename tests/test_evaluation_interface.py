@@ -21,85 +21,62 @@ def run_cmd_on_main(cmd):
 
 
 class TestEvaluationInterface(unittest.TestCase):
-    def test_trec25_spot_check_runs_measure_01(self):
-        expected_lines = [
-            # "trec-leaderboard Measure-02 Measure-02 -1.0",
-            "trec-leaderboard Measure-01 Measure-01 1.0"
-        ]
-        result, stdout = evaluate_command("Measure-01",eval_measure="Measure-01")
-
+    def test_self_comparison_gives_perfect_correlation(self):
+        """Sanity check: same leaderboard, same measure -> 1.0"""
+        result, stdout = evaluate_command("Measure-01", eval_measure="Measure-01")
         self.assertIsNone(result.exception)
         self.assertEqual(result.exit_code, 0)
+        self.assertIn("trec-leaderboard Measure-01 Measure-01 1.0", stdout)
 
-        for l in expected_lines:
-            self.assertIn(l, stdout)
-
-    def test_trec25_spot_check_runs_measure_02(self):
-        expected_lines = [
-            "trec-leaderboard Measure-02 Measure-02 1.0",
-            # "trec-leaderboard Measure-01 Measure-01 -1.0"
-        ]
-        result, stdout = evaluate_command("Measure-02", eval_measure="Measure-02")
-
+    def test_cross_measure_correlation_is_negative(self):
+        """Cross-measure: Measure-01 vs Measure-02 are inversely ranked -> -1.0"""
+        result, stdout = evaluate_command("Measure-01", eval_measure="Measure-02")
         self.assertIsNone(result.exception)
         self.assertEqual(result.exit_code, 0)
+        self.assertIn("trec-leaderboard Measure-01 Measure-02 -1.0", stdout)
 
-        for l in expected_lines:
-            self.assertIn(l, stdout)
+    def test_invalid_output_path_fails_gracefully(self):
+        """Test that invalid output path causes failure but still prints results."""
+        target_file = Path("/tmp/results.jsonl-does-not-exist")
+        cmd = ["meta-evaluate", "--truth-leaderboard", EXAMPLE_LEADERBOARD,
+               "--input", EXAMPLE_LEADERBOARD, "--truth-measure", "Measure-01",
+               "--eval-measure", "Measure-02", "--truth-format", "tot",
+               "--eval-format", "tot", "--correlation", "kendall", "--output", target_file]
+        result, stdout = run_cmd_on_main(cmd)
 
-    def test_trec25_spot_check_runs_measure_01_but_fails_on_output(self):
-            target_file = Path("/tmp/results.jsonl-does")
+        self.assertIsNotNone(result.exception)
+        self.assertEqual(result.exit_code, 1)
+        self.assertFalse(target_file.is_file())
+        self.assertIn("trec-leaderboard Measure-01 Measure-02 -1.0", stdout)
 
-            self.assertFalse(target_file.is_file())
+    def test_missing_truth_measure_raises_error(self):
+        """Test that requesting non-existent truth measure raises clear error."""
+        result, stdout = evaluate_command("NonExistent", eval_measure="Measure-01")
+        self.assertIsNotNone(result.exception)
+        self.assertNotEqual(result.exit_code, 0)
 
-            cmd = ["meta-evaluate", "--truth-leaderboard", EXAMPLE_LEADERBOARD, "--input", EXAMPLE_LEADERBOARD, "--truth-measure", "Measure-02", "--eval-measure", "Measure-01", "--truth-format", "tot", "--eval-format", "tot", "--correlation", "kendall", "--output", target_file]
-            result, stdout = run_cmd_on_main(cmd)
+    def test_missing_eval_measure_raises_error(self):
+        """Test that requesting non-existent eval measure raises clear error."""
+        result, stdout = evaluate_command("Measure-01", eval_measure="NonExistent")
+        self.assertIsNotNone(result.exception)
+        self.assertNotEqual(result.exit_code, 0)
 
-            self.assertIsNotNone(result.exception)
-            self.assertEqual(result.exit_code, 1)
-            self.assertFalse(target_file.is_file())
-            self.assertIn("trec-leaderboard Measure-02 Measure-01 -1.0", stdout)
-
-    def test_trec25_spot_check_runs_measure_01_and_produces_output(self):
-        expected_lines = [
-            "trec-leaderboard Measure-01 Measure-01 1.0"
-        ]
-
+    def test_produces_jsonl_output(self):
+        """Test that --output with .jsonl extension writes valid JSONL."""
         with TemporaryDirectory() as tmp_dir:
             target_file = (Path(tmp_dir) / "results.jsonl").absolute()
-
-            self.assertFalse(target_file.is_file())
-
-            cmd = ["meta-evaluate", "--truth-leaderboard", EXAMPLE_LEADERBOARD, "--input", EXAMPLE_LEADERBOARD, "--truth-measure", "Measure-01", "--eval-measure", "Measure-01", "--truth-format", "tot", "--eval-format", "tot", "--correlation", "kendall", "--output", target_file]
+            cmd = ["meta-evaluate", "--truth-leaderboard", EXAMPLE_LEADERBOARD,
+                   "--input", EXAMPLE_LEADERBOARD, "--truth-measure", "Measure-01",
+                   "--eval-measure", "Measure-02", "--truth-format", "tot",
+                   "--eval-format", "tot", "--correlation", "kendall",
+                   "--output", target_file]
             result, stdout = run_cmd_on_main(cmd)
 
             self.assertIsNone(result.exception)
             self.assertEqual(result.exit_code, 0)
-
-            for l in expected_lines:
-                self.assertIn(l, stdout)
-
             self.assertTrue(target_file.is_file())
-            self.assertIn('"TruthMeasure":"Measure-01","EvalMeasure":"Measure-01","kendall":1.0', target_file.read_text())  
 
-    def test_trec25_spot_check_runs_measure_02_and_produces_output(self):
-        expected_lines = [
-            "trec-leaderboard Measure-02 Measure-02 1.0",
-        ]
-
-        with TemporaryDirectory() as tmp_dir:
-            target_file = (Path(tmp_dir) / "results.jsonl").absolute()
-
-            self.assertFalse(target_file.is_file())
-
-            cmd = ["meta-evaluate", "--truth-leaderboard", EXAMPLE_LEADERBOARD, "--input", EXAMPLE_LEADERBOARD, "--truth-measure", "Measure-02", "--eval-measure", "Measure-02", "--truth-format", "tot", "--eval-format", "tot", "--correlation", "kendall", "--output", target_file]
-            result, stdout = run_cmd_on_main(cmd)
-
-            self.assertIsNone(result.exception)
-            self.assertEqual(result.exit_code, 0)
-
-            for l in expected_lines:
-                self.assertIn(l, stdout)
-
-            self.assertTrue(target_file.is_file())
-            self.assertIn('"TruthMeasure":"Measure-02","EvalMeasure":"Measure-02","kendall":1.0', target_file.read_text())
+            content = target_file.read_text()
+            self.assertIn('"TruthMeasure":"Measure-01"', content)
+            self.assertIn('"EvalMeasure":"Measure-02"', content)
+            self.assertIn('"kendall":-1.0', content)

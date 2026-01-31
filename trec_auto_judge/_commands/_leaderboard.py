@@ -43,7 +43,7 @@ from typing import List, Optional
     "--output",
     type=Path,
     required=False,
-    help="Output file (.jsonl or .csv).",
+    help="Output file path. Format determined by extension: .jsonl for JSON Lines, .csv for CSV.",
 )
 @click.option(
     "--sort/--no-sort",
