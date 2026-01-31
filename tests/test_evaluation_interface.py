@@ -61,6 +61,15 @@ class TestEvaluationInterface(unittest.TestCase):
         self.assertIsNotNone(result.exception)
         self.assertNotEqual(result.exit_code, 0)
 
+    def test_kendall_at_k_computes_top_k_correlation(self):
+        """Test that kendall@10 computes correlation on top-k systems from truth."""
+        # With only 3 runs in test data, @10 includes all runs (same as kendall)
+        result, stdout = evaluate_command("Measure-01", eval_measure="Measure-01", correlation="kendall@10")
+        self.assertIsNone(result.exception)
+        self.assertEqual(result.exit_code, 0)
+        # Self-comparison should still be 1.0
+        self.assertIn("trec-leaderboard Measure-01 Measure-01 1.0", stdout)
+
     def test_produces_jsonl_output(self):
         """Test that --output with .jsonl extension writes valid JSONL."""
         with TemporaryDirectory() as tmp_dir:

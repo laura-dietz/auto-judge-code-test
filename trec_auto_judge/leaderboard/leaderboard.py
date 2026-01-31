@@ -117,12 +117,17 @@ class Leaderboard:
             ),
         )
 
-        return cls(
+        result = cls(
             measures=lb.measures,
             entries=lb.entries,
             all_topic_id=lb.all_topic_id,
             spec=spec,
         )
+
+        # Verify all entries have all measures
+        LeaderboardVerification(result, on_missing="error", warn=True).complete_measures(include_all_row=False)
+
+        return result
 
     @classmethod
     def _load_directory(
@@ -580,11 +585,12 @@ def mean_of_floats(values: Sequence[Any]) -> float:
     """Aggregate numeric values via arithmetic mean (values cast to float)."""
     return mean(float(v) for v in values)
 
+# todo drop this functionality. Have it fall back on `mean_of_floats`
 def mean_of_ints(values: Sequence[Any]) -> float:
     """Aggregate numeric values via arithmetic mean (values cast to float)."""
     return mean(float(v) for v in values)
 
-
+# todo drop this functionality. Have it fall back on `mean_of_floats`
 def mean_of_bools(values: Sequence[Any]) -> float:
     """Aggregate booleans via mean of {0.0, 1.0}."""
     return mean(1.0 if bool(v) else 0.0 for v in values)
