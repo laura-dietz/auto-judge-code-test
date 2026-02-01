@@ -2,7 +2,7 @@ import click
 import glob
 from pathlib import Path
 import pandas as pd
-from ..evaluation import TrecLeaderboardEvaluation, CORRELATION_METHODS
+from ..evaluation import LeaderboardEvaluator, CORRELATION_METHODS
 from ..click_plus import (
     detect_header_interactive,
     LEADERBOARD_FORMATS,
@@ -63,6 +63,16 @@ def persist_output(df: pd.DataFrame, output: Path) -> None:
     help="Eval leaderboard(s) have header row to skip.",
 )
 @click.option(
+    "--truth-drop-aggregate/--no-truth-drop-aggregate",
+    default=False,
+    help="Drop pre-existing aggregate rows from truth and recompute from per-topic data.",
+)
+@click.option(
+    "--eval-drop-aggregate/--no-eval-drop-aggregate",
+    default=False,
+    help="Drop pre-existing aggregate rows from eval and recompute from per-topic data.",
+)
+@click.option(
     "--on-missing",
     type=click.Choice(["error", "warn", "skip", "default"]),
     default="error",
@@ -107,6 +117,8 @@ def meta_evaluate(
     truth_header: bool,
     eval_format: str,
     eval_header: bool,
+    truth_drop_aggregate: bool,
+    eval_drop_aggregate: bool,
     on_missing: str,
     input: tuple,
     output: Path,
@@ -145,14 +157,16 @@ def meta_evaluate(
     eval_measures = list(eval_measure) if eval_measure else None
     correlation_methods = list(correlation) if correlation else None
 
-    te = TrecLeaderboardEvaluation(
+    te = LeaderboardEvaluator(
         truth_leaderboard,
         truth_measures=truth_measures,
         eval_measures=eval_measures,
         truth_format=truth_format,
         truth_has_header=truth_has_header,
+        truth_drop_aggregate=truth_drop_aggregate,
         eval_format=eval_format,
         eval_has_header=eval_has_header,
+        eval_drop_aggregate=eval_drop_aggregate,
         on_missing=on_missing,
         correlation_methods=correlation_methods,
     )

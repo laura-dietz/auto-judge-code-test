@@ -5,6 +5,7 @@ from typing import Dict, List, Literal, Tuple
 
 from trec_auto_judge import Leaderboard
 
+# TODO: Consider unifying with leaderboard.OnMissing which uses "fix_aggregate" instead of "skip"
 OnMissing = Literal["error", "warn", "skip", "default"]
 LeaderboardFormat = Literal["trec_eval", "tot", "ir_measures", "ranking"]
 BASE_CORRELATION_METHODS = ["kendall", "pearson", "spearman", "tauap_b"]
@@ -28,7 +29,7 @@ def parse_correlation_method(method: str) -> tuple[str, int | None]:
     return (method, None)
 
 
-class TrecLeaderboardEvaluation():
+class LeaderboardEvaluator():
     """Compute correlation between predicted leaderboards and ground truth."""
 
     def __init__(
@@ -39,28 +40,32 @@ class TrecLeaderboardEvaluation():
         on_missing: OnMissing = "error",
         truth_format: LeaderboardFormat = "ir_measures",
         truth_has_header: bool = False,
+        truth_drop_aggregate: bool = False,
         eval_format: LeaderboardFormat = "tot",
         eval_has_header: bool = False,
+        eval_drop_aggregate: bool = False,
         correlation_methods: List[str] | None = None,
     ):
         self.on_missing = on_missing
         self.truth_format = truth_format
         self.truth_has_header = truth_has_header
+        self.truth_drop_aggregate = truth_drop_aggregate
         self.eval_format = eval_format
         self.eval_has_header = eval_has_header
+        self.eval_drop_aggregate = eval_drop_aggregate
         self.truth_measures_filter = truth_measures  # None means all
         self.eval_measures_filter = eval_measures    # None means all
         self.correlation_methods = correlation_methods if correlation_methods else CORRELATION_METHODS
 
         # Load truth leaderboard (required)
         self.truth_leaderboard = self.load_leaderboard(
-            truth_leaderboard, self.truth_format, self.truth_has_header, self.on_missing
+            truth_leaderboard, self.truth_format, self.truth_has_header, self.on_missing, self.truth_drop_aggregate
         )
 
-    def load_leaderboard(self, leaderboard_path: Path, format: LeaderboardFormat, has_header: bool = False, on_missing: OnMissing = "error") -> Leaderboard:
+    def load_leaderboard(self, leaderboard_path: Path, format: LeaderboardFormat, has_header: bool = False, on_missing: OnMissing = "error", drop_aggregate: bool = False) -> Leaderboard:
         if not leaderboard_path or not Path(leaderboard_path).exists():
             raise ValueError(f"Leaderboard path does not exist: {leaderboard_path}")
-        return Leaderboard.load(Path(leaderboard_path), format=format, has_header=has_header, on_missing=on_missing)
+        return Leaderboard.load(Path(leaderboard_path), format=format, has_header=has_header, on_missing=on_missing, drop_aggregate=drop_aggregate)
 
     def extract_ranking(self, leaderboard: Leaderboard, measure: str) -> Dict[str, float]:
         """Extract run_id -> value mapping for aggregate rows (topic_id == all_topic_id)."""
@@ -105,7 +110,7 @@ class TrecLeaderboardEvaluation():
             top-k filtering based on the @k suffix.
         """
         eval_leaderboard = self.load_leaderboard(
-            leaderboard_file, self.eval_format, self.eval_has_header, self.on_missing
+            leaderboard_file, self.eval_format, self.eval_has_header, self.on_missing, self.eval_drop_aggregate
         )
 
         # Clean truth to match eval's run_ids and recompute aggregates

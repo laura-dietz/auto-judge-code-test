@@ -1,6 +1,6 @@
 import unittest
 from tempfile import TemporaryDirectory
-from trec_auto_judge.evaluation import TrecLeaderboardEvaluation
+from trec_auto_judge.evaluation import LeaderboardEvaluator
 from pathlib import Path
 
 EXAMPLE_01 = """
@@ -39,7 +39,7 @@ class TestEvaluation(unittest.TestCase):
             expected = {('ORACLE', 'ORACLE'): {'kendall': 1.0, 'pearson': 1.0, 'spearman': 1.0, 'tauap_b': 1.0}}
             leaderboard = Path(d) / "leaderboard"
             leaderboard.write_text(EXAMPLE_01)
-            te = TrecLeaderboardEvaluation(leaderboard, truth_measures=["ORACLE"], eval_measures=["ORACLE"], truth_format="tot", eval_format="tot")
+            te = LeaderboardEvaluator(leaderboard, truth_measures=["ORACLE"], eval_measures=["ORACLE"], truth_format="tot", eval_format="tot", correlation_methods=["kendall", "pearson", "spearman", "tauap_b"])
             actual = te.evaluate(leaderboard)
             self.assertEqual(expected, actual)
 
@@ -52,7 +52,7 @@ class TestEvaluation(unittest.TestCase):
             }
             leaderboard = Path(d) / "leaderboard"
             leaderboard.write_text(EXAMPLE_02)
-            te = TrecLeaderboardEvaluation(leaderboard, truth_measures=["M2"], eval_measures=None, truth_format="tot", eval_format="tot")
+            te = LeaderboardEvaluator(leaderboard, truth_measures=["M2"], eval_measures=None, truth_format="tot", eval_format="tot", correlation_methods=["kendall", "pearson", "spearman", "tauap_b"])
             actual = te.evaluate(leaderboard)
             self.assertIn(('M2', 'M1'), actual)
             self.assertIn(('M2', 'M2'), actual)
@@ -70,7 +70,7 @@ class TestEvaluation(unittest.TestCase):
             }
             leaderboard = Path(d) / "leaderboard"
             leaderboard.write_text(EXAMPLE_02)
-            te = TrecLeaderboardEvaluation(leaderboard, truth_measures=["M1"], eval_measures=None, truth_format="tot", eval_format="tot")
+            te = LeaderboardEvaluator(leaderboard, truth_measures=["M1"], eval_measures=None, truth_format="tot", eval_format="tot", correlation_methods=["kendall", "pearson", "spearman", "tauap_b"])
             actual = te.evaluate(leaderboard)
             self.assertIn(('M1', 'M1'), actual)
             self.assertIn(('M1', 'M2'), actual)
@@ -91,7 +91,7 @@ class TestEvaluation(unittest.TestCase):
             l2 = Path(d) / "leaderboard-2"
             l2.write_text(EXAMPLE_02)
 
-            te = TrecLeaderboardEvaluation(l1, truth_measures=["ORACLE"], eval_measures=None, truth_format="tot", eval_format="tot")
+            te = LeaderboardEvaluator(l1, truth_measures=["ORACLE"], eval_measures=None, truth_format="tot", eval_format="tot", correlation_methods=["kendall", "pearson", "spearman", "tauap_b"])
             actual = te.evaluate(l2)
             self.assertIn(('ORACLE', 'M1'), actual)
             self.assertIn(('ORACLE', 'M2'), actual)
@@ -111,7 +111,7 @@ class TestEvaluation(unittest.TestCase):
             l2 = Path(d) / "leaderboard-2"
             l2.write_text(EXAMPLE_02)
 
-            te = TrecLeaderboardEvaluation(l2, truth_measures=["M2"], eval_measures=["ORACLE"], truth_format="tot", eval_format="tot")
+            te = LeaderboardEvaluator(l2, truth_measures=["M2"], eval_measures=["ORACLE"], truth_format="tot", eval_format="tot", correlation_methods=["kendall", "pearson", "spearman", "tauap_b"])
             actual = te.evaluate(l1)
 
             self.assertEqual(expected, actual)
@@ -121,6 +121,6 @@ class TestEvaluation(unittest.TestCase):
             leaderboard = Path(d) / "leaderboard"
             leaderboard.write_text(EXAMPLE_02)
 
-            te = TrecLeaderboardEvaluation(leaderboard, truth_measures=["measure-does-not-exist"], eval_measures=["M1"], truth_format="tot", eval_format="tot")
+            te = LeaderboardEvaluator(leaderboard, truth_measures=["measure-does-not-exist"], eval_measures=["M1"], truth_format="tot", eval_format="tot")
             with self.assertRaises(ValueError):
                 te.evaluate(leaderboard)

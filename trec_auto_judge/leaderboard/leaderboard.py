@@ -89,6 +89,7 @@ class Leaderboard:
         format: LeaderboardFormat,
         has_header: bool = False,
         on_missing: OnMissing = "error",
+        drop_aggregate: bool = False,
     ) -> "Leaderboard":
         """
         Load a leaderboard from file or directory.
@@ -101,6 +102,7 @@ class Leaderboard:
                 - "ir_measures": run topic measure value (4 cols)
                 - "ranking": topic Q0 doc_id rank score run (6 cols)
             has_header: If True, skip the first line (header row)
+            drop_aggregate: If True, drop pre-existing "all" entries and recompute
 
         If path is a directory, all files are loaded and merged into a single
         leaderboard. For trec_eval format, each file's name becomes the run_id.
@@ -110,20 +112,43 @@ class Leaderboard:
         else:
             lb = cls._load_file(path, format, has_header)
 
-        # Create default spec for loaded leaderboard (single place for this logic)
-        spec = LeaderboardSpec(
-            measures=tuple(
-                MeasureSpec(name=m, aggregate=mean_of_floats, default=0.0)
-                for m in lb.measures
-            ),
-        )
+        if drop_aggregate:
+            # Filter out "all" entries and recompute aggregates
+            per_topic_entries = [e for e in lb.entries if e.topic_id != lb.all_topic_id]
+            per_topic_measures = set()
+            for e in per_topic_entries:
+                per_topic_measures.update(e.values.keys())
 
-        result = cls(
-            measures=lb.measures,
-            entries=lb.entries,
-            all_topic_id=lb.all_topic_id,
-            spec=spec,
-        )
+            # Create spec from per-topic measures only
+            spec = LeaderboardSpec(
+                measures=tuple(
+                    MeasureSpec(name=m, aggregate=mean_of_floats, default=0.0)
+                    for m in lb.measures if m in per_topic_measures
+                ),
+            )
+
+            # Build with recomputed aggregates using CLI on_missing policy
+            builder = LeaderboardBuilder(spec)
+            for e in per_topic_entries:
+                filtered_values = {k: v for k, v in e.values.items() if k in spec.name_set}
+                builder.add(run_id=e.run_id, topic_id=e.topic_id, values=filtered_values)
+
+            result = builder.build(on_missing=on_missing)
+        else:
+            # Create default spec for loaded leaderboard (single place for this logic)
+            spec = LeaderboardSpec(
+                measures=tuple(
+                    MeasureSpec(name=m, aggregate=mean_of_floats, default=0.0)
+                    for m in lb.measures
+                ),
+            )
+
+            result = cls(
+                measures=lb.measures,
+                entries=lb.entries,
+                all_topic_id=lb.all_topic_id,
+                spec=spec,
+            )
 
         # Verify all entries have all measures
         LeaderboardVerification(result, on_missing=on_missing, warn=(on_missing != "error")).complete_measures(include_all_row=False)
