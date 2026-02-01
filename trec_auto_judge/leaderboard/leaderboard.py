@@ -230,43 +230,22 @@ class Leaderboard:
 
         Args:
             lb: Source leaderboard with raw entries
-            drop_aggregate: If True, filter out pre-existing "all" entries
+            drop_aggregate: If True, filter out pre-existing "all" entries and recompute
             on_missing: Policy for handling missing (run_id, topic_id) pairs
         """
-        per_topic_entries = [e for e in lb.entries if e.topic_id != lb.all_topic_id]
-        all_entries = [e for e in lb.entries if e.topic_id == lb.all_topic_id]
+        # Use for_leaderboard() factory to get builder with appropriate spec
+        builder = LeaderboardBuilder.for_leaderboard(lb, drop_aggregate)
 
-        # Use spec from input leaderboard (has proper dtypes from _load_file)
-        if lb.spec is None:
-            raise ValueError("Cannot build from entries: input leaderboard has no spec")
+        for e in lb.entries:
+            # Skip "all" rows if we're recomputing aggregates
+            if drop_aggregate and e.topic_id == lb.all_topic_id:
+                continue
+            # Filter values to only include measures in the spec
+            # (handles sparse entries and "all"-only measures)
+            filtered_values = {k: v for k, v in e.values.items() if k in builder.spec.name_set}
+            builder.add(run_id=e.run_id, topic_id=e.topic_id, values=filtered_values)
 
-        if drop_aggregate:
-            # Drop original "all" entries and recompute from per-topic entries only
-            # Only include measures that exist in per-topic entries
-            per_topic_measures: Set[str] = set()
-            for e in per_topic_entries:
-                per_topic_measures.update(e.values.keys())
-
-            # Filter spec to only include per-topic measures (preserving dtypes)
-            filtered_measure_specs = tuple(
-                ms for ms in lb.spec.measures if ms.name in per_topic_measures
-            )
-            spec = LeaderboardSpec(measures=filtered_measure_specs)
-
-            builder = LeaderboardBuilder(spec)
-            for e in per_topic_entries:
-                filtered_values = {k: v for k, v in e.values.items() if k in spec.name_set}
-                builder.add(run_id=e.run_id, topic_id=e.topic_id, values=filtered_values)
-
-            return builder.build(on_missing=on_missing)
-        else:
-            # Keep original entries including "all" rows - no recomputation
-            return Leaderboard(
-                measures=lb.measures,
-                entries=lb.entries,
-                all_topic_id=lb.all_topic_id,
-                spec=lb.spec,
-            )
+        return builder.build(on_missing=on_missing, drop_aggregate=drop_aggregate)
 
     def verify(self,  on_missing:OnMissing, expected_topic_ids: Sequence[str], warn:Optional[bool]=False):
         LeaderboardVerification(leaderboard = self, warn=warn, expected_topic_ids=expected_topic_ids, on_missing=on_missing) \
@@ -443,13 +422,50 @@ class LeaderboardBuilder:
     - Collect per-topic rows (hand-filled or record-derived).
     - Validate measure keys (fail fast on typos/missing keys).
     - Cast values according to the spec.
-    - Compute synthetic per-run `all_topic_id` rows using each measure's aggregator.
+    - Handle aggregate rows (drop and recompute, or keep existing).
     """
 
     def __init__(self, spec: LeaderboardSpec):
         """Create a builder for a specific leaderboard specification."""
         self.spec = spec
         self._rows: List[LeaderboardEntry] = []
+
+    @classmethod
+    def for_leaderboard(
+        cls,
+        lb: "Leaderboard",
+        drop_aggregate: bool = True,
+    ) -> "LeaderboardBuilder":
+        """
+        Create a builder configured for rebuilding from an existing leaderboard.
+
+        Args:
+            lb: Source leaderboard
+            drop_aggregate: If True, derive spec from per-topic entries only
+                (measures that only exist in "all" rows are excluded).
+                If False, use the full spec from the leaderboard.
+
+        Returns:
+            A new LeaderboardBuilder with appropriate spec
+        """
+        if lb.spec is None:
+            raise ValueError("Cannot create builder: leaderboard has no spec")
+
+        if drop_aggregate:
+            # Derive spec from per-topic measures only
+            per_topic_measures: Set[str] = set()
+            for e in lb.entries:
+                if e.topic_id != lb.all_topic_id:
+                    per_topic_measures.update(e.values.keys())
+
+            filtered_specs = tuple(
+                ms for ms in lb.spec.measures if ms.name in per_topic_measures
+            )
+            spec = LeaderboardSpec(measures=filtered_specs)
+        else:
+            spec = lb.spec
+
+        return cls(spec)
 
     def add(
         self,
@@ -573,14 +589,14 @@ class LeaderboardBuilder:
 
     def _compute_aggregates(
         self,
-        entries: List[LeaderboardEntry],
+        per_topic_entries: List[LeaderboardEntry],
         phantom_defaults: List[tuple[str, str]],
     ) -> List[LeaderboardEntry]:
         """
-        Compute "all" row aggregates from entries and phantom defaults.
+        Compute "all" row aggregates from per-topic entries and phantom defaults.
 
         Args:
-            entries: Per-topic entries to aggregate
+            per_topic_entries: Per-topic entries to aggregate (must not contain "all" entries)
             phantom_defaults: (run_id, topic_id) pairs to include in aggregation
                 using MeasureSpec default values (no actual entries created)
 
@@ -590,9 +606,7 @@ class LeaderboardBuilder:
         by_run: Dict[str, Dict[MeasureName, List[Any]]] = defaultdict(lambda: defaultdict(list))
 
         # Collect values from actual entries
-        for e in entries:
-            if e.topic_id == self.spec.all_topic_id:
-                continue
+        for e in per_topic_entries:
             for k, v in e.values.items():
                 by_run[e.run_id][k].append(v)
 
@@ -613,17 +627,51 @@ class LeaderboardBuilder:
 
         return all_rows
 
+    def _handle_aggregates(
+        self,
+        entries: List[LeaderboardEntry],
+        drop_aggregate: bool,
+        phantom_defaults: List[tuple[str, str]],
+    ) -> Tuple[List[LeaderboardEntry], List[LeaderboardEntry]]:
+        """
+        Handle aggregate ("all") rows based on drop_aggregate flag.
+
+        This is the single place where drop_aggregate logic is handled.
+
+        Args:
+            entries: All entries (may include existing "all" rows)
+            drop_aggregate: If True, drop existing aggregates and recompute.
+                           If False, keep existing aggregates as-is.
+            phantom_defaults: (run_id, topic_id) pairs for phantom default handling
+
+        Returns:
+            Tuple of (per_topic_entries, all_entries)
+        """
+        # Separate per-topic from "all" entries
+        per_topic_entries = [e for e in entries if e.topic_id != self.spec.all_topic_id]
+        existing_all_entries = [e for e in entries if e.topic_id == self.spec.all_topic_id]
+
+        if drop_aggregate:
+            # Drop existing aggregates and compute fresh ones
+            all_entries = self._compute_aggregates(per_topic_entries, phantom_defaults)
+        else:
+            # Keep existing aggregates (already cast via add())
+            all_entries = existing_all_entries
+
+        return per_topic_entries, all_entries
+
     def build(
         self,
         expected_topic_ids: Optional[Sequence[str]] = None,
         on_missing: OnMissing = "default",
+        drop_aggregate: bool = True,
     ) -> Leaderboard:
         """
-        Build a Leaderboard with synthetic per-run `all_topic_id` rows.
+        Build a Leaderboard with per-run `all_topic_id` rows.
 
         The returned Leaderboard contains:
         - all per-topic rows that were added
-        - plus one additional row per run_id with topic_id == spec.all_topic_id
+        - plus one row per run_id with topic_id == spec.all_topic_id (aggregate)
 
         Args:
             expected_topic_ids: If provided, handles missing (run_id, topic_id) pairs.
@@ -632,6 +680,8 @@ class LeaderboardBuilder:
                 - "warn": create per-topic entries with defaults and print warning
                 - "fix_aggregate": only fill defaults for "all" row aggregation (no per-topic entries)
                 - "error": raise ValueError listing missing (run_id, topic_id) pairs
+            drop_aggregate: If True (default), drop any existing "all" entries and
+                recompute fresh aggregates. If False, keep existing "all" entries as-is.
         """
         # Step 1: Detect missing pairs
         all_missing: List[tuple[str, str]] = []
@@ -660,13 +710,13 @@ class LeaderboardBuilder:
             elif on_missing == "fix_aggregate":
                 phantom_defaults = all_missing
 
-        # Step 3: Compute aggregates
+        # Step 3: Handle aggregates via single handler
         all_entries = self._rows + filled_rows
-        all_rows = self._compute_aggregates(all_entries, phantom_defaults)
+        per_topic_entries, all_rows = self._handle_aggregates(all_entries, drop_aggregate, phantom_defaults)
 
         return Leaderboard(
             measures=self.spec.names,
-            entries=tuple(all_entries + all_rows),
+            entries=tuple(per_topic_entries + all_rows),
             all_topic_id=self.spec.all_topic_id,
             spec=self.spec,
         )

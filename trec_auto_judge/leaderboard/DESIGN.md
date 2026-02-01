@@ -45,20 +45,23 @@ class LeaderboardBuilder:
     def add_from_all(leaderboards, ...): ...       # Merge multiple leaderboards
 
     # Building
-    def build(expected_topic_ids, on_missing) -> Leaderboard: ...
+    def build(expected_topic_ids, on_missing, drop_aggregate) -> Leaderboard: ...
+
+    # Internal
+    def _handle_aggregates(entries, drop_aggregate, phantom_defaults): ...
 ```
 
 **Responsibilities:**
 1. **Validation** - Unknown/missing measures raise `KeyError`
 2. **Casting** - Values cast via `MeasureSpec.get_cast()`
-3. **Aggregate computation** - "all" rows computed via `MeasureSpec.get_aggregate()`
+3. **Aggregate handling** - Drop and/or recompute "all" rows via `_handle_aggregates()`
 4. **Missing entry handling** - Fill defaults or phantom defaults per `on_missing`
 
 **Design principle:** Any operation that creates or transforms a leaderboard goes through the builder:
 - Judge creates results → `builder.add()` → `builder.build()`
-- Load from file → `_load_file()` → `builder.add_entries()` → `builder.build()`
-- Merge files → `builder.add_from_all()` → `builder.build()`
-- Filter → `builder.add_entries()` (filtered) → `builder.build()`
+- Load from file → `_load_file()` → `_build_from_entries()` → `builder.add()` → `builder.build()`
+- Merge files (directory) → `_load_directory()` → `builder.add_from_all()` → `builder.build()`
+- Filter → `filter_and_recompute()` → `builder.add()` → `builder.build()`
 
 ### MeasureSpec (Measure Schema)
 
@@ -174,18 +177,30 @@ Leaderboard.load(path, drop_aggregate=True/False)
 _load_file() / _load_directory()  ──► Returns raw Leaderboard with spec
       │
       ▼
-_build_from_entries(lb, drop_aggregate, on_missing)  ◄── SINGLE HANDLER
+_build_from_entries(lb, drop_aggregate, on_missing)
+      │
+      ▼
+LeaderboardBuilder(spec)
+      │
+      ▼
+builder.add_entries(lb.entries, skip_all_rows=False)  ──► All entries added (casting happens here)
+      │
+      ▼
+builder.build(drop_aggregate=?)
+      │
+      ▼
+builder._handle_aggregates(entries, drop_aggregate, phantom_defaults)  ◄── SINGLE HANDLER
       │
       ├─► drop_aggregate=True:
-      │     • Filter to per-topic entries only
-      │     • Filter spec to per-topic measures only
-      │     • builder.add_entries() → builder.build()  (recomputes aggregates)
+      │     • Filter out existing "all" entries
+      │     • Compute fresh aggregates from per-topic entries
       │
       └─► drop_aggregate=False:
-            • Return original leaderboard unchanged (keep original "all" rows)
+            • Keep original "all" entries (already cast)
+            • Skip aggregate computation
 ```
 
-**Single responsibility:** `_build_from_entries()` is the only place that handles `drop_aggregate` logic.
+**Single responsibility:** `LeaderboardBuilder._handle_aggregates()` is the only place that handles `drop_aggregate` logic. This ensures casting always happens (via the builder) regardless of the flag.
 
 ### Related: filter_and_recompute()
 
@@ -291,10 +306,11 @@ class MyJudge(AutoJudge):
 │                ▼                                                     │
 │  _build_from_entries(drop_aggregate=?)                              │
 │                │                                                     │
-│         ┌──────┴──────┐                                              │
-│         ▼             ▼                                              │
-│     True: rebuild   False: keep as-is                                │
-│     via builder                                                      │
+│                ▼                                                     │
+│  LeaderboardBuilder(spec).add_entries().build(drop_aggregate=?)     │
+│                │                                                     │
+│                ▼                                                     │
+│  _handle_aggregates() ──► drop or keep "all" rows                   │
 └─────────────────────────────────────────────────────────────────────┘
 
 ┌─────────────────────────────────────────────────────────────────────┐
@@ -327,4 +343,4 @@ class MyJudge(AutoJudge):
 3. **Fail-fast validation**: Unknown/missing measures raise immediately
 4. **Explicit over implicit**: Judges define specs explicitly; inference only for file loading
 5. **Spec routing**: Once a spec exists, it's routed through all operations (never recreated)
-6. **Single handler for flags**: `drop_aggregate` handled in one place (`_build_from_entries`)
+6. **Single handler for flags**: `drop_aggregate` handled in one place (`LeaderboardBuilder._handle_aggregates`)
