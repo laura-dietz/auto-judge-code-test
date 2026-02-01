@@ -128,38 +128,13 @@ class Leaderboard:
         has_header: bool,
     ) -> "Leaderboard":
         """Load and merge all leaderboard files from a directory."""
-        # Find all files (exclude hidden files and subdirectories)
         files = sorted([f for f in directory.iterdir() if f.is_file() and not f.name.startswith(".")])
-
         if not files:
             raise ValueError(f"No files found in directory: {directory}")
-
         print(f"Loading {len(files)} files from {directory}", file=sys.stderr)
 
-        # Collect all entries and measures across files
-        all_entry_values: Dict[Tuple[str, str], Dict[str, str]] = defaultdict(dict)
-        measure_names: List[str] = []
-        measure_set: Set[str] = set()
-
-        for file_path in files:
-            leaderboard = cls._load_file(file_path, format, has_header)
-            for entry in leaderboard.entries:
-                for measure, value in entry.values.items():
-                    all_entry_values[(entry.run_id, entry.topic_id)][measure] = value
-                    if measure not in measure_set:
-                        measure_names.append(measure)
-                        measure_set.add(measure)
-
-        # Build merged entries
-        entries = [
-            LeaderboardEntry(run_id=run_id, topic_id=topic_id, values=values)
-            for (run_id, topic_id), values in all_entry_values.items()
-        ]
-
-        return cls(
-            measures=tuple(measure_names),
-            entries=tuple(entries),
-        )
+        leaderboards = [cls._load_file(f, format, has_header) for f in files]
+        return LeaderboardBuilder(leaderboards[0].spec).add_from_all(leaderboards).build()
 
     @classmethod
     def _load_file(
@@ -226,9 +201,18 @@ class Leaderboard:
             for (run_id, topic_id), values in entry_values.items()
         ]
 
+        # Infer dtype for each measure from values
+        measure_specs = []
+        for m in measure_names:
+            dtype = _infer_dtype_from_values([e.values.get(m) for e in entries if m in e.values])
+            measure_specs.append(MeasureSpec(name=m, dtype=dtype))
+
+        spec = LeaderboardSpec(measures=tuple(measure_specs))
+
         return cls(
             measures=tuple(measure_names),
             entries=tuple(entries),
+            spec=spec,
         )
 
     @classmethod
@@ -249,31 +233,40 @@ class Leaderboard:
             drop_aggregate: If True, filter out pre-existing "all" entries
             on_missing: Policy for handling missing (run_id, topic_id) pairs
         """
-        # Filter out "all" entries - we always recompute aggregates
         per_topic_entries = [e for e in lb.entries if e.topic_id != lb.all_topic_id]
+        all_entries = [e for e in lb.entries if e.topic_id == lb.all_topic_id]
 
-        # Determine measures from per-topic entries only (if drop_aggregate)
-        # or from all measures (if not dropping, to preserve measure order)
+        # Use spec from input leaderboard (has proper dtypes from _load_file)
+        if lb.spec is None:
+            raise ValueError("Cannot build from entries: input leaderboard has no spec")
+
         if drop_aggregate:
+            # Drop original "all" entries and recompute from per-topic entries only
+            # Only include measures that exist in per-topic entries
             per_topic_measures: Set[str] = set()
             for e in per_topic_entries:
                 per_topic_measures.update(e.values.keys())
-            measure_names = [m for m in lb.measures if m in per_topic_measures]
+
+            # Filter spec to only include per-topic measures (preserving dtypes)
+            filtered_measure_specs = tuple(
+                ms for ms in lb.spec.measures if ms.name in per_topic_measures
+            )
+            spec = LeaderboardSpec(measures=filtered_measure_specs)
+
+            builder = LeaderboardBuilder(spec)
+            for e in per_topic_entries:
+                filtered_values = {k: v for k, v in e.values.items() if k in spec.name_set}
+                builder.add(run_id=e.run_id, topic_id=e.topic_id, values=filtered_values)
+
+            return builder.build(on_missing=on_missing)
         else:
-            measure_names = list(lb.measures)
-
-        # Create spec (dtype=float for all loaded measures)
-        spec = LeaderboardSpec(
-            measures=tuple(MeasureSpec(name=m) for m in measure_names),
-        )
-
-        # Build with proper casting and aggregate computation
-        builder = LeaderboardBuilder(spec)
-        for e in per_topic_entries:
-            filtered_values = {k: v for k, v in e.values.items() if k in spec.name_set}
-            builder.add(run_id=e.run_id, topic_id=e.topic_id, values=filtered_values)
-
-        return builder.build(on_missing=on_missing)
+            # Keep original entries including "all" rows - no recomputation
+            return Leaderboard(
+                measures=lb.measures,
+                entries=lb.entries,
+                all_topic_id=lb.all_topic_id,
+                spec=lb.spec,
+            )
 
     def verify(self,  on_missing:OnMissing, expected_topic_ids: Sequence[str], warn:Optional[bool]=False):
         LeaderboardVerification(leaderboard = self, warn=warn, expected_topic_ids=expected_topic_ids, on_missing=on_missing) \
@@ -504,6 +497,46 @@ class LeaderboardBuilder:
         for r in records:
             self.add(run_id=run_id(r), topic_id=topic_id(r), values=get_values(r))
 
+    def add_entries(
+        self,
+        entries: Iterable[LeaderboardEntry],
+        skip_all_rows: bool = True,
+    ) -> "LeaderboardBuilder":
+        """
+        Add entries from LeaderboardEntry objects (e.g., from another leaderboard).
+
+        Args:
+            entries: LeaderboardEntry objects to add
+            skip_all_rows: If True (default), skip entries where topic_id == all_topic_id
+
+        Returns:
+            self for chaining
+        """
+        for e in entries:
+            if skip_all_rows and e.topic_id == self.spec.all_topic_id:
+                continue
+            self.add(run_id=e.run_id, topic_id=e.topic_id, values=e.values)
+        return self
+
+    def add_from_all(
+        self,
+        leaderboards: Sequence[Leaderboard],
+        skip_all_rows: bool = True,
+    ) -> "LeaderboardBuilder":
+        """
+        Add entries from multiple leaderboards.
+
+        Args:
+            leaderboards: Leaderboards to add entries from
+            skip_all_rows: If True (default), skip 'all' rows (they'll be recomputed)
+
+        Returns:
+            self for chaining
+        """
+        for lb in leaderboards:
+            self.add_entries(lb.entries, skip_all_rows=skip_all_rows)
+        return self
+
     def entries(self) -> tuple[LeaderboardEntry, ...]:
         """Return the currently staged per-topic entries (no synthetic 'all' rows)."""
         return tuple(self._rows)
@@ -642,5 +675,34 @@ def _mean_of_floats(values: Sequence[Any]) -> float:
 def _first_value(values: Sequence[Any]) -> Any:
     """Aggregate by taking the first value (used for string measures)."""
     return values[0] if values else None
+
+
+def _infer_dtype_from_values(values: Sequence[Any]) -> type:
+    """
+    Infer dtype from a sequence of string values.
+
+    Returns:
+        - bool: if all values are "true"/"false" (case-insensitive)
+        - float: if all values can be parsed as numbers
+        - str: otherwise
+    """
+    non_none_values = [v for v in values if v is not None]
+    if not non_none_values:
+        return float  # Default to float for empty
+
+    # Check if all values are boolean strings
+    bool_strings = {"true", "false", "1", "0", "yes", "no"}
+    if all(str(v).lower() in bool_strings for v in non_none_values):
+        return bool
+
+    # Check if all values can be parsed as numbers
+    try:
+        for v in non_none_values:
+            float(v)
+        return float
+    except (ValueError, TypeError):
+        pass
+
+    return str
 
 

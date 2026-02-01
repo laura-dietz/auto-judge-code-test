@@ -23,8 +23,6 @@ from trec_auto_judge import (
     LeaderboardBuilder,
     LeaderboardSpec,
     MeasureSpec,
-    mean_of_floats,
-    mean_of_bools,
     Qrels,
     QrelsSpec,
     build_qrels,
@@ -44,18 +42,8 @@ from trec_auto_judge.nugget_data import (
 # Define what measures the judge produces and how to aggregate them.
 
 MINIMAL_SPEC = LeaderboardSpec(measures=(
-    MeasureSpec(
-        name="SCORE",
-        aggregate=mean_of_floats,  # Average across topics
-        cast=float,                # Ensure values are floats
-        default=0.0,               # Default for missing entries
-    ),
-    MeasureSpec(
-        name="HAS_KEYWORDS",
-        aggregate=mean_of_bools,   # Fraction of topics with keywords
-        cast=bool,
-        default=False,
-    ),
+    MeasureSpec("SCORE"),              # dtype=float (default)
+    MeasureSpec("HAS_KEYWORDS", bool), # dtype=bool: cast to 1.0/0.0, aggregate via mean
 ))
 
 

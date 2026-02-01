@@ -330,7 +330,6 @@ class TestVerificationCatchesProblems:
             LeaderboardSpec,
             LeaderboardBuilder,
             MeasureSpec,
-            mean_of_floats,
         )
 
         spec = LeaderboardSpec(
