@@ -64,6 +64,15 @@ class LeaderboardEvaluator():
             truth_leaderboard, self.truth_format, self.truth_has_header, self.on_missing, self.truth_drop_aggregate
         )
 
+        # Validate truth leaderboard has enough runs for correlation
+        num_runs = len(self.truth_leaderboard.run_ids)
+        if num_runs < 3:
+            raise ValueError(
+                f"Truth leaderboard has only {num_runs} run(s). "
+                f"Correlation requires at least 3 runs. "
+                f"Did you pass a single file instead of a directory?"
+            )
+
     def load_leaderboard(self, leaderboard_path: Path, format: LeaderboardFormat, has_header: bool = False, on_missing: OnMissing = "error", drop_aggregate: bool = False) -> Leaderboard:
         if not leaderboard_path or not Path(leaderboard_path).exists():
             raise ValueError(f"Leaderboard path does not exist: {leaderboard_path}")
