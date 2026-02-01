@@ -8,7 +8,8 @@ from ..click_plus import (
     LEADERBOARD_FORMATS,
     LEADERBOARD_FORMAT_HELP,
 )
-from typing import List
+from ..leaderboard import Leaderboard
+from typing import List, Set
 from tira.io_utils import to_prototext
 
 
@@ -114,6 +115,12 @@ def persist_output(df: pd.DataFrame, output: Path) -> None:
     multiple=True,
     help="Topic ID(s) to use for evaluation. Repeatable. If omitted, uses truth's topics.",
 )
+@click.option(
+    "--topic-ids-from-eval",
+    is_flag=True,
+    default=False,
+    help="Derive topic IDs from the union of topics in eval leaderboards (ignores --topic-id).",
+)
 @click.argument("input_files", nargs=-1, type=str)
 def meta_evaluate(
     truth_leaderboard: Path,
@@ -131,6 +138,7 @@ def meta_evaluate(
     aggregate: bool,
     correlation: tuple,
     topic_id: tuple,
+    topic_ids_from_eval: bool,
     input_files: tuple,
 ) -> int:
     """Compute correlation between predicted leaderboards and ground-truth leaderboard."""
@@ -163,7 +171,25 @@ def meta_evaluate(
     truth_measures = list(truth_measure) if truth_measure else None
     eval_measures = list(eval_measure) if eval_measure else None
     correlation_methods = list(correlation) if correlation else None
-    topic_ids_set = set(topic_id) if topic_id else None
+
+    # Determine topic IDs to use
+    topic_ids_set: Set[str] | None = None
+    if topic_ids_from_eval:
+        # Derive from union of eval leaderboard topics
+        topic_ids_set = set()
+        for eval_path in all_inputs:
+            lb = Leaderboard.load(
+                eval_path,
+                format=eval_format,
+                has_header=eval_has_header,
+                on_missing="skip",
+                drop_aggregate=eval_drop_aggregate,
+            )
+            # topic_ids property excludes "all" aggregate topic
+            topic_ids_set.update(lb.topic_ids)
+        click.echo(f"Derived {len(topic_ids_set)} topic IDs from eval leaderboards", err=True)
+    elif topic_id:
+        topic_ids_set = set(topic_id)
 
     te = LeaderboardEvaluator(
         truth_leaderboard,
