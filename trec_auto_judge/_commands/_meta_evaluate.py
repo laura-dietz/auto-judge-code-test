@@ -206,6 +206,16 @@ def meta_evaluate(
         topic_ids=topic_ids_set,
     )
 
+    # Print diagnostic info
+    truth_runs = len(te.truth_leaderboard.run_ids)
+    truth_topics = len(te.truth_leaderboard.topic_ids)
+    effective_topics = len(topic_ids_set) if topic_ids_set else truth_topics
+    click.echo(
+        f"Truth leaderboard: {truth_runs} run(s), {truth_topics} topic(s). "
+        f"Using {effective_topics} topic(s) for evaluation.",
+        err=True
+    )
+
     df = []
 
     for c in all_inputs:
