@@ -1,5 +1,27 @@
 # Leaderboard System Design
 
+> **Note for Claude:** This DESIGN.md documents the leaderboard module's architecture and invariants.
+> **Read this document before modifying any leaderboard code.** The design has specific invariants
+> that are easy to accidentally violate. Check the Key Invariants and Anti-Patterns sections first.
+
+## Key Invariants (Read First)
+
+1. **All construction goes through LeaderboardBuilder** - Never create `Leaderboard` directly except in `build()`
+2. **`_handle_aggregates()` is the ONLY handler for `drop_aggregate`** - Don't filter "all" entries elsewhere
+3. **Validation happens in `add()`** - Unknown/missing measures fail immediately via `KeyError`
+4. **Casting happens in `add()`** - Values are always cast before storage, ensuring type consistency
+5. **`for_leaderboard()` handles spec filtering** - When loading with `drop_aggregate=True`, use this factory to exclude "all"-only measures
+
+## Anti-Patterns
+
+❌ **Don't skip "all" entries before calling `add()`** - Let `_handle_aggregates()` decide what to keep/drop
+
+❌ **Don't create `LeaderboardSpec` manually after loading** - Use `for_leaderboard()` factory which derives the correct spec
+
+❌ **Don't check `drop_aggregate` in multiple places** - It should only affect behavior in `_handle_aggregates()` and `for_leaderboard()`
+
+❌ **Don't bypass the builder** - Even for simple transformations, go through `LeaderboardBuilder` to ensure casting and validation
+
 ## Overview
 
 The leaderboard system provides type-safe, schema-driven storage and manipulation of evaluation results. It separates concerns between data storage (`Leaderboard`), construction logic (`LeaderboardBuilder`), and schema definition (`LeaderboardSpec`/`MeasureSpec`).
@@ -37,6 +59,10 @@ class Leaderboard:
 ```python
 class LeaderboardBuilder:
     def __init__(self, spec: LeaderboardSpec): ...
+
+    # Factory methods
+    @classmethod
+    def for_leaderboard(cls, lb, drop_aggregate=True): ...  # Create builder from existing leaderboard
 
     # Adding entries
     def add(*, run_id, topic_id, values): ...      # Single entry
@@ -180,10 +206,13 @@ _load_file() / _load_directory()  ──► Returns raw Leaderboard with spec
 _build_from_entries(lb, drop_aggregate, on_missing)
       │
       ▼
-LeaderboardBuilder(spec)
+LeaderboardBuilder.for_leaderboard(lb, drop_aggregate)  ──► Factory creates builder with appropriate spec
+      │
+      ├─► drop_aggregate=True: spec from per-topic measures only
+      └─► drop_aggregate=False: full spec from leaderboard
       │
       ▼
-builder.add_entries(lb.entries, skip_all_rows=False)  ──► All entries added (casting happens here)
+builder.add() for each entry  ──► All entries added (casting happens here)
       │
       ▼
 builder.build(drop_aggregate=?)
@@ -201,6 +230,30 @@ builder._handle_aggregates(entries, drop_aggregate, phantom_defaults)  ◄──
 ```
 
 **Single responsibility:** `LeaderboardBuilder._handle_aggregates()` is the only place that handles `drop_aggregate` logic. This ensures casting always happens (via the builder) regardless of the flag.
+
+### Responsibility Split for "all" Handling
+
+Handling "all" topics involves three aspects:
+
+| Aspect | Handler | Purpose |
+|--------|---------|---------|
+| **3a. Spec filtering** | `for_leaderboard(drop_aggregate=True)` | Exclude "all"-only measures from spec |
+| **3b. Value filtering** | `_build_from_entries()` | Filter entry values to match filtered spec |
+| **3c. Entry filtering** | `_handle_aggregates()` | Drop/keep/recompute "all" entries |
+
+**Which code paths use which:**
+
+| Code Path | 3a | 3b | 3c | Notes |
+|-----------|----|----|----|----|
+| Judge implementation | ✗ | ✗ | ✓ | Developer controls spec, no "all"-only measures |
+| `Leaderboard.load()` | ✓ | ✓ | ✓ | External data may have "all"-only measures |
+| `filter_and_recompute()` | ✗ | ✗ | ✓ | Already-processed data, manually skips "all" |
+
+**Why this split is intentional:**
+
+- **3a and 3b are load-specific**: Only needed when reading external files where "all" rows may have different measures than per-topic rows. The `for_leaderboard()` factory and `_build_from_entries()` handle this.
+
+- **3c is universal**: All code paths go through `build()` → `_handle_aggregates()`, which is the single handler for deciding whether to drop/keep/recompute "all" entries.
 
 ### Related: filter_and_recompute()
 
@@ -307,7 +360,16 @@ class MyJudge(AutoJudge):
 │  _build_from_entries(drop_aggregate=?)                              │
 │                │                                                     │
 │                ▼                                                     │
-│  LeaderboardBuilder(spec).add_entries().build(drop_aggregate=?)     │
+│  LeaderboardBuilder.for_leaderboard(lb, drop_aggregate)             │
+│                │                                                     │
+│                ├─► drop_aggregate=True: spec from per-topic only     │
+│                └─► drop_aggregate=False: full spec                   │
+│                │                                                     │
+│                ▼                                                     │
+│  builder.add() for each entry ──► casting happens here              │
+│                │                                                     │
+│                ▼                                                     │
+│  builder.build(drop_aggregate=?)                                    │
 │                │                                                     │
 │                ▼                                                     │
 │  _handle_aggregates() ──► drop or keep "all" rows                   │

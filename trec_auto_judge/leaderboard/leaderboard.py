@@ -236,14 +236,13 @@ class Leaderboard:
         # Use for_leaderboard() factory to get builder with appropriate spec
         builder = LeaderboardBuilder.for_leaderboard(lb, drop_aggregate)
 
+        # Add all entries (including "all" rows) - _handle_aggregates() decides what to keep
         for e in lb.entries:
-            # Skip "all" rows if we're recomputing aggregates
-            if drop_aggregate and e.topic_id == lb.all_topic_id:
-                continue
             # Filter values to only include measures in the spec
-            # (handles sparse entries and "all"-only measures)
+            # (handles sparse entries and "all"-only measures when drop_aggregate=True)
             filtered_values = {k: v for k, v in e.values.items() if k in builder.spec.name_set}
-            builder.add(run_id=e.run_id, topic_id=e.topic_id, values=filtered_values)
+            if filtered_values:  # Skip entries with no matching measures
+                builder.add(run_id=e.run_id, topic_id=e.topic_id, values=filtered_values)
 
         return builder.build(on_missing=on_missing, drop_aggregate=drop_aggregate)
 
