@@ -244,6 +244,15 @@ class Leaderboard:
             # (handles sparse entries and "all"-only measures when drop_aggregate=True)
             filtered_values = {k: v for k, v in e.values.items() if k in builder.spec.name_set}
             if filtered_values:  # Skip entries with no matching measures
+                # Check for missing measures and handle per on_missing policy
+                missing = builder.spec.name_set - set(filtered_values.keys())
+                if missing:
+                    if on_missing == "error":
+                        raise KeyError(f"Missing measure(s): {sorted(missing)}")
+                    # Fill defaults for missing measures
+                    for ms in builder.spec.measures:
+                        if ms.name not in filtered_values:
+                            filtered_values[ms.name] = ms.get_default()
                 builder.add(run_id=e.run_id, topic_id=e.topic_id, values=filtered_values)
 
         return builder.build(on_missing=on_missing, drop_aggregate=drop_aggregate)
