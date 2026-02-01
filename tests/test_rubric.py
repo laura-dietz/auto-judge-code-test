@@ -366,10 +366,10 @@ class TestVerificationCatchesProblems:
 
     def test_leaderboard_verification_catches_missing_topic(self, sample_topics):
         """Verify LeaderboardVerification catches missing topics."""
-        from trec_auto_judge import LeaderboardSpec, LeaderboardBuilder, MeasureSpec, mean_of_floats
+        from trec_auto_judge import LeaderboardSpec, LeaderboardBuilder, MeasureSpec
 
         spec = LeaderboardSpec(measures=(
-            MeasureSpec("SCORE", aggregate=mean_of_floats, cast=float),
+            MeasureSpec("SCORE"),
         ))
         builder = LeaderboardBuilder(spec)
 

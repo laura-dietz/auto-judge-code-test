@@ -43,27 +43,20 @@ A `LeaderboardBuilder` is the only place where:
 
 ## Quickstart
 
-### Define aggregators for `all'
-
-or use from leaderboard module.
-
-Example
-
-```python
-from statistics import mean
-
-def mean_of_bools(values):
-    return mean(1.0 if bool(v) else 0.0 for v in values)
-```
-
 ## Define a Leaderboard spec
 
+`MeasureSpec` takes a name and an optional dtype. The dtype determines casting, aggregation, and default behavior:
+
+- `float` (default): cast to float, aggregate via mean, default 0.0
+- `int`: cast to float, aggregate via mean, default 0.0
+- `bool`: cast to 1.0/0.0, aggregate via mean, default 0.0
+- `str`: keep as string, aggregate via first value, default ""
 
 ```python
 
 MY_SPEC = LeaderboardSpec(measures=(
-    MeasureSpec("GRADE", aggregate=mean_of_floats, cast=float),
-    MeasureSpec("IS_MATCH", aggregate=mean_of_bools, cast=bool),
+    MeasureSpec("GRADE"),            # dtype=float (default)
+    MeasureSpec("IS_MATCH", bool),   # dtype=bool
 ))
 ```
 

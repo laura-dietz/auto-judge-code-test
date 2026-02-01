@@ -22,8 +22,6 @@ from trec_auto_judge import (
     Report,
     Request,
     auto_judge_to_click_command,
-    mean_of_floats,
-    mean_of_ints,
 )
 
 # Import shared preference utilities
@@ -43,8 +41,11 @@ from trec25.judges.shared.pref_common import (
 
 PREF_SPEC = LeaderboardSpec(
     measures=(
-        MeasureSpec("BORDA_COUNT", aggregate=mean_of_ints, cast=float, default=0.0),
-        MeasureSpec("WIN_FRAC", aggregate=mean_of_floats, cast=float, default=0.0),
+        # TODO: Revisit whether BORDA_COUNT should be dtype=int instead of float.
+        # It's a count of wins, so conceptually an integer, but float allows
+        # fractional aggregation across topics.
+        MeasureSpec("BORDA_COUNT"),
+        MeasureSpec("WIN_FRAC"),
     )
 )
 

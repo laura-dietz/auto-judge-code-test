@@ -10,7 +10,7 @@ class TestLeaderboard(unittest.TestCase):
     def test_valid_leaderboard_float(self):
         
         MY_SPEC = LeaderboardSpec(measures=(
-            MeasureSpec("measure-01", aggregate=mean_of_floats, cast=float),
+            MeasureSpec("measure-01"),  # dtype=float is default
         ))
         b = LeaderboardBuilder(MY_SPEC)
 
@@ -29,7 +29,7 @@ class TestLeaderboard(unittest.TestCase):
     def test_valid_leaderboard_mean_bools_all_true(self):
         
         MY_SPEC = LeaderboardSpec(measures=(
-            MeasureSpec("measure-01", aggregate=mean_of_bools, cast=lambda x:x),
+            MeasureSpec("measure-01", bool),  # dtype=bool for boolean measures
         ))
         b = LeaderboardBuilder(MY_SPEC)
 
@@ -66,7 +66,7 @@ class TestLeaderboardBuildOnMissing(unittest.TestCase):
     def setUp(self):
         """Create a spec with default value for testing."""
         self.spec = LeaderboardSpec(measures=(
-            MeasureSpec("SCORE", aggregate=mean_of_floats, cast=float, default=0.0),
+            MeasureSpec("SCORE"),  # dtype=float is default, gives default=0.0
         ))
         self.expected_topics = ["t1", "t2", "t3"]
 

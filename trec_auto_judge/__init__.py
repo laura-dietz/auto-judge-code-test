@@ -2,7 +2,7 @@ from typing import Iterable, Protocol, Sequence, Optional, Type
 
 from .report import Report, load_report
 from .request import Request, load_requests_from_irds, load_requests_from_file
-from .leaderboard import Leaderboard, LeaderboardEntry, MeasureSpec, LeaderboardSpec, LeaderboardBuilder, LeaderboardVerification, LeaderboardVerificationError, mean_of_bools, mean_of_floats, mean_of_ints
+from .leaderboard import Leaderboard, LeaderboardEntry, MeasureSpec, LeaderboardSpec, LeaderboardBuilder, LeaderboardVerification, LeaderboardVerificationError
 from .qrels.qrels import QrelsSpec, QrelRow, Qrels, build_qrels, QrelsVerification, QrelsVerificationError, write_qrel_file, doc_id_md5
 from .llm.minima_llm import MinimaLlmConfig, OpenAIMinimaLlm
 from .nugget_data import NuggetBanks, NuggetBanksProtocol

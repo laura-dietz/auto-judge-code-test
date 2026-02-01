@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 from typing import Type
-from trec_auto_judge import Report, LeaderboardSpec, LeaderboardBuilder, LeaderboardVerification, mean_of_floats, MeasureSpec, AutoJudge, auto_judge_to_click_command, Leaderboard, Qrels, Sequence, Request, Optional, MinimaLlmConfig, NuggetBanks, NuggetBanksProtocol
+from trec_auto_judge import Report, LeaderboardSpec, LeaderboardBuilder, LeaderboardVerification, MeasureSpec, AutoJudge, auto_judge_to_click_command, Leaderboard, Qrels, Sequence, Request, Optional, MinimaLlmConfig, NuggetBanks, NuggetBanksProtocol
 from collections import defaultdict
 from tqdm import tqdm
 from tira.third_party_integrations import ensure_pyterrier_is_loaded
@@ -18,16 +18,16 @@ def group_by_topic_id(rag_responses: list[Report]) -> float:
 
 # Some semi-random selected weighting models from http://terrier.org/docs/v4.2/javadoc/org/terrier/matching/models/WeightingModel.html
 LEADERBOARD_SPEC = LeaderboardSpec(measures=(
-    MeasureSpec("BM25", aggregate=mean_of_floats, cast=float),
-    MeasureSpec("DirichletLM", aggregate=mean_of_floats, cast=float),
-    MeasureSpec("Hiemstra_LM", aggregate=mean_of_floats, cast=float),
-    MeasureSpec("DFIC", aggregate=mean_of_floats, cast=float),
-    MeasureSpec("DPH", aggregate=mean_of_floats, cast=float),
-    MeasureSpec("DLH", aggregate=mean_of_floats, cast=float),
-    MeasureSpec("Tf", aggregate=mean_of_floats, cast=float),
-    MeasureSpec("TF_IDF", aggregate=mean_of_floats, cast=float),
-    MeasureSpec("PL2", aggregate=mean_of_floats, cast=float),
-    MeasureSpec("InL2", aggregate=mean_of_floats, cast=float),
+    MeasureSpec("BM25"),
+    MeasureSpec("DirichletLM"),
+    MeasureSpec("Hiemstra_LM"),
+    MeasureSpec("DFIC"),
+    MeasureSpec("DPH"),
+    MeasureSpec("DLH"),
+    MeasureSpec("Tf"),
+    MeasureSpec("TF_IDF"),
+    MeasureSpec("PL2"),
+    MeasureSpec("InL2"),
 ))
 
 

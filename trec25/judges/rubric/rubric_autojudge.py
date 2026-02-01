@@ -216,10 +216,10 @@ def write_talmudir_export(
 # =============================================================================
 
 RUBRIC_SPEC = LeaderboardSpec(measures=(
-    MeasureSpec("NUGGET_COVERAGE", aggregate=mean_of_floats, cast=float, default=0.0),
-    MeasureSpec("AVG_GRADE", aggregate=mean_of_floats, cast=float, default=0.0),
-    MeasureSpec("MAX_GRADE", aggregate=mean_of_floats, cast=float, default=0.0),
-    MeasureSpec("COVERED_COUNT", aggregate=mean_of_floats, cast=float, default=0.0),
+    MeasureSpec("NUGGET_COVERAGE"),
+    MeasureSpec("AVG_GRADE"),
+    MeasureSpec("MAX_GRADE"),
+    MeasureSpec("COVERED_COUNT"),
 ))
 
 

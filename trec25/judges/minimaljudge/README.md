@@ -93,23 +93,19 @@ class AutoJudge(Protocol):
 The spec declares what measures your judge produces:
 
 ```python
-from trec_auto_judge import LeaderboardSpec, MeasureSpec, mean_of_floats, mean_of_bools
+from trec_auto_judge import LeaderboardSpec, MeasureSpec
 
 MINIMAL_SPEC = LeaderboardSpec(measures=(
-    MeasureSpec(
-        name="SCORE",           # Measure name (appears in output)
-        aggregate=mean_of_floats,  # How to combine per-topic values into "all" row
-        cast=float,             # Type conversion for values
-        default=0.0,            # Default for missing entries
-    ),
-    MeasureSpec(
-        name="HAS_KEYWORDS",
-        aggregate=mean_of_bools,
-        cast=bool,
-        default=False,
-    ),
+    MeasureSpec("SCORE"),              # dtype=float (default): cast to float, aggregate via mean
+    MeasureSpec("HAS_KEYWORDS", bool), # dtype=bool: cast to 1.0/0.0, aggregate via mean
 ))
 ```
+
+The `dtype` parameter determines casting, aggregation, and default behavior:
+- `float` (default): cast to float, aggregate via mean, default 0.0
+- `int`: cast to float, aggregate via mean, default 0.0
+- `bool`: cast to 1.0/0.0, aggregate via mean, default 0.0
+- `str`: keep as string, aggregate via first value, default ""
 
 ### Step 2: Build the Leaderboard
 

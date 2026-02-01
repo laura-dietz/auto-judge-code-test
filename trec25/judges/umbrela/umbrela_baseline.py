@@ -113,8 +113,8 @@ class Umbrela(dspy.Signature):
 
 
 UMBRELA_SPEC = LeaderboardSpec(measures=(
-    MeasureSpec("GRADE", aggregate=mean_of_floats, cast=float),
-    MeasureSpec("IS_MATCH", aggregate=mean_of_bools, cast=bool),
+    MeasureSpec("GRADE"),
+    MeasureSpec("IS_MATCH", bool),
 ))
 
 

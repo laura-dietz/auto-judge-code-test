@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 from typing import Type
-from trec_auto_judge import AutoJudge, Sequence, Optional, Report, Request, LeaderboardSpec, LeaderboardBuilder, LeaderboardVerification, mean_of_floats, MeasureSpec, auto_judge_to_click_command, Leaderboard, Qrels, MinimaLlmConfig, NuggetBanks, NuggetBanksProtocol
+from trec_auto_judge import AutoJudge, Sequence, Optional, Report, Request, LeaderboardSpec, LeaderboardBuilder, LeaderboardVerification, MeasureSpec, auto_judge_to_click_command, Leaderboard, Qrels, MinimaLlmConfig, NuggetBanks, NuggetBanksProtocol
 import click
 from pathlib import Path
 from collections import defaultdict
@@ -15,8 +15,8 @@ def rand(seed: str) -> float:
 
 
 NAIVE_LEADERBOARD_SPEC = LeaderboardSpec(measures=(
-    MeasureSpec("LENGTH", aggregate=mean_of_floats, cast=float),
-    MeasureSpec("RANDOM", aggregate=mean_of_floats, cast=float),
+    MeasureSpec("LENGTH"),
+    MeasureSpec("RANDOM"),
 ))
 
 

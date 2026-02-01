@@ -334,7 +334,7 @@ class TestVerificationCatchesProblems:
         )
 
         spec = LeaderboardSpec(
-            measures=(MeasureSpec("SCORE", aggregate=mean_of_floats, cast=float),)
+            measures=(MeasureSpec("SCORE"),)
         )
         builder = LeaderboardBuilder(spec)
 
