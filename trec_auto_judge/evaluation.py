@@ -45,6 +45,7 @@ class LeaderboardEvaluator():
         eval_has_header: bool = False,
         eval_drop_aggregate: bool = False,
         correlation_methods: List[str] | None = None,
+        topic_ids: set[str] | None = None,
     ):
         self.on_missing = on_missing
         self.truth_format = truth_format
@@ -56,6 +57,7 @@ class LeaderboardEvaluator():
         self.truth_measures_filter = truth_measures  # None means all
         self.eval_measures_filter = eval_measures    # None means all
         self.correlation_methods = correlation_methods if correlation_methods else CORRELATION_METHODS
+        self.topic_ids = topic_ids  # Pre-determined topics, or None = use truth's topics
 
         # Load truth leaderboard (required)
         self.truth_leaderboard = self.load_leaderboard(
@@ -108,15 +110,24 @@ class LeaderboardEvaluator():
             Dict mapping (truth_measure, eval_measure) pairs to correlation results.
             Each method (e.g., "kendall", "kendall@10") is computed with its own
             top-k filtering based on the @k suffix.
+
+        Filtering order for kendall@k:
+            1. Filter truth to pre-determined topic_ids, recompute aggregates
+            2. Get top k runs from truth's new aggregates
+            3. Filter eval to topic_ids AND top k runs, recompute aggregates
+            4. Filter truth to top k runs, recompute aggregates
+            5. Compare rankings
         """
         eval_leaderboard = self.load_leaderboard(
             leaderboard_file, self.eval_format, self.eval_has_header, self.on_missing, self.eval_drop_aggregate
         )
 
-        # Clean truth to match eval's run_ids and recompute aggregates
-        cleaned_truth = self.truth_leaderboard.filter_and_recompute(
-            run_ids=eval_leaderboard.run_ids
-        )
+        # Step 1: Determine topics to use
+        # Use pre-determined topic_ids, or fall back to truth's topics
+        topics_to_use = self.topic_ids if self.topic_ids is not None else self.truth_leaderboard.topic_ids
+
+        # Step 2: Filter truth to topics, recompute aggregates
+        truth_by_topics = self.truth_leaderboard.filter_and_recompute(topic_ids=topics_to_use)
 
         ret = {}
 
@@ -126,14 +137,22 @@ class LeaderboardEvaluator():
             for method in self.correlation_methods:
                 base_method, top_k = parse_correlation_method(method)
 
-                # Filter to top_k if specified in method name
                 if top_k is not None:
-                    top_run_ids = set(cleaned_truth.top_k_run_ids(truth_m, top_k))
-                    truth_for_method = cleaned_truth.filter_and_recompute(run_ids=top_run_ids)
-                    eval_for_method = eval_leaderboard.filter_and_recompute(run_ids=top_run_ids)
+                    # Step 3: Get top k runs from truth (based on topic-filtered aggregates)
+                    top_run_ids = set(truth_by_topics.top_k_run_ids(truth_m, top_k))
+
+                    # Step 4: Filter eval to topics AND top k runs, recompute
+                    eval_for_method = eval_leaderboard.filter_and_recompute(
+                        topic_ids=topics_to_use,
+                        run_ids=top_run_ids
+                    )
+
+                    # Step 5: Filter truth to top k runs (already has topics), recompute
+                    truth_for_method = truth_by_topics.filter_and_recompute(run_ids=top_run_ids)
                 else:
-                    truth_for_method = cleaned_truth
-                    eval_for_method = eval_leaderboard
+                    # No top-k: just filter both to topics
+                    truth_for_method = truth_by_topics
+                    eval_for_method = eval_leaderboard.filter_and_recompute(topic_ids=topics_to_use)
 
                 truth_ranking = self.extract_ranking(truth_for_method, truth_m)
                 eval_ranking = self.extract_ranking(eval_for_method, eval_m)

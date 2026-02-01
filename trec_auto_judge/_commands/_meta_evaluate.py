@@ -108,6 +108,12 @@ def persist_output(df: pd.DataFrame, output: Path) -> None:
     multiple=True,
     help="Correlation method(s) to compute. Repeatable. If omitted, computes all.",
 )
+@click.option(
+    "--topic-id",
+    type=str,
+    multiple=True,
+    help="Topic ID(s) to use for evaluation. Repeatable. If omitted, uses truth's topics.",
+)
 @click.argument("input_files", nargs=-1, type=str)
 def meta_evaluate(
     truth_leaderboard: Path,
@@ -124,6 +130,7 @@ def meta_evaluate(
     output: Path,
     aggregate: bool,
     correlation: tuple,
+    topic_id: tuple,
     input_files: tuple,
 ) -> int:
     """Compute correlation between predicted leaderboards and ground-truth leaderboard."""
@@ -152,10 +159,11 @@ def meta_evaluate(
             all_inputs[0], eval_format, eval_header, "eval"
         )
 
-    # Convert tuples to lists (empty tuple means "all measures")
+    # Convert tuples to lists/sets (empty tuple means "all" / None)
     truth_measures = list(truth_measure) if truth_measure else None
     eval_measures = list(eval_measure) if eval_measure else None
     correlation_methods = list(correlation) if correlation else None
+    topic_ids_set = set(topic_id) if topic_id else None
 
     te = LeaderboardEvaluator(
         truth_leaderboard,
@@ -169,6 +177,7 @@ def meta_evaluate(
         eval_drop_aggregate=eval_drop_aggregate,
         on_missing=on_missing,
         correlation_methods=correlation_methods,
+        topic_ids=topic_ids_set,
     )
 
     df = []
