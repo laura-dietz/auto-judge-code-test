@@ -29,12 +29,12 @@ class TestLeaderboard(unittest.TestCase):
     def test_valid_leaderboard_mean_bools_all_true(self):
         
         MY_SPEC = LeaderboardSpec(measures=(
-            MeasureSpec("measure-01", bool),  # dtype=bool for boolean measures
+            MeasureSpec("measure-01"),  # Use 1.0/0.0 for boolean measures
         ))
         b = LeaderboardBuilder(MY_SPEC)
 
-        b.add(run_id="run-01",topic_id="topic-01",values={"measure-01": True})
-        b.add(run_id="run-01",topic_id="topic-02",values={"measure-01": True})
+        b.add(run_id="run-01",topic_id="topic-01",values={"measure-01": 1.0})
+        b.add(run_id="run-01",topic_id="topic-02",values={"measure-01": 1.0})
     
         l = b.build()
         

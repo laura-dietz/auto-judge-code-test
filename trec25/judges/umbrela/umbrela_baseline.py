@@ -114,7 +114,7 @@ class Umbrela(dspy.Signature):
 
 UMBRELA_SPEC = LeaderboardSpec(measures=(
     MeasureSpec("GRADE"),
-    MeasureSpec("IS_MATCH", bool),
+    MeasureSpec("IS_MATCH"),  # 1.0/0.0 for boolean
 ))
 
 
@@ -219,7 +219,7 @@ class UmbrelaJudge(AutoJudge):
             doc_id = doc_id_md5(response.get_report_text())
 
             grade = grade_lookup.get((topic_id, doc_id), 0.0)
-            is_match = grade >= 2.0
+            is_match = 1.0 if grade >= 2.0 else 0.0
 
             b.add(
                 run_id=run_id,

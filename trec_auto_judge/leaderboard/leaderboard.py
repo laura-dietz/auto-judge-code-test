@@ -365,22 +365,29 @@ class MeasureSpec:
     Build-time definition of a measure.
 
     - `name`: key used in entry.values and output.
-    - `dtype`: Python type (float, bool, int, str) that determines cast/aggregate/default behavior.
+    - `dtype`: Only `float` or `str` allowed.
 
     Processing is derived from dtype:
-    - float/int/bool: cast to float, aggregate via mean, default 0.0
+    - float: cast to float, aggregate via mean, default 0.0
     - str: keep as string, aggregate via first value, default ""
+
+    Note: `bool` and `int` are NOT allowed because they don't survive
+    save/load round-trips. Use `float` with 1.0/0.0 for boolean data.
     """
     name: MeasureName
     dtype: type = float
 
+    def __post_init__(self):
+        if self.dtype not in (float, str):
+            raise ValueError(
+                f"MeasureSpec dtype must be float or str, got {self.dtype.__name__}. "
+                f"Use float with 1.0/0.0 for boolean data, float for integer counts."
+            )
+
     def get_cast(self) -> CastFn:
         """Return cast function based on dtype."""
-        if self.dtype == bool:
-            return lambda x: 1.0 if x else 0.0
         if self.dtype == str:
             return str
-        # float, int -> float
         return float
 
     def get_aggregate(self) -> AggFn:
@@ -682,18 +689,15 @@ def _infer_dtype_from_values(values: Sequence[Any]) -> type:
     Infer dtype from a sequence of string values.
 
     Returns:
-        - bool: if all values are "true"/"false" (case-insensitive)
         - float: if all values can be parsed as numbers
         - str: otherwise
+
+    Note: Only float and str are valid dtypes. Bool/int are not inferred
+    because they can't survive save/load round-trips.
     """
     non_none_values = [v for v in values if v is not None]
     if not non_none_values:
         return float  # Default to float for empty
-
-    # Check if all values are boolean strings
-    bool_strings = {"true", "false", "1", "0", "yes", "no"}
-    if all(str(v).lower() in bool_strings for v in non_none_values):
-        return bool
 
     # Check if all values can be parsed as numbers
     try:

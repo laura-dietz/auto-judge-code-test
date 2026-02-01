@@ -96,16 +96,16 @@ The spec declares what measures your judge produces:
 from trec_auto_judge import LeaderboardSpec, MeasureSpec
 
 MINIMAL_SPEC = LeaderboardSpec(measures=(
-    MeasureSpec("SCORE"),              # dtype=float (default): cast to float, aggregate via mean
-    MeasureSpec("HAS_KEYWORDS", bool), # dtype=bool: cast to 1.0/0.0, aggregate via mean
+    MeasureSpec("SCORE"),
+    MeasureSpec("HAS_KEYWORDS"),  # Use 1.0/0.0 for boolean data
 ))
 ```
 
 The `dtype` parameter determines casting, aggregation, and default behavior:
 - `float` (default): cast to float, aggregate via mean, default 0.0
-- `int`: cast to float, aggregate via mean, default 0.0
-- `bool`: cast to 1.0/0.0, aggregate via mean, default 0.0
 - `str`: keep as string, aggregate via first value, default ""
+
+For boolean data, use `float` with `1.0`/`0.0` values. The mean gives you the fraction of `True`.
 
 ### Step 2: Build the Leaderboard
 

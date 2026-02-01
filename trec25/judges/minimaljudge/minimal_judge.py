@@ -42,8 +42,8 @@ from trec_auto_judge.nugget_data import (
 # Define what measures the judge produces and how to aggregate them.
 
 MINIMAL_SPEC = LeaderboardSpec(measures=(
-    MeasureSpec("SCORE"),              # dtype=float (default)
-    MeasureSpec("HAS_KEYWORDS", bool), # dtype=bool: cast to 1.0/0.0, aggregate via mean
+    MeasureSpec("SCORE"),
+    MeasureSpec("HAS_KEYWORDS"),  # Use 1.0/0.0 for boolean
 ))
 
 

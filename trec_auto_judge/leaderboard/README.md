@@ -45,20 +45,22 @@ A `LeaderboardBuilder` is the only place where:
 
 ## Define a Leaderboard spec
 
-`MeasureSpec` takes a name and an optional dtype. The dtype determines casting, aggregation, and default behavior:
+`MeasureSpec` takes a name and an optional dtype. Only `float` and `str` are allowed:
 
 - `float` (default): cast to float, aggregate via mean, default 0.0
-- `int`: cast to float, aggregate via mean, default 0.0
-- `bool`: cast to 1.0/0.0, aggregate via mean, default 0.0
 - `str`: keep as string, aggregate via first value, default ""
+
+For boolean data, use `float` with `1.0`/`0.0` values.
 
 ```python
 
 MY_SPEC = LeaderboardSpec(measures=(
-    MeasureSpec("GRADE"),            # dtype=float (default)
-    MeasureSpec("IS_MATCH", bool),   # dtype=bool
+    MeasureSpec("GRADE"),
+    MeasureSpec("IS_MATCH"),  # Use 1.0/0.0 for boolean
 ))
 ```
+
+Only `float` and `str` dtypes are allowed. For boolean data, use `float` with `1.0`/`0.0` values.
 
 ## Build a Leaderboard
 
@@ -70,8 +72,8 @@ from pathlib import Path
 
 b = LeaderboardBuilder(MY_SPEC)
 
-b.add(run_id="runA", topic_id="t1", GRADE=0.9, IS_MATCH=True)
-b.add(run_id="runA", topic_id="t2", GRADE=0.4, IS_MATCH=False)
+b.add(run_id="runA", topic_id="t1", GRADE=0.9, IS_MATCH=1.0)
+b.add(run_id="runA", topic_id="t2", GRADE=0.4, IS_MATCH=0.0)
 
 lb = b.build()
 lb.write(Path("leaderboard.tsv"))
