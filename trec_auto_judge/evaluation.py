@@ -11,8 +11,9 @@ LeaderboardFormat = Literal["trec_eval", "tot", "ir_measures", "ranking"]
 BASE_CORRELATION_METHODS = ["kendall", "pearson", "spearman", "tauap_b"]
 TOP_K_VALUES = [10]
 CORRELATION_METHODS: List[str] = (
-    BASE_CORRELATION_METHODS +
-    [f"{m}@{k}" for m in BASE_CORRELATION_METHODS for k in TOP_K_VALUES]
+    BASE_CORRELATION_METHODS + 
+    []
+    # [f"{m}@{k}" for m in BASE_CORRELATION_METHODS for k in TOP_K_VALUES]
 )
 
 
