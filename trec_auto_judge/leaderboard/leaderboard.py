@@ -134,7 +134,8 @@ class Leaderboard:
         print(f"Loading {len(files)} files from {directory}", file=sys.stderr)
 
         leaderboards = [cls._load_file(f, format, has_header) for f in files]
-        return LeaderboardBuilder(leaderboards[0].spec).add_from_all(leaderboards).build()
+        spec = leaderboards[0].spec_without_aggregate()
+        return LeaderboardBuilder(spec).add_from_all(leaderboards).build()
 
     @classmethod
     def _load_file(
@@ -233,8 +234,9 @@ class Leaderboard:
             drop_aggregate: If True, filter out pre-existing "all" entries and recompute
             on_missing: Policy for handling missing (run_id, topic_id) pairs
         """
-        # Use for_leaderboard() factory to get builder with appropriate spec
-        builder = LeaderboardBuilder.for_leaderboard(lb, drop_aggregate)
+        # Get appropriate spec based on drop_aggregate
+        spec = lb.spec_without_aggregate() if drop_aggregate else lb.spec
+        builder = LeaderboardBuilder(spec)
 
         # Add all entries (including "all" rows) - _handle_aggregates() decides what to keep
         for e in lb.entries:
@@ -264,6 +266,23 @@ class Leaderboard:
     def topic_ids(self) -> Set[str]:
         """Unique topic_ids (excluding 'all')."""
         return {e.topic_id for e in self.entries if e.topic_id != self.all_topic_id}
+
+    def spec_without_aggregate(self) -> "LeaderboardSpec":
+        """
+        Derive a LeaderboardSpec containing only measures present in per-topic entries.
+
+        Measures that only exist in 'all' rows are excluded. This is useful when
+        merging leaderboards or when drop_aggregate will be applied later.
+        """
+        per_topic_measures: Set[str] = set()
+        for e in self.entries:
+            if e.topic_id != self.all_topic_id:
+                per_topic_measures.update(e.values.keys())
+
+        filtered_specs = tuple(
+            ms for ms in self.spec.measures if ms.name in per_topic_measures
+        )
+        return LeaderboardSpec(measures=filtered_specs)
 
     def filter_and_recompute(
         self,
@@ -429,43 +448,6 @@ class LeaderboardBuilder:
         self.spec = spec
         self._rows: List[LeaderboardEntry] = []
 
-    @classmethod
-    def for_leaderboard(
-        cls,
-        lb: "Leaderboard",
-        drop_aggregate: bool = True,
-    ) -> "LeaderboardBuilder":
-        """
-        Create a builder configured for rebuilding from an existing leaderboard.
-
-        Args:
-            lb: Source leaderboard
-            drop_aggregate: If True, derive spec from per-topic entries only
-                (measures that only exist in "all" rows are excluded).
-                If False, use the full spec from the leaderboard.
-
-        Returns:
-            A new LeaderboardBuilder with appropriate spec
-        """
-        if lb.spec is None:
-            raise ValueError("Cannot create builder: leaderboard has no spec")
-
-        if drop_aggregate:
-            # Derive spec from per-topic measures only
-            per_topic_measures: Set[str] = set()
-            for e in lb.entries:
-                if e.topic_id != lb.all_topic_id:
-                    per_topic_measures.update(e.values.keys())
-
-            filtered_specs = tuple(
-                ms for ms in lb.spec.measures if ms.name in per_topic_measures
-            )
-            spec = LeaderboardSpec(measures=filtered_specs)
-        else:
-            spec = lb.spec
-
-        return cls(spec)
-
     def add(
         self,
         *,
@@ -527,6 +509,9 @@ class LeaderboardBuilder:
         """
         Add entries from LeaderboardEntry objects (e.g., from another leaderboard).
 
+        Values are filtered to only include measures in the spec. Validation
+        of complete measure coverage happens at build() time.
+
         Args:
             entries: LeaderboardEntry objects to add
             skip_all_rows: If True (default), skip entries where topic_id == all_topic_id
@@ -537,7 +522,10 @@ class LeaderboardBuilder:
         for e in entries:
             if skip_all_rows and e.topic_id == self.spec.all_topic_id:
                 continue
-            self.add(run_id=e.run_id, topic_id=e.topic_id, values=e.values)
+            # Filter values to spec - validation happens at build() time
+            filtered_values = {k: v for k, v in e.values.items() if k in self.spec.name_set}
+            if filtered_values:
+                self.add(run_id=e.run_id, topic_id=e.topic_id, values=filtered_values)
         return self
 
     def add_from_all(
