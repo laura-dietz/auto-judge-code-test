@@ -5,6 +5,7 @@ Supported formats:
 - trec_eval: measure topic_id value (3 cols, run_id from filename)
 - tot: run_id measure topic_id value (4 cols)
 - ir_measures: run_id topic_id measure value (4 cols)
+- ranking: topic_id Q0 run_id rank value measure (6 cols, TREC ranking format)
 - jsonl: JSON lines with run_id, topic_id, measure, value fields
 
 Handles both single files and directories (one file per run).
@@ -20,7 +21,7 @@ from typing import Literal, List
 from .eval_result import EvalResult, EvalEntry, MeasureSpecs, ALL_TOPIC_ID
 from .builder import EvalResultBuilder
 
-Format = Literal["trec_eval", "tot", "ir_measures", "jsonl"]
+Format = Literal["trec_eval", "tot", "ir_measures", "ranking", "jsonl"]
 
 
 def load(
@@ -183,6 +184,13 @@ def _parse_line(line: str, format: Format, filename: str) -> EvalEntry | None:
             )
         run_id, topic_id, measure, value = parts
 
+    elif format == "ranking":
+        if len(parts) != 6:
+            raise ValueError(
+                f"ranking format expects 6 columns, got {len(parts)}: {line!r}"
+            )
+        topic_id, _q0, run_id, _rank, value, measure = parts
+
     else:
         raise ValueError(f"Unknown format: {format!r}")
 
@@ -259,6 +267,10 @@ def _format_entry(entry: EvalEntry, format: Format) -> str:
 
     elif format == "ir_measures":
         return f"{entry.run_id}\t{entry.topic_id}\t{entry.measure}\t{value_str}"
+
+    elif format == "ranking":
+        # rank is always 0 since EvalResult doesn't track ranking
+        return f"{entry.topic_id}\tQ0\t{entry.run_id}\t0\t{value_str}\t{entry.measure}"
 
     elif format == "jsonl":
         obj = {
