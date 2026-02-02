@@ -8,7 +8,7 @@ from ..click_plus import (
     LEADERBOARD_FORMATS,
     LEADERBOARD_FORMAT_HELP,
 )
-from ..leaderboard import Leaderboard
+from ..eval_results import load as load_eval_result, EvalResult
 from typing import List, Set
 from tira.io_utils import to_prototext
 
@@ -175,19 +175,21 @@ def meta_evaluate(
     # Determine topic IDs to use
     topic_ids_set: Set[str] | None = None
     if topic_ids_from_eval:
-        # Derive from union of eval leaderboard topics
+        # Derive from union of eval result topics
         topic_ids_set = set()
         for eval_path in all_inputs:
-            lb = Leaderboard.load(
+            er = load_eval_result(
                 eval_path,
                 format=eval_format,
                 has_header=eval_has_header,
-                on_missing="skip",
-                drop_aggregate=eval_drop_aggregate,
+                drop_aggregates=eval_drop_aggregate,
+                recompute_aggregates=False,
+                verify=False,
+                on_missing="ignore",
             )
-            # topic_ids property excludes "all" aggregate topic
-            topic_ids_set.update(lb.topic_ids)
-        click.echo(f"Derived {len(topic_ids_set)} topic IDs from eval leaderboards", err=True)
+            # topic_ids property excludes ALL_TOPIC_ID
+            topic_ids_set.update(er.topic_ids)
+        click.echo(f"Derived {len(topic_ids_set)} topic IDs from eval results", err=True)
     elif topic_id:
         topic_ids_set = set(topic_id)
 
@@ -207,8 +209,8 @@ def meta_evaluate(
     )
 
     # Print diagnostic info
-    truth_runs = len(te.truth_leaderboard.run_ids)
-    truth_topics = len(te.truth_leaderboard.topic_ids)
+    truth_runs = len(te.truth_result.run_ids)
+    truth_topics = len(te.truth_result.topic_ids)
     effective_topics = len(topic_ids_set) if topic_ids_set else truth_topics
     click.echo(
         f"Truth leaderboard: {truth_runs} run(s), {truth_topics} topic(s). "

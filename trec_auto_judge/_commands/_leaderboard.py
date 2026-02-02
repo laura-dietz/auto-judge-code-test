@@ -7,7 +7,7 @@ from pathlib import Path
 import pandas as pd
 from statistics import mean, stdev
 
-from trec_auto_judge import Leaderboard
+from trec_auto_judge.eval_results import load as load_eval_result, EvalResult, ALL_TOPIC_ID
 from ..click_plus import (
     detect_header_interactive,
     LEADERBOARD_FORMATS,
@@ -87,29 +87,37 @@ def leaderboard(
     df_rows = []
 
     for input_path in all_inputs:
-        lb = Leaderboard.load(input_path, format=eval_format, has_header=has_header)
+        er = load_eval_result(
+            input_path,
+            format=eval_format,
+            has_header=has_header,
+            drop_aggregates=False,
+            recompute_aggregates=False,
+            verify=False,
+            on_missing="ignore",
+        )
 
         # Get measures to process
-        measures = list(lb.measures)
+        measures = sorted(er.measures)
         if measure_filter:
             measures = [m for m in measures if m in measure_filter]
 
-        # Get unique run_ids from entries
-        run_ids = sorted(set(entry.run_id for entry in lb.entries))
+        # Get unique run_ids
+        run_ids = sorted(er.run_ids)
 
         # Group values by (run_id, measure), compute mean across topics
         # run_id is the IR system being judged, topic_id varies
         for run_id in run_ids:
             for m in measures:
                 # Collect values across topics for this (run_id, measure)
-                values = []
-                for entry in lb.entries:
-                    if entry.run_id != run_id:
-                        continue
-                    if entry.topic_id == lb.all_topic_id:
-                        continue  # Skip aggregate rows, compute from per-topic
-                    if m in entry.values:
-                        values.append(float(entry.values[m]))
+                values = [
+                    float(e.value)
+                    for e in er.entries
+                    if e.run_id == run_id
+                    and e.measure == m
+                    and e.topic_id != ALL_TOPIC_ID
+                    and isinstance(e.value, (int, float))
+                ]
 
                 if not values:
                     continue

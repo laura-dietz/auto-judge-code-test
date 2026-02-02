@@ -3,11 +3,11 @@ import sys
 from pathlib import Path
 from typing import Dict, List, Literal, Tuple
 
-from trec_auto_judge import Leaderboard
+from trec_auto_judge.eval_results import load as load_eval_result, EvalResult
 
 # TODO: Consider unifying with leaderboard.OnMissing which uses "fix_aggregate" instead of "skip"
 OnMissing = Literal["error", "warn", "skip", "default"]
-LeaderboardFormat = Literal["trec_eval", "tot", "ir_measures", "ranking"]
+EvalResultFormat = Literal["trec_eval", "tot", "ir_measures", "ranking"]
 BASE_CORRELATION_METHODS = ["kendall", "pearson", "spearman", "tauap_b"]
 TOP_K_VALUES = [10]
 CORRELATION_METHODS: List[str] = (
@@ -39,10 +39,10 @@ class LeaderboardEvaluator():
         truth_measures: List[str] | None = None,
         eval_measures: List[str] | None = None,
         on_missing: OnMissing = "error",
-        truth_format: LeaderboardFormat = "ir_measures",
+        truth_format: EvalResultFormat = "ir_measures",
         truth_has_header: bool = False,
         truth_drop_aggregate: bool = False,
-        eval_format: LeaderboardFormat = "tot",
+        eval_format: EvalResultFormat = "tot",
         eval_has_header: bool = False,
         eval_drop_aggregate: bool = False,
         correlation_methods: List[str] | None = None,
@@ -60,47 +60,66 @@ class LeaderboardEvaluator():
         self.correlation_methods = correlation_methods if correlation_methods else CORRELATION_METHODS
         self.topic_ids = topic_ids  # Pre-determined topics, or None = use truth's topics
 
-        # Load truth leaderboard (required)
-        self.truth_leaderboard = self.load_leaderboard(
+        # Load truth result (required)
+        self.truth_result = self._load_eval_result(
             truth_leaderboard, self.truth_format, self.truth_has_header, self.on_missing, self.truth_drop_aggregate
         )
 
-        # Validate truth leaderboard has enough runs for correlation
-        num_runs = len(self.truth_leaderboard.run_ids)
+        # Validate truth result has enough runs for correlation
+        num_runs = len(self.truth_result.run_ids)
         if num_runs < 3:
             raise ValueError(
-                f"Truth leaderboard has only {num_runs} run(s). "
+                f"Truth result has only {num_runs} run(s). "
                 f"Correlation requires at least 3 runs. "
                 f"Did you pass a single file instead of a directory?"
             )
 
-    def load_leaderboard(self, leaderboard_path: Path, format: LeaderboardFormat, has_header: bool = False, on_missing: OnMissing = "error", drop_aggregate: bool = False) -> Leaderboard:
-        if not leaderboard_path or not Path(leaderboard_path).exists():
-            raise ValueError(f"Leaderboard path does not exist: {leaderboard_path}")
-        return Leaderboard.load(Path(leaderboard_path), format=format, has_header=has_header, on_missing=on_missing, drop_aggregate=drop_aggregate)
+    def _load_eval_result(
+        self,
+        path: Path,
+        format: EvalResultFormat,
+        has_header: bool = False,
+        on_missing: OnMissing = "error",
+        drop_aggregate: bool = False,
+    ) -> EvalResult:
+        if not path or not Path(path).exists():
+            raise ValueError(f"Path does not exist: {path}")
 
-    def extract_ranking(self, leaderboard: Leaderboard, measure: str) -> Dict[str, float]:
-        """Extract run_id -> value mapping for aggregate rows (topic_id == all_topic_id)."""
-        return leaderboard.get_aggregate_ranking(measure)
+        # Map on_missing: "skip"/"default" -> "ignore"
+        eval_on_missing = "ignore" if on_missing in ("skip", "default") else on_missing
+
+        return load_eval_result(
+            Path(path),
+            format=format,
+            has_header=has_header,
+            drop_aggregates=drop_aggregate,
+            recompute_aggregates=drop_aggregate,
+            verify=True,
+            on_missing=eval_on_missing,
+        )
+
+    def extract_ranking(self, eval_result: EvalResult, measure: str) -> Dict[str, float]:
+        """Extract run_id -> value mapping for aggregate rows (topic_id == ALL_TOPIC_ID)."""
+        return eval_result.get_aggregate_ranking(measure)
 
     def get_measure_pairs(
-        self, eval_leaderboard: Leaderboard
+        self, eval_result: EvalResult
     ) -> List[Tuple[str, str]]:
         """Get list of (truth_measure, eval_measure) pairs to analyze."""
         # Determine eval measures to use
-        eval_measures = list(eval_leaderboard.measures)
+        eval_measures = sorted(eval_result.measures)
         if self.eval_measures_filter:
-            missing = set(self.eval_measures_filter) - set(eval_leaderboard.measures)
+            missing = set(self.eval_measures_filter) - eval_result.measures
             if missing:
-                raise ValueError(f"Eval measures not found in eval leaderboard: {sorted(missing)}")
+                raise ValueError(f"Eval measures not found in eval result: {sorted(missing)}")
             eval_measures = [m for m in eval_measures if m in self.eval_measures_filter]
 
         # Determine truth measures to use
-        truth_measures = list(self.truth_leaderboard.measures)
+        truth_measures = sorted(self.truth_result.measures)
         if self.truth_measures_filter:
-            missing = set(self.truth_measures_filter) - set(self.truth_leaderboard.measures)
+            missing = set(self.truth_measures_filter) - self.truth_result.measures
             if missing:
-                raise ValueError(f"Truth measures not found in truth leaderboard: {sorted(missing)}")
+                raise ValueError(f"Truth measures not found in truth result: {sorted(missing)}")
             truth_measures = [m for m in truth_measures if m in self.truth_measures_filter]
 
         # Generate all pairs
@@ -108,13 +127,13 @@ class LeaderboardEvaluator():
 
     def evaluate(
         self,
-        leaderboard_file: Path,
+        eval_file: Path,
     ) -> Dict[Tuple[str, str], Dict]:
         """
         Evaluate and return dict keyed by (truth_measure, eval_measure) pairs.
 
         Args:
-            leaderboard_file: Path to the evaluated leaderboard file
+            eval_file: Path to the evaluated result file
 
         Returns:
             Dict mapping (truth_measure, eval_measure) pairs to correlation results.
@@ -128,20 +147,20 @@ class LeaderboardEvaluator():
             4. Filter truth to top k runs, recompute aggregates
             5. Compare rankings
         """
-        eval_leaderboard = self.load_leaderboard(
-            leaderboard_file, self.eval_format, self.eval_has_header, self.on_missing, self.eval_drop_aggregate
+        eval_result = self._load_eval_result(
+            eval_file, self.eval_format, self.eval_has_header, self.on_missing, self.eval_drop_aggregate
         )
 
         # Step 1: Determine topics to use
         # Use pre-determined topic_ids, or fall back to truth's topics
-        topics_to_use = self.topic_ids if self.topic_ids is not None else self.truth_leaderboard.topic_ids
+        topics_to_use = self.topic_ids if self.topic_ids is not None else self.truth_result.topic_ids
 
         # Step 2: Filter truth to topics, recompute aggregates
-        truth_by_topics = self.truth_leaderboard.filter_and_recompute(topic_ids=topics_to_use)
+        truth_by_topics = self.truth_result.filter_and_recompute(topic_ids=topics_to_use)
 
         ret = {}
 
-        for truth_m, eval_m in self.get_measure_pairs(eval_leaderboard):
+        for truth_m, eval_m in self.get_measure_pairs(eval_result):
             correlations = {}
 
             for method in self.correlation_methods:
@@ -152,7 +171,7 @@ class LeaderboardEvaluator():
                     top_run_ids = set(truth_by_topics.top_k_run_ids(truth_m, top_k))
 
                     # Step 4: Filter eval to topics AND top k runs, recompute
-                    eval_for_method = eval_leaderboard.filter_and_recompute(
+                    eval_for_method = eval_result.filter_and_recompute(
                         topic_ids=topics_to_use,
                         run_ids=top_run_ids
                     )
@@ -162,7 +181,7 @@ class LeaderboardEvaluator():
                 else:
                     # No top-k: just filter both to topics
                     truth_for_method = truth_by_topics
-                    eval_for_method = eval_leaderboard.filter_and_recompute(topic_ids=topics_to_use)
+                    eval_for_method = eval_result.filter_and_recompute(topic_ids=topics_to_use)
 
                 truth_ranking = self.extract_ranking(truth_for_method, truth_m)
                 eval_ranking = self.extract_ranking(eval_for_method, eval_m)
