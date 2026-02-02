@@ -423,6 +423,196 @@ class TestBuilderAddRecords:
         assert result.get_value("run1", ALL_TOPIC_ID, "score") == pytest.approx(0.7)
 
 
+class TestAggregateSanityCheck:
+    """Tests for detecting when file aggregates differ from recomputed ones.
+
+    This is important for diagnosing issues like:
+    - f1 vs f1_macro (might use different aggregation formulas)
+    - nugget_coverage vs nugget_coverage_macro
+    - Upstream data errors
+    """
+
+    def test_aggregates_match_when_simple_mean(self):
+        """When file uses simple mean, recomputed should match."""
+        specs = MeasureSpecs.from_single({"score": "float"})
+        builder = EvalResultBuilder(specs)
+        # Add per-topic data
+        builder.add("run1", "t1", "score", "0.4")
+        builder.add("run1", "t2", "score", "0.6")
+        # Add aggregate as simple mean: (0.4 + 0.6) / 2 = 0.5
+        builder.add("run1", ALL_TOPIC_ID, "score", "0.5")
+
+        original = builder.build(compute_aggregates=False, verify=False, on_missing="ignore")
+        recomputed = original.filter_and_recompute()
+
+        orig_agg = original.get_value("run1", ALL_TOPIC_ID, "score")
+        recomp_agg = recomputed.get_value("run1", ALL_TOPIC_ID, "score")
+
+        assert orig_agg == pytest.approx(recomp_agg), \
+            f"Aggregates should match: original={orig_agg}, recomputed={recomp_agg}"
+
+    def test_aggregates_differ_when_weighted_mean(self):
+        """When file uses weighted mean, recomputed (simple mean) will differ."""
+        specs = MeasureSpecs.from_single({"score": "float"})
+        builder = EvalResultBuilder(specs)
+        # Add per-topic data with different "weights" (simulated)
+        # t1 has 1 item, t2 has 3 items (but we only store the average)
+        builder.add("run1", "t1", "score", "1.0")  # 1 item with score 1.0
+        builder.add("run1", "t2", "score", "0.5")  # 3 items with avg 0.5
+
+        # File aggregate uses weighted mean: (1*1.0 + 3*0.5) / 4 = 2.5/4 = 0.625
+        builder.add("run1", ALL_TOPIC_ID, "score", "0.625")
+
+        original = builder.build(compute_aggregates=False, verify=False, on_missing="ignore")
+        recomputed = original.filter_and_recompute()
+
+        orig_agg = original.get_value("run1", ALL_TOPIC_ID, "score")
+        recomp_agg = recomputed.get_value("run1", ALL_TOPIC_ID, "score")
+        # Recomputed uses simple mean: (1.0 + 0.5) / 2 = 0.75
+
+        assert orig_agg == pytest.approx(0.625)
+        assert recomp_agg == pytest.approx(0.75)
+        assert orig_agg != pytest.approx(recomp_agg), \
+            "Aggregates should differ when original uses weighted mean"
+
+    def test_detect_aggregate_discrepancy(self):
+        """Utility test showing how to detect aggregate discrepancies."""
+        specs = MeasureSpecs.from_single({"f1": "float", "f1_macro": "float"})
+        builder = EvalResultBuilder(specs)
+
+        # Simulate data where f1 and f1_macro have different values
+        # f1 per-topic: 0.8, 0.6
+        # f1_macro in file: 0.7 (simple mean = correct)
+        # But imagine f1 aggregate in file was computed differently
+        builder.add("run1", "t1", "f1", "0.8")
+        builder.add("run1", "t2", "f1", "0.6")
+        builder.add("run1", ALL_TOPIC_ID, "f1", "0.65")  # Wrong! Should be 0.7
+
+        builder.add("run1", "t1", "f1_macro", "0.8")
+        builder.add("run1", "t2", "f1_macro", "0.6")
+        builder.add("run1", ALL_TOPIC_ID, "f1_macro", "0.7")  # Correct
+
+        original = builder.build(compute_aggregates=False, verify=False, on_missing="ignore")
+        recomputed = original.filter_and_recompute()
+
+        # Check discrepancies
+        discrepancies = []
+        for measure in ["f1", "f1_macro"]:
+            orig = original.get_value("run1", ALL_TOPIC_ID, measure)
+            recomp = recomputed.get_value("run1", ALL_TOPIC_ID, measure)
+            if orig is not None and recomp is not None:
+                if abs(orig - recomp) > 0.001:
+                    discrepancies.append((measure, orig, recomp))
+
+        assert len(discrepancies) == 1
+        assert discrepancies[0][0] == "f1"
+        assert discrepancies[0][1] == pytest.approx(0.65)  # original (wrong)
+        assert discrepancies[0][2] == pytest.approx(0.7)   # recomputed (correct)
+
+
+class TestV1V2Parity:
+    """Tests to verify v1 and v2 meta-evaluate produce identical results."""
+
+    def _build_truth_and_eval(self):
+        """Build synthetic truth and eval results for testing."""
+        import tempfile
+        from pathlib import Path
+
+        # Truth: 4 runs, 3 topics, measures: ndcg, map
+        truth_specs = MeasureSpecs.from_single({"ndcg": "float", "map": "float"})
+        truth_builder = EvalResultBuilder(truth_specs)
+
+        truth_data = {
+            "run_a": {"t1": {"ndcg": 0.9, "map": 0.8}, "t2": {"ndcg": 0.7, "map": 0.6}, "t3": {"ndcg": 0.8, "map": 0.7}},
+            "run_b": {"t1": {"ndcg": 0.6, "map": 0.5}, "t2": {"ndcg": 0.8, "map": 0.7}, "t3": {"ndcg": 0.5, "map": 0.4}},
+            "run_c": {"t1": {"ndcg": 0.7, "map": 0.6}, "t2": {"ndcg": 0.6, "map": 0.5}, "t3": {"ndcg": 0.9, "map": 0.8}},
+            "run_d": {"t1": {"ndcg": 0.5, "map": 0.4}, "t2": {"ndcg": 0.9, "map": 0.8}, "t3": {"ndcg": 0.6, "map": 0.5}},
+        }
+
+        for run_id, topics in truth_data.items():
+            for topic_id, measures in topics.items():
+                for measure, value in measures.items():
+                    truth_builder.add(run_id, topic_id, measure, value)
+
+        truth = truth_builder.build(compute_aggregates=True, verify=False, on_missing="ignore")
+
+        # Eval: same runs, single measure AVG_GRADE
+        eval_specs = MeasureSpecs.from_single({"AVG_GRADE": "float"})
+        eval_builder = EvalResultBuilder(eval_specs)
+
+        eval_data = {
+            "run_a": {"t1": 0.85, "t2": 0.75, "t3": 0.80},
+            "run_b": {"t1": 0.55, "t2": 0.70, "t3": 0.45},
+            "run_c": {"t1": 0.65, "t2": 0.60, "t3": 0.85},
+            "run_d": {"t1": 0.50, "t2": 0.80, "t3": 0.55},
+        }
+
+        for run_id, topics in eval_data.items():
+            for topic_id, value in topics.items():
+                eval_builder.add(run_id, topic_id, "AVG_GRADE", value)
+
+        eval_result = eval_builder.build(compute_aggregates=True, verify=False, on_missing="ignore")
+
+        return truth, eval_result
+
+    def test_v1_v2_same_correlation_synthetic(self):
+        """v1 and v2 should produce identical correlations on synthetic data."""
+        import tempfile
+        from pathlib import Path
+        from trec_auto_judge.eval_results import write
+        from trec_auto_judge.evaluation import TrecLeaderboardEvaluation
+        from trec_auto_judge.evaluation_v2 import LeaderboardEvaluator
+
+        truth, eval_result = self._build_truth_and_eval()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            truth_path = Path(tmpdir) / "truth.jsonl"
+            eval_path = Path(tmpdir) / "eval.txt"
+
+            write(truth, truth_path, format="jsonl")
+            write(eval_result, eval_path, format="tot")
+
+            # v1
+            v1_eval = TrecLeaderboardEvaluation(
+                truth_path,
+                truth_measures=["ndcg"],
+                eval_measures=["AVG_GRADE"],
+                truth_format="jsonl",
+                truth_has_header=False,
+                eval_format="tot",
+                eval_has_header=False,
+                on_missing="skip",
+                correlation_methods=["kendall", "pearson", "spearman"],
+            )
+            v1_result = v1_eval.evaluate(eval_path)
+
+            # v2
+            v2_eval = LeaderboardEvaluator(
+                truth_path,
+                truth_measures=["ndcg"],
+                eval_measures=["AVG_GRADE"],
+                truth_format="jsonl",
+                truth_has_header=False,
+                truth_drop_aggregate=False,
+                eval_format="tot",
+                eval_has_header=False,
+                eval_drop_aggregate=False,
+                on_missing="skip",
+                correlation_methods=["kendall", "pearson", "spearman"],
+                topic_ids=None,  # --all-topics / preserve mode
+            )
+            v2_result = v2_eval.evaluate(eval_path)
+
+        # Compare results
+        for (truth_m, eval_m), v1_metrics in v1_result.items():
+            v2_metrics = v2_result.get((truth_m, eval_m), {})
+            for method in ["kendall", "pearson", "spearman"]:
+                v1_val = v1_metrics.get(method)
+                v2_val = v2_metrics.get(method)
+                assert v1_val == pytest.approx(v2_val, abs=1e-6), \
+                    f"v1 vs v2 mismatch for {truth_m}/{eval_m}/{method}: {v1_val} != {v2_val}"
+
+
 class TestBuilderMerge:
     """Tests for merging EvalResults via add_from."""
 

@@ -43,24 +43,29 @@ A `LeaderboardBuilder` is the only place where:
 
 ## Quickstart
 
+### Define aggregators for `all'
+
+or use from leaderboard module.
+
+Example
+
+```python
+from statistics import mean
+
+def mean_of_bools(values):
+    return mean(1.0 if bool(v) else 0.0 for v in values)
+```
+
 ## Define a Leaderboard spec
 
-`MeasureSpec` takes a name and an optional dtype. Only `float` and `str` are allowed:
-
-- `float` (default): cast to float, aggregate via mean, default 0.0
-- `str`: keep as string, aggregate via first value, default ""
-
-For boolean data, use `float` with `1.0`/`0.0` values.
 
 ```python
 
 MY_SPEC = LeaderboardSpec(measures=(
-    MeasureSpec("GRADE"),
-    MeasureSpec("IS_MATCH"),  # Use 1.0/0.0 for boolean
+    MeasureSpec("GRADE", aggregate=mean_of_floats, cast=float),
+    MeasureSpec("IS_MATCH", aggregate=mean_of_bools, cast=bool),
 ))
 ```
-
-Only `float` and `str` dtypes are allowed. For boolean data, use `float` with `1.0`/`0.0` values.
 
 ## Build a Leaderboard
 
@@ -72,8 +77,8 @@ from pathlib import Path
 
 b = LeaderboardBuilder(MY_SPEC)
 
-b.add(run_id="runA", topic_id="t1", GRADE=0.9, IS_MATCH=1.0)
-b.add(run_id="runA", topic_id="t2", GRADE=0.4, IS_MATCH=0.0)
+b.add(run_id="runA", topic_id="t1", GRADE=0.9, IS_MATCH=True)
+b.add(run_id="runA", topic_id="t2", GRADE=0.4, IS_MATCH=False)
 
 lb = b.build()
 lb.write(Path("leaderboard.tsv"))

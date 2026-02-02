@@ -229,6 +229,56 @@ class EvalResult:
         sorted_runs = sorted(ranking.items(), key=lambda x: x[1], reverse=True)
         return [run_id for run_id, _ in sorted_runs[:k]]
 
+    def filter_runs(self, run_ids: Set[str]) -> "EvalResult":
+        """
+        Filter entries by run_ids WITHOUT recomputing aggregates.
+
+        Use this for run-based filtering where aggregate values should be preserved.
+        The aggregate entries are also filtered to only include the specified run_ids.
+
+        Args:
+            run_ids: Keep only these run_ids.
+
+        Returns:
+            New EvalResult with filtered entries (including filtered aggregates).
+        """
+        filtered_entries = tuple(e for e in self.entries if e.run_id in run_ids)
+        return EvalResult(entries=filtered_entries, specs=self.specs)
+
+    def filter_topics_and_recompute(
+        self,
+        topic_ids: Set[str] | None = None,
+    ) -> "EvalResult":
+        """
+        Filter entries by topic_ids and recompute aggregates.
+
+        Use this for topic-based filtering which requires recomputing aggregates
+        (since aggregates are means over topics).
+
+        Args:
+            topic_ids: Keep only these topic_ids. None = keep all (but still recompute).
+
+        Returns:
+            New EvalResult with filtered entries and fresh aggregates.
+        """
+        from .builder import EvalResultBuilder
+
+        builder = EvalResultBuilder(self.specs)
+        for e in self.entries:
+            builder.add_entry(e)
+
+        filtered = builder.filter(
+            run_ids=None,
+            topic_ids=topic_ids,
+            drop_aggregates=True,
+        )
+
+        return filtered.build(
+            compute_aggregates=True,
+            verify=True,
+            on_missing="ignore",
+        )
+
     def filter_and_recompute(
         self,
         run_ids: Set[str] | None = None,
@@ -239,6 +289,8 @@ class EvalResult:
 
         Creates new EvalResult with only specified run_ids/topic_ids,
         dropping existing aggregates and recomputing them.
+
+        Note: For run-only filtering without recompute, use filter_runs() instead.
 
         Args:
             run_ids: Keep only these run_ids. None = keep all.
@@ -264,3 +316,88 @@ class EvalResult:
             verify=True,
             on_missing="ignore",
         )
+
+    def check_aggregate_discrepancies(
+        self,
+        tolerance: float = 0.001,
+    ) -> Dict[str, Dict[str, tuple]]:
+        """
+        Check if file aggregates match recomputed aggregates (simple mean).
+
+        This is useful for:
+        - Detecting when upstream data uses weighted averages
+        - Finding data errors in aggregate computation
+        - Understanding why correlation results differ between preserve/recompute modes
+
+        Args:
+            tolerance: Maximum allowed difference between original and recomputed.
+
+        Returns:
+            Dict of {run_id: {measure: (original, recomputed, diff)}} for discrepancies.
+            Empty dict if all aggregates match.
+
+        Example:
+            >>> discrepancies = result.check_aggregate_discrepancies()
+            >>> for run_id, measures in discrepancies.items():
+            ...     for measure, (orig, recomp, diff) in measures.items():
+            ...         print(f"{run_id}/{measure}: {orig} vs {recomp} (diff={diff})")
+        """
+        recomputed = self.filter_and_recompute()
+
+        discrepancies: Dict[str, Dict[str, tuple]] = {}
+
+        for run_id in self.run_ids:
+            run_discrepancies = {}
+            for measure in self.measures:
+                orig = self.get_value(run_id, ALL_TOPIC_ID, measure)
+                recomp = recomputed.get_value(run_id, ALL_TOPIC_ID, measure)
+
+                if orig is None or recomp is None:
+                    continue
+
+                # Only compare numeric values
+                if not isinstance(orig, (int, float)) or not isinstance(recomp, (int, float)):
+                    continue
+
+                diff = abs(orig - recomp)
+                if diff > tolerance:
+                    run_discrepancies[measure] = (orig, recomp, diff)
+
+            if run_discrepancies:
+                discrepancies[run_id] = run_discrepancies
+
+        return discrepancies
+
+    def report_aggregate_discrepancies(self, tolerance: float = 0.001) -> str:
+        """
+        Generate a human-readable report of aggregate discrepancies.
+
+        Args:
+            tolerance: Maximum allowed difference between original and recomputed.
+
+        Returns:
+            Multi-line string report, or "No discrepancies found." if clean.
+        """
+        discrepancies = self.check_aggregate_discrepancies(tolerance)
+
+        if not discrepancies:
+            return "No aggregate discrepancies found."
+
+        lines = ["Aggregate discrepancies (file vs recomputed):"]
+
+        # Group by measure for clearer reporting
+        by_measure: Dict[str, list] = {}
+        for run_id, measures in discrepancies.items():
+            for measure, (orig, recomp, diff) in measures.items():
+                if measure not in by_measure:
+                    by_measure[measure] = []
+                by_measure[measure].append((run_id, orig, recomp, diff))
+
+        for measure, runs in sorted(by_measure.items()):
+            lines.append(f"\n  {measure}:")
+            for run_id, orig, recomp, diff in sorted(runs, key=lambda x: -x[3])[:5]:
+                lines.append(f"    {run_id}: {orig:.6f} vs {recomp:.6f} (diff={diff:.6f})")
+            if len(runs) > 5:
+                lines.append(f"    ... and {len(runs) - 5} more runs")
+
+        return "\n".join(lines)

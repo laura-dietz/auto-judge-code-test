@@ -93,6 +93,29 @@ jsonl: JSON lines with run_id, topic_id, measure, value
     is_flag=True,
     help="Show detailed output.",
 )
+@click.option(
+    "--compare-aggregates",
+    is_flag=True,
+    help="Compare file aggregates vs recomputed aggregates and report discrepancies.",
+)
+@click.option(
+    "--original-measure",
+    type=str,
+    multiple=True,
+    help="Measure name(s) in original file for aggregate comparison. Repeatable.",
+)
+@click.option(
+    "--recomputed-measure",
+    type=str,
+    multiple=True,
+    help="Corresponding measure name(s) after recompute. Must match --original-measure count.",
+)
+@click.option(
+    "--tolerance",
+    type=float,
+    default=0.001,
+    help="Tolerance for aggregate comparison (default: 0.001).",
+)
 def eval_result(
     input_path: Path,
     input_format: str,
@@ -108,6 +131,10 @@ def eval_result(
     filter_measures: tuple[str, ...],
     roundtrip: bool,
     verbose: bool,
+    compare_aggregates: bool,
+    original_measure: tuple[str, ...],
+    recomputed_measure: tuple[str, ...],
+    tolerance: float,
 ) -> int:
     """Load, convert, and roundtrip-test EvalResult files.
 
@@ -123,6 +150,18 @@ def eval_result(
 
         # Load directory of trec_eval files
         trec-auto-judge eval-result ./runs/ -if trec_eval -v
+
+        # Compare file aggregates vs recomputed aggregates
+        trec-auto-judge eval-result data.jsonl -if jsonl --compare-aggregates
+
+        # Compare with measure name mapping (e.g., f1_macro vs f1)
+        trec-auto-judge eval-result data.jsonl -if jsonl --compare-aggregates \\
+            --original-measure f1_macro --recomputed-measure f1
+
+        # Multiple measure mappings
+        trec-auto-judge eval-result data.jsonl -if jsonl --compare-aggregates \\
+            --original-measure f1_macro --recomputed-measure f1 \\
+            --original-measure precision_macro --recomputed-measure precision
     """
     output_format = output_format or input_format
 
@@ -144,6 +183,19 @@ def eval_result(
     )
 
     _print_summary(original, "Loaded", verbose)
+
+    # Aggregate comparison mode
+    if compare_aggregates:
+        return _compare_aggregates_mode(
+            input_path=input_path,
+            input_format=input_format,
+            has_header=has_header,
+            on_missing=on_missing,
+            original_measure=original_measure,
+            recomputed_measure=recomputed_measure,
+            tolerance=tolerance,
+            verbose=verbose,
+        )
 
     # Apply filters if specified
     run_ids_filter: Set[str] | None = None
@@ -283,3 +335,146 @@ def _compare_results(original: EvalResult, reloaded: EvalResult, verbose: bool) 
                     errors.append(f"{run_id}/{topic_id}/{measure}: {orig_val!r} vs {reload_val!r}")
 
     return errors
+
+
+def _compare_aggregates_mode(
+    input_path: Path,
+    input_format: str,
+    has_header: bool,
+    on_missing: str,
+    original_measure: tuple[str, ...],
+    recomputed_measure: tuple[str, ...],
+    tolerance: float,
+    verbose: bool,
+) -> int:
+    """Compare file aggregates vs recomputed aggregates.
+
+    Loads the file twice:
+    1. With original aggregates preserved
+    2. With aggregates recomputed from per-topic data
+
+    Then compares them, optionally mapping measure names.
+    """
+    # Validate measure mapping
+    if original_measure and recomputed_measure:
+        if len(original_measure) != len(recomputed_measure):
+            click.echo(
+                click.style(
+                    f"ERROR: --original-measure count ({len(original_measure)}) "
+                    f"must match --recomputed-measure count ({len(recomputed_measure)})",
+                    fg="red",
+                ),
+                err=True,
+            )
+            return 1
+        measure_mapping = dict(zip(original_measure, recomputed_measure))
+    elif original_measure or recomputed_measure:
+        click.echo(
+            click.style(
+                "ERROR: Must specify both --original-measure and --recomputed-measure, or neither",
+                fg="red",
+            ),
+            err=True,
+        )
+        return 1
+    else:
+        measure_mapping = None  # Same measures, no mapping
+
+    # Load with original aggregates preserved
+    click.echo("Loading with original aggregates...", err=True)
+    original = load(
+        input_path,
+        format=input_format,
+        has_header=has_header,
+        drop_aggregates=False,
+        recompute_aggregates=False,
+        verify=False,
+        on_missing=on_missing,
+    )
+
+    if not original.has_aggregates:
+        click.echo(
+            click.style("WARNING: File has no aggregate entries (topic_id='all')", fg="yellow"),
+            err=True,
+        )
+
+    # Load with recomputed aggregates
+    click.echo("Loading with recomputed aggregates...", err=True)
+    recomputed = load(
+        input_path,
+        format=input_format,
+        has_header=has_header,
+        drop_aggregates=True,
+        recompute_aggregates=True,
+        verify=False,
+        on_missing=on_missing,
+    )
+
+    # Determine which measures to compare
+    if measure_mapping:
+        # User specified explicit mapping
+        pairs = list(measure_mapping.items())
+    else:
+        # Compare same-named measures present in both
+        common_measures = original.measures & recomputed.measures
+        pairs = [(m, m) for m in sorted(common_measures)]
+
+    if not pairs:
+        click.echo(click.style("No measures to compare", fg="yellow"), err=True)
+        return 0
+
+    click.echo(f"\nComparing {len(pairs)} measure(s) across {len(original.run_ids)} run(s)...", err=True)
+    if verbose:
+        click.echo(f"  Measure pairs: {pairs}", err=True)
+
+    # Collect discrepancies
+    discrepancies: dict[str, list[tuple[str, float, float, float]]] = {}
+
+    for orig_measure, recomp_measure in pairs:
+        measure_diffs = []
+
+        for run_id in sorted(original.run_ids):
+            orig_val = original.get_value(run_id, ALL_TOPIC_ID, orig_measure)
+            recomp_val = recomputed.get_value(run_id, ALL_TOPIC_ID, recomp_measure)
+
+            if orig_val is None or recomp_val is None:
+                continue
+
+            # Only compare numeric values
+            if not isinstance(orig_val, (int, float)) or not isinstance(recomp_val, (int, float)):
+                continue
+
+            diff = abs(float(orig_val) - float(recomp_val))
+            if diff > tolerance:
+                measure_diffs.append((run_id, float(orig_val), float(recomp_val), diff))
+
+        if measure_diffs:
+            pair_name = f"{orig_measure}" if orig_measure == recomp_measure else f"{orig_measure} vs {recomp_measure}"
+            discrepancies[pair_name] = measure_diffs
+
+    # Report results
+    if not discrepancies:
+        click.echo(
+            click.style(f"\nNo discrepancies found (tolerance={tolerance})", fg="green"),
+            err=True,
+        )
+        return 0
+
+    click.echo(
+        click.style(f"\nDiscrepancies found in {len(discrepancies)} measure(s):", fg="yellow"),
+        err=True,
+    )
+
+    total_diffs = 0
+    for measure_pair, diffs in sorted(discrepancies.items()):
+        click.echo(f"\n  {measure_pair}:", err=True)
+        # Sort by diff descending
+        diffs_sorted = sorted(diffs, key=lambda x: -x[3])
+        for run_id, orig_val, recomp_val, diff in diffs_sorted[:5]:
+            click.echo(f"    {run_id}: {orig_val:.6f} vs {recomp_val:.6f} (diff={diff:.6f})", err=True)
+        if len(diffs) > 5:
+            click.echo(f"    ... and {len(diffs) - 5} more run(s)", err=True)
+        total_diffs += len(diffs)
+
+    click.echo(f"\nTotal: {total_diffs} discrepancies across {len(discrepancies)} measure(s)", err=True)
+    return 1  # Return non-zero to indicate discrepancies found

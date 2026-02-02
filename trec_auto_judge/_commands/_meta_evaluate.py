@@ -2,14 +2,13 @@ import click
 import glob
 from pathlib import Path
 import pandas as pd
-from ..evaluation import LeaderboardEvaluator, CorrelationMethodType
+from ..evaluation import TrecLeaderboardEvaluation, CORRELATION_METHODS
 from ..click_plus import (
     detect_header_interactive,
     LEADERBOARD_FORMATS,
     LEADERBOARD_FORMAT_HELP,
 )
-from ..eval_results import load as load_eval_result, EvalResult
-from typing import List, Set
+from typing import List
 from tira.io_utils import to_prototext
 
 
@@ -64,16 +63,6 @@ def persist_output(df: pd.DataFrame, output: Path) -> None:
     help="Eval leaderboard(s) have header row to skip.",
 )
 @click.option(
-    "--truth-drop-aggregate/--no-truth-drop-aggregate",
-    default=False,
-    help="Drop pre-existing aggregate rows from truth and recompute from per-topic data.",
-)
-@click.option(
-    "--eval-drop-aggregate/--no-eval-drop-aggregate",
-    default=False,
-    help="Drop pre-existing aggregate rows from eval and recompute from per-topic data.",
-)
-@click.option(
     "--on-missing",
     type=click.Choice(["error", "warn", "skip", "default"]),
     default="error",
@@ -93,7 +82,7 @@ def persist_output(df: pd.DataFrame, output: Path) -> None:
     "--output",
     type=Path,
     required=False,
-    help="Output file path. Format determined by extension: .jsonl for JSON Lines, .prototext for Prototext.",
+    help="The file where the evaluation should be persisted.",
 )
 @click.option(
     "--aggregate",
@@ -105,26 +94,9 @@ def persist_output(df: pd.DataFrame, output: Path) -> None:
 )
 @click.option(
     "--correlation",
-    type=CorrelationMethodType(),
+    type=click.Choice(CORRELATION_METHODS),
     multiple=True,
-    help="Correlation method(s) to compute (e.g., kendall, kendall@15). Repeatable. If omitted, computes all.",
-)
-@click.option(
-    "--topic-id",
-    type=str,
-    multiple=True,
-    help="Topic ID(s) to use for evaluation. Repeatable. If omitted, uses truth's topics.",
-)
-@click.option(
-    "--topic-ids-from-eval",
-    is_flag=True,
-    default=False,
-    help="Derive topic IDs from the union of topics in eval leaderboards (ignores --topic-id).",
-)
-@click.option(
-    "--only-shared-topics/--all-topics",
-    help="Filter to topics present in both truth and eval (recomputes aggregates). "
-         "Default (--all-topics) uses provided aggregates without topic filtering.",
+    help="Correlation method(s) to compute. Repeatable. If omitted, computes all.",
 )
 @click.argument("input_files", nargs=-1, type=str)
 def meta_evaluate(
@@ -135,16 +107,11 @@ def meta_evaluate(
     truth_header: bool,
     eval_format: str,
     eval_header: bool,
-    truth_drop_aggregate: bool,
-    eval_drop_aggregate: bool,
     on_missing: str,
     input: tuple,
     output: Path,
     aggregate: bool,
     correlation: tuple,
-    topic_id: tuple,
-    topic_ids_from_eval: bool,
-    only_shared_topics: bool,
     input_files: tuple,
 ) -> int:
     """Compute correlation between predicted leaderboards and ground-truth leaderboard."""
@@ -173,117 +140,22 @@ def meta_evaluate(
             all_inputs[0], eval_format, eval_header, "eval"
         )
 
-    # Convert tuples to lists/sets (empty tuple means "all" / None)
+    # Convert tuples to lists (empty tuple means "all measures")
     truth_measures = list(truth_measure) if truth_measure else None
     eval_measures = list(eval_measure) if eval_measure else None
     correlation_methods = list(correlation) if correlation else None
 
-    # Determine topic IDs to use
-    # Load truth first to get its topics (needed for --all-topics and --only-shared-topics)
-    truth_result_for_topics = load_eval_result(
-        truth_leaderboard,
-        format=truth_format,
-        has_header=truth_has_header,
-        drop_aggregates=truth_drop_aggregate,
-        recompute_aggregates=False,
-        verify=False,
-        on_missing="ignore",
-    )
-    truth_topic_ids = set(truth_result_for_topics.topic_ids)
-
-    if topic_id:
-        # Explicit --topic-id flags
-        topic_ids_set = set(topic_id)
-    elif only_shared_topics or topic_ids_from_eval:
-        # Need to load eval files to get their topics
-        eval_topics_union: Set[str] = set()
-        for eval_path in all_inputs:
-            er = load_eval_result(
-                eval_path,
-                format=eval_format,
-                has_header=eval_has_header,
-                drop_aggregates=eval_drop_aggregate,
-                recompute_aggregates=False,
-                verify=False,
-                on_missing="ignore",
-            )
-            eval_topics_union.update(er.topic_ids)
-
-        if only_shared_topics:
-            # Intersection of truth and eval topics
-            topic_ids_set = truth_topic_ids & eval_topics_union
-            click.echo(f"Using {len(topic_ids_set)} shared topics (intersection of truth and eval)", err=True)
-        else:
-            # topic_ids_from_eval: use union of eval topics
-            topic_ids_set = eval_topics_union
-            click.echo(f"Derived {len(topic_ids_set)} topic IDs from eval results", err=True)
-    else:
-        # --all-topics (default): use all truth topics
-        topic_ids_set = truth_topic_ids
-
-    te = LeaderboardEvaluator(
+    te = TrecLeaderboardEvaluation(
         truth_leaderboard,
         truth_measures=truth_measures,
         eval_measures=eval_measures,
         truth_format=truth_format,
         truth_has_header=truth_has_header,
-        truth_drop_aggregate=truth_drop_aggregate,
         eval_format=eval_format,
         eval_has_header=eval_has_header,
-        eval_drop_aggregate=eval_drop_aggregate,
         on_missing=on_missing,
         correlation_methods=correlation_methods,
-        topic_ids=topic_ids_set,
     )
-
-    # Print diagnostic info
-    truth_runs = len(te.truth_result.run_ids)
-    truth_topics = len(te.truth_result.topic_ids)
-    click.echo(
-        f"Truth leaderboard: {truth_runs} run(s), {truth_topics} topic(s). "
-        f"Using {len(topic_ids_set)} topic(s) for evaluation.",
-        err=True
-    )
-
-    # Collect eval leaderboard stats (union across all input files)
-    eval_run_ids: Set[str] = set()
-    eval_topic_ids: Set[str] = set()
-    for eval_path in all_inputs:
-        er = load_eval_result(
-            eval_path,
-            format=eval_format,
-            has_header=eval_has_header,
-            drop_aggregates=eval_drop_aggregate,
-            recompute_aggregates=False,
-            verify=False,
-            on_missing="ignore",
-        )
-        eval_run_ids.update(er.run_ids)
-        eval_topic_ids.update(er.topic_ids)
-    click.echo(
-        f"Eval leaderboards: {len(all_inputs)} file(s), {len(eval_run_ids)} run(s), {len(eval_topic_ids)} topic(s).",
-        err=True
-    )
-
-    # Report topic overlap
-    truth_topic_set = set(te.truth_result.topic_ids)
-    common_topics = truth_topic_set & eval_topic_ids
-    truth_only = truth_topic_set - eval_topic_ids
-    eval_only = eval_topic_ids - truth_topic_set
-    click.echo(
-        f"Topic overlap: {len(common_topics)} common, {len(truth_only)} truth-only, {len(eval_only)} eval-only.",
-        err=True
-    )
-
-    # Warn if using @k correlation methods (requires recomputing aggregates)
-    if correlation_methods:
-        top_k_methods = [m for m in correlation_methods if "@" in m]
-        if top_k_methods:
-            click.echo(
-                f"Note: correlation@k methods ({top_k_methods}) require recomputing aggregates. "
-                f"Measures without per-topic data will be unavailable for these methods.",
-                err=True
-            )
 
     df = []
 
