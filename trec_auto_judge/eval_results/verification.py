@@ -37,7 +37,10 @@ def check_same_topics_per_run(
     """
     Check that all runs have the same set of topic_ids.
 
-    Returns dict of run_id -> topic_ids for runs that differ from the first.
+    Computes the union of all topics across runs, then reports which runs
+    are missing topics compared to that union.
+
+    Returns dict of run_id -> topic_ids for runs with incomplete topic sets.
     """
     topics_by_run: dict[str, Set[str]] = defaultdict(set)
 
@@ -48,18 +51,30 @@ def check_same_topics_per_run(
     if not topics_by_run:
         return {}
 
-    run_ids = list(topics_by_run.keys())
-    reference_topics = topics_by_run[run_ids[0]]
+    # Compute union of all topics across all runs
+    all_topics = set()
+    for topics in topics_by_run.values():
+        all_topics.update(topics)
 
+    # Find runs missing topics (compared to union)
     differing = {}
-    for run_id in run_ids[1:]:
-        if topics_by_run[run_id] != reference_topics:
-            differing[run_id] = topics_by_run[run_id]
+    for run_id, topics in topics_by_run.items():
+        missing = all_topics - topics
+        if missing:
+            differing[run_id] = topics
 
     if differing:
+        # Build detailed message
+        details = []
+        for run_id, topics in sorted(differing.items()):
+            missing = sorted(all_topics - topics)
+            details.append(f"  {run_id}: missing {missing}")
+        detail_str = "\n".join(details[:5])  # Limit to first 5
+        if len(details) > 5:
+            detail_str += f"\n  ... and {len(details) - 5} more"
         _handle_failure(
             on_fail,
-            f"{len(differing)} runs have different topic sets than {run_ids[0]}"
+            f"{len(differing)} runs have incomplete topic sets (expected {len(all_topics)} topics):\n{detail_str}"
         )
 
     return differing

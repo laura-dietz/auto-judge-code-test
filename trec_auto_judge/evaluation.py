@@ -102,6 +102,18 @@ class LeaderboardEvaluator():
                 f"Did you pass a single file instead of a directory?"
             )
 
+    def _handle_missing(self, msg: str) -> bool:
+        """Handle missing data according to on_missing policy.
+
+        Returns True if processing should continue (warn/skip/default),
+        raises ValueError if on_missing == "error".
+        """
+        if self.on_missing == "error":
+            raise ValueError(msg)
+        elif self.on_missing == "warn":
+            print(f"Warning: {msg}", file=sys.stderr)
+        return True  # continue for warn/skip/default
+
     def _load_eval_result(
         self,
         path: Path,
@@ -126,8 +138,18 @@ class LeaderboardEvaluator():
             on_missing=eval_on_missing,
         )
 
-    def extract_ranking(self, eval_result: EvalResult, measure: str) -> Dict[str, float]:
-        """Extract run_id -> value mapping for aggregate rows (topic_id == ALL_TOPIC_ID)."""
+    def extract_ranking(self, eval_result: EvalResult, measure: str) -> Dict[str, float] | None:
+        """Extract run_id -> value mapping for aggregate rows (topic_id == ALL_TOPIC_ID).
+
+        Returns None if measure is missing and on_missing is skip/warn.
+        Returns all 0.0 if measure is missing and on_missing is default.
+        """
+        if measure not in eval_result.measures:
+            self._handle_missing(f"Measure '{measure}' not found in result")
+            if self.on_missing == "default":
+                # Fill all runs with 0.0
+                return {run_id: 0.0 for run_id in eval_result.run_ids}
+            return None  # skip for warn/skip
         return eval_result.get_aggregate_ranking(measure)
 
     def get_measure_pairs(
@@ -168,23 +190,47 @@ class LeaderboardEvaluator():
             Each method (e.g., "kendall", "kendall@10") is computed with its own
             top-k filtering based on the @k suffix.
 
-        Filtering order for kendall@k:
-            1. Filter truth to pre-determined topic_ids, recompute aggregates
-            2. Get top k runs from truth's new aggregates
-            3. Filter eval to topic_ids AND top k runs, recompute aggregates
-            4. Filter truth to top k runs, recompute aggregates
-            5. Compare rankings
+        Filtering order:
+            1. Filter truth and eval to common runs (intersection for fair comparison)
+            2. If topic_ids specified (--only-shared-topics): filter to those topics, recompute
+               Otherwise (--all-topics): use provided aggregates, no topic filtering
+            For kendall@k specifically:
+            3. Get top k runs from truth's aggregates
+            4. Filter eval to top k runs (and topics if specified), recompute
+            5. Filter truth to top k runs, recompute
+            6. Compare rankings
         """
         eval_result = self._load_eval_result(
             eval_file, self.eval_format, self.eval_has_header, self.on_missing, self.eval_drop_aggregate
         )
 
-        # Step 1: Determine topics to use
-        # Use pre-determined topic_ids, or fall back to truth's topics
-        topics_to_use = self.topic_ids if self.topic_ids is not None else self.truth_result.topic_ids
+        # Step 1: Compute common runs (intersection of truth and eval)
+        common_run_ids = set(self.truth_result.run_ids) & set(eval_result.run_ids)
 
-        # Step 2: Filter truth to topics, recompute aggregates
-        truth_by_topics = self.truth_result.filter_and_recompute(topic_ids=topics_to_use)
+        # Step 2: Determine if we need to filter/recompute truth
+        # Only @k methods require recomputation (they filter by runs)
+        # Topic filtering alone preserves aggregates (aggregate = mean over topics)
+        has_top_k_methods = any("@" in m for m in self.correlation_methods)
+        needs_recompute = has_top_k_methods
+
+        if needs_recompute:
+            # Filter and recompute aggregates (required for @k methods or topic filtering)
+            truth_filtered = self.truth_result.filter_and_recompute(
+                topic_ids=self.topic_ids,
+                run_ids=common_run_ids,
+            )
+            # Warn about measures lost during filtering
+            lost_measures = self.truth_result.measures - truth_filtered.measures
+            if lost_measures:
+                print(
+                    f"Warning: {len(lost_measures)} measure(s) unavailable after filtering "
+                    f"(no per-topic data): {sorted(lost_measures)}",
+                    file=sys.stderr
+                )
+        else:
+            # No filtering needed - use original truth with provided aggregates
+            # Run alignment will handle mismatches via on_missing policy
+            truth_filtered = self.truth_result
 
         ret = {}
 
@@ -195,24 +241,36 @@ class LeaderboardEvaluator():
                 base_method, top_k = parse_correlation_method(method)
 
                 if top_k is not None:
-                    # Step 3: Get top k runs from truth (based on topic-filtered aggregates)
-                    top_run_ids = set(truth_by_topics.top_k_run_ids(truth_m, top_k))
+                    # Step 4: Get top k runs from truth (already filtered to common runs + topics)
+                    # Check if measure exists before computing top-k
+                    if truth_m not in truth_filtered.measures:
+                        self._handle_missing(f"Measure '{truth_m}' not found for top-k ranking")
+                        continue  # skip this method for this measure pair
 
-                    # Step 4: Filter eval to topics AND top k runs, recompute
+                    top_run_ids = set(truth_filtered.top_k_run_ids(truth_m, top_k))
+
+                    # Step 5: Filter eval to topics (if specified) AND top k runs, recompute
                     eval_for_method = eval_result.filter_and_recompute(
-                        topic_ids=topics_to_use,
+                        topic_ids=self.topic_ids,
                         run_ids=top_run_ids
                     )
 
-                    # Step 5: Filter truth to top k runs (already has topics), recompute
-                    truth_for_method = truth_by_topics.filter_and_recompute(run_ids=top_run_ids)
+                    # Step 6: Filter truth to top k runs, recompute
+                    truth_for_method = truth_filtered.filter_and_recompute(run_ids=top_run_ids)
                 else:
-                    # No top-k: just filter both to topics
-                    truth_for_method = truth_by_topics
-                    eval_for_method = eval_result.filter_and_recompute(topic_ids=topics_to_use)
+                    # No top-k: filter eval to common runs (and topics if specified)
+                    truth_for_method = truth_filtered
+                    eval_for_method = eval_result.filter_and_recompute(
+                        topic_ids=self.topic_ids,
+                        run_ids=common_run_ids,
+                    )
 
                 truth_ranking = self.extract_ranking(truth_for_method, truth_m)
                 eval_ranking = self.extract_ranking(eval_for_method, eval_m)
+
+                # Skip if either measure is missing
+                if truth_ranking is None or eval_ranking is None:
+                    continue
 
                 correlations[method] = self._compute_single_correlation(
                     truth_ranking, eval_ranking, base_method
@@ -242,10 +300,7 @@ class LeaderboardEvaluator():
                 msg_parts.append(f"missing in ground truth: {sorted(missing_in_truth)}")
             msg = f"Run ID mismatch: {'; '.join(msg_parts)}. \nShared RunIDs: {sorted(truth_systems & eval_systems)}"
 
-            if self.on_missing == "error":
-                raise ValueError(msg)
-            elif self.on_missing == "warn":
-                print(f"Warning: {msg}", file=sys.stderr)
+            self._handle_missing(msg)
 
         # Include all systems from ground truth
         for system in truth_systems:
