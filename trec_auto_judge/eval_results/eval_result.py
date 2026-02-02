@@ -228,3 +228,39 @@ class EvalResult:
         ranking = self.get_aggregate_ranking(measure)
         sorted_runs = sorted(ranking.items(), key=lambda x: x[1], reverse=True)
         return [run_id for run_id, _ in sorted_runs[:k]]
+
+    def filter_and_recompute(
+        self,
+        run_ids: Set[str] | None = None,
+        topic_ids: Set[str] | None = None,
+    ) -> "EvalResult":
+        """
+        Filter entries and recompute aggregates.
+
+        Creates new EvalResult with only specified run_ids/topic_ids,
+        dropping existing aggregates and recomputing them.
+
+        Args:
+            run_ids: Keep only these run_ids. None = keep all.
+            topic_ids: Keep only these topic_ids. None = keep all.
+
+        Returns:
+            New EvalResult with filtered entries and fresh aggregates.
+        """
+        from .builder import EvalResultBuilder
+
+        builder = EvalResultBuilder(self.specs)
+        for e in self.entries:
+            builder.add_entry(e)
+
+        filtered = builder.filter(
+            run_ids=run_ids,
+            topic_ids=topic_ids,
+            drop_aggregates=True,
+        )
+
+        return filtered.build(
+            compute_aggregates=True,
+            verify=True,
+            on_missing="ignore",
+        )
