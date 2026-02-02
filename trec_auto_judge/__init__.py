@@ -125,6 +125,7 @@ class AutoJudge(LeaderboardJudgeProtocol, QrelsCreatorProtocol, NuggetCreatorPro
 
 from ._commands._meta_evaluate import meta_evaluate
 from ._commands._leaderboard import leaderboard
+from ._commands._eval_result import eval_result
 from ._commands._export_corpus import export_corpus
 from ._commands._list_models import list_models
 from ._commands._run import run_workflow
@@ -138,6 +139,7 @@ def main():
 
 main.command("meta-evaluate")(meta_evaluate)
 main.command("leaderboard")(leaderboard)
+main.add_command(eval_result)
 main.command()(export_corpus)
 main.add_command(list_models)
 main.add_command(run_workflow)

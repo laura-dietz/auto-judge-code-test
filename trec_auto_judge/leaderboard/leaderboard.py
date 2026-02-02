@@ -108,7 +108,7 @@ class Leaderboard:
         leaderboard. For trec_eval format, each file's name becomes the run_id.
         """
         if path.is_dir():
-            lb = cls._load_directory(path, format, has_header)
+            lb = cls._load_directory(path, format, has_header, drop_aggregate)
         else:
             lb = cls._load_file(path, format, has_header)
 
@@ -126,16 +126,31 @@ class Leaderboard:
         directory: Path,
         format: LeaderboardFormat,
         has_header: bool,
+        drop_aggregate: bool,
     ) -> "Leaderboard":
-        """Load and merge all leaderboard files from a directory."""
+        """
+        Load and merge all leaderboard files from a directory.
+
+        Args:
+            drop_aggregate: If True, use per-topic-only spec (spec_without_aggregate).
+                           If False, use full spec including aggregate measures.
+
+        Call-sites: load()
+        """
         files = sorted([f for f in directory.iterdir() if f.is_file() and not f.name.startswith(".")])
         if not files:
             raise ValueError(f"No files found in directory: {directory}")
         print(f"Loading {len(files)} files from {directory}", file=sys.stderr)
 
         leaderboards = [cls._load_file(f, format, has_header) for f in files]
-        spec = leaderboards[0].spec_without_aggregate()
-        return LeaderboardBuilder(spec).add_from_all(leaderboards).build()
+
+        # Choose spec based on drop_aggregate
+        if drop_aggregate:
+            spec = leaderboards[0].spec_without_aggregate()
+        else:
+            spec = leaderboards[0].spec
+
+        return LeaderboardBuilder(spec).add_from_all(leaderboards, skip_all_rows=drop_aggregate).build(drop_aggregate=drop_aggregate)
 
     @classmethod
     def _load_file(
@@ -197,18 +212,24 @@ class Leaderboard:
                 measure_set.add(measure)
 
         # Build entries
+        all_topic_id = "all"
         entries = [
             LeaderboardEntry(run_id=run_id, topic_id=topic_id, values=values)
             for (run_id, topic_id), values in entry_values.items()
         ]
 
-        # Infer dtype for each measure from values
-        measure_specs = []
-        for m in measure_names:
-            dtype = _infer_dtype_from_values([e.values.get(m) for e in entries if m in e.values])
-            measure_specs.append(MeasureSpec(name=m, dtype=dtype))
+        # Collect measure names by entry type
+        per_topic_names = {m for e in entries if e.topic_id != all_topic_id for m in e.values}
+        aggregate_names = {m for e in entries if e.topic_id == all_topic_id for m in e.values}
 
-        spec = LeaderboardSpec(measures=tuple(measure_specs))
+        def make_spec(m: str) -> MeasureSpec:
+            vals = [e.values.get(m) for e in entries if m in e.values]
+            return MeasureSpec(name=m, dtype=_infer_dtype_from_values(vals))
+
+        spec = LeaderboardSpec(
+            measures=tuple(make_spec(m) for m in measure_names if m in per_topic_names),
+            aggregate_measures=tuple(make_spec(m) for m in measure_names if m in aggregate_names),
+        )
 
         return cls(
             measures=tuple(measure_names),
@@ -229,31 +250,37 @@ class Leaderboard:
         This ensures consistent casting and aggregate computation for both
         load() and filter_and_recompute().
 
+        Uses prepare_entry_values(on_extra="filter", on_missing=varies).
+
         Args:
             lb: Source leaderboard with raw entries
             drop_aggregate: If True, filter out pre-existing "all" entries and recompute
-            on_missing: Policy for handling missing (run_id, topic_id) pairs
+            on_missing: Policy for handling missing measures:
+                - "error": raise KeyError
+                - others: fill with defaults
+
+        Call-sites: load()
         """
         # Get appropriate spec based on drop_aggregate
         spec = lb.spec_without_aggregate() if drop_aggregate else lb.spec
         builder = LeaderboardBuilder(spec)
 
-        # Add all entries (including "all" rows) - _handle_aggregates() decides what to keep
+        # Map OnMissing to prepare_entry_values on_missing parameter
+        prep_on_missing: Literal["error", "default"] = "error" if on_missing == "error" else "default"
+
+        # Add all entries - prepare_entry_values handles per-topic vs aggregate
         for e in lb.entries:
-            # Filter values to only include measures in the spec
-            # (handles sparse entries and "all"-only measures when drop_aggregate=True)
-            filtered_values = {k: v for k, v in e.values.items() if k in builder.spec.name_set}
-            if filtered_values:  # Skip entries with no matching measures
-                # Check for missing measures and handle per on_missing policy
-                missing = builder.spec.name_set - set(filtered_values.keys())
-                if missing:
-                    if on_missing == "error":
-                        raise KeyError(f"Missing measure(s): {sorted(missing)}")
-                    # Fill defaults for missing measures
-                    for ms in builder.spec.measures:
-                        if ms.name not in filtered_values:
-                            filtered_values[ms.name] = ms.get_default()
-                builder.add(run_id=e.run_id, topic_id=e.topic_id, values=filtered_values)
+            try:
+                casted = prepare_entry_values(
+                    spec, e.topic_id, e.values,
+                    on_extra="filter", on_missing=prep_on_missing
+                )
+                if casted:
+                    builder._rows.append(LeaderboardEntry(run_id=e.run_id, topic_id=e.topic_id, values=casted))
+            except KeyError:
+                if on_missing == "error":
+                    raise
+                # Skip entries that can't be prepared (e.g., aggregate entries when drop_aggregate)
 
         return builder.build(on_missing=on_missing, drop_aggregate=drop_aggregate)
 
@@ -414,21 +441,53 @@ class LeaderboardSpec:
     """
     Build-time schema for a leaderboard.
 
-    The spec defines all valid measure names with aggregator and caster. 
-    Storing values for different names will raise an error.
+    The spec defines valid measure names for per-topic and aggregate rows.
+
+    - `measures`: Required for per-topic entries (topic_id != all_topic_id)
+    - `aggregate_measures`: Only exist in aggregate "all" rows. May overlap with `measures`.
+
+    When adding entries:
+    - Per-topic entries are validated against `measures`
+    - Aggregate entries are validated against `aggregate_measures`
     """
     measures: Tuple[MeasureSpec, ...]
+    aggregate_measures: Tuple[MeasureSpec, ...] = ()
     all_topic_id: str = "all"
 
     @property
     def names(self) -> Tuple[MeasureName, ...]:
-        """Measure names in schema order."""
+        """Per-topic measure names in schema order."""
         return tuple(m.name for m in self.measures)
 
     @property
     def name_set(self) -> set[MeasureName]:
-        """Measure names as a set for fast validation."""
+        """Per-topic measure names as a set for fast validation."""
         return set(self.names)
+
+    @property
+    def aggregate_names(self) -> Tuple[MeasureName, ...]:
+        """Aggregate-only measure names in schema order."""
+        return tuple(m.name for m in self.aggregate_measures)
+
+    @property
+    def aggregate_name_set(self) -> set[MeasureName]:
+        """Aggregate measure names as a set for fast validation."""
+        return set(self.aggregate_names)
+
+    @property
+    def all_names(self) -> Tuple[MeasureName, ...]:
+        """All measure names (per-topic + aggregate-only) in schema order."""
+        seen = set()
+        result = []
+        for m in self.measures:
+            if m.name not in seen:
+                result.append(m.name)
+                seen.add(m.name)
+        for m in self.aggregate_measures:
+            if m.name not in seen:
+                result.append(m.name)
+                seen.add(m.name)
+        return tuple(result)
 
     def cast_values(self, values: Mapping[MeasureName, Any]) -> Dict[MeasureName, Any]:
         """
@@ -437,6 +496,71 @@ class LeaderboardSpec:
         Assumes `values` contains all required measure keys.
         """
         return {m.name: m.get_cast()(values[m.name]) for m in self.measures}
+
+
+#  ==== Entry Preparation Helper ===
+
+def prepare_entry_values(
+    spec: "LeaderboardSpec",
+    topic_id: str,
+    values: Mapping[MeasureName, Any],
+    on_extra: Literal["error", "filter"] = "error",
+    on_missing: Literal["error", "default"] = "error",
+) -> Dict[MeasureName, Any]:
+    """
+    Validate, filter, and cast entry values against the appropriate spec.
+
+    This is the single source of truth for preparing values before adding to a leaderboard.
+    Chooses per-topic or aggregate validation based on topic_id.
+
+    Args:
+        spec: The LeaderboardSpec defining valid measures
+        topic_id: Entry's topic_id - determines which measures apply
+        values: Raw measure values from the entry
+        on_extra: How to handle unknown measures
+            - "error": raise KeyError
+            - "filter": silently remove
+        on_missing: How to handle missing required measures
+            - "error": raise KeyError
+            - "default": fill with MeasureSpec defaults
+
+    Returns:
+        Dict of casted values ready for LeaderboardEntry
+
+    Call-sites:
+        - LeaderboardBuilder.add(): on_extra="error", on_missing="error" (strict)
+        - LeaderboardBuilder.add_entries(): on_extra="filter", on_missing="error" (lenient filter)
+        - Leaderboard._build_from_entries(): on_extra="filter", on_missing varies
+    """
+    # Choose validation set based on topic_id
+    is_aggregate = (topic_id == spec.all_topic_id)
+    if is_aggregate:
+        valid_names = spec.aggregate_name_set
+        measure_specs = spec.aggregate_measures
+    else:
+        valid_names = spec.name_set
+        measure_specs = spec.measures
+
+    # Handle extras
+    extra = set(values) - valid_names
+    if extra and on_extra == "error":
+        raise KeyError(f"Unknown measure(s): {sorted(extra)}")
+
+    # Filter to valid names
+    filtered = {k: v for k, v in values.items() if k in valid_names}
+
+    # Handle missing
+    missing = valid_names - set(filtered.keys())
+    if missing:
+        if on_missing == "error":
+            raise KeyError(f"Missing measure(s): {sorted(missing)}")
+        # Fill defaults
+        for ms in measure_specs:
+            if ms.name not in filtered:
+                filtered[ms.name] = ms.get_default()
+
+    # Cast values
+    return {ms.name: ms.get_cast()(filtered[ms.name]) for ms in measure_specs}
 
 
 #  ==== Convenient Builder for Leaderboards ===
@@ -457,6 +581,40 @@ class LeaderboardBuilder:
         self.spec = spec
         self._rows: List[LeaderboardEntry] = []
 
+    #  Informational
+
+    def entries(self) -> tuple[LeaderboardEntry, ...]:
+        """Return the currently staged per-topic entries (no synthetic 'all' rows)."""
+        return tuple(self._rows)
+
+
+    def _detect_missing_run_topic(
+        self,
+        expected_topic_ids: Sequence[str],
+    ) -> List[tuple[str, str]]:
+        """
+        Detect missing (run_id, topic_id) pairs.
+
+        Returns list of (run_id, topic_id) tuples for each run that is missing
+        expected topics.
+        """
+        
+        # TODO I think we should discard this, it should be part of verification
+        existing_run_topic: Dict[str, Set[str]] = defaultdict(set)
+        for e in self._rows:
+            if e.topic_id != self.spec.all_topic_id:
+                existing_run_topic[e.run_id].add(e.topic_id)
+
+        expected_set = set(expected_topic_ids)
+        missing: List[tuple[str, str]] = []
+        for run_id in existing_run_topic.keys():
+            for topic_id in expected_set - existing_run_topic[run_id]:
+                missing.append((run_id, topic_id))
+        return missing
+
+
+    # All ways to add entries
+
     def add(
         self,
         *,
@@ -466,29 +624,31 @@ class LeaderboardBuilder:
         **kw: Any,
     ) -> None:
         """
-        Add one per-topic row.
+        Add one row (per-topic or aggregate). STRICT mode.
 
         Provide either:
         - `values={...}` (a dict of measure -> value), OR
         - keyword args (e.g., GRADE=..., IS_MATCH=...).
 
-        This method is strict by default:
+        Validation depends on topic_id:
+        - Per-topic entries: validated against spec.measures
+        - Aggregate entries (topic_id == all_topic_id): validated against spec.aggregate_measures
+
+        This method is strict (on_extra="error", on_missing="error"):
         - Unknown measure keys raise KeyError.
         - Missing measure keys raise KeyError.
+
+        Call-sites: add_records(), filter_and_recompute(), external judge implementations
         """
         if values is None:
             values = kw
         elif kw:
             raise TypeError("Pass either values= or keyword measures, not both.")
 
-        extra = set(values) - self.spec.name_set
-        missing = self.spec.name_set - set(values)
-        if extra:
-            raise KeyError(f"Unknown measure(s): {sorted(extra)}")
-        if missing:
-            raise KeyError(f"Missing measure(s): {sorted(missing)}")
-
-        casted = self.spec.cast_values(values)
+        casted = prepare_entry_values(
+            self.spec, topic_id, values,
+            on_extra="error", on_missing="error"
+        )
         self._rows.append(LeaderboardEntry(run_id=run_id, topic_id=topic_id, values=casted))
 
     def add_records(
@@ -516,10 +676,10 @@ class LeaderboardBuilder:
         skip_all_rows: bool = True,
     ) -> "LeaderboardBuilder":
         """
-        Add entries from LeaderboardEntry objects (e.g., from another leaderboard).
+        Add entries from LeaderboardEntry objects (e.g., from another leaderboard). LENIENT mode.
 
-        Values are filtered to only include measures in the spec. Validation
-        of complete measure coverage happens at build() time.
+        Extra measures are filtered out silently. Missing measures raise KeyError.
+        Uses prepare_entry_values(on_extra="filter", on_missing="error").
 
         Args:
             entries: LeaderboardEntry objects to add
@@ -527,14 +687,26 @@ class LeaderboardBuilder:
 
         Returns:
             self for chaining
+
+        Call-sites: add_from_all()
         """
+        
+        # TODO Ignoreing `skip_all_rows``
         for e in entries:
-            if skip_all_rows and e.topic_id == self.spec.all_topic_id:
-                continue
-            # Filter values to spec - validation happens at build() time
-            filtered_values = {k: v for k, v in e.values.items() if k in self.spec.name_set}
-            if filtered_values:
-                self.add(run_id=e.run_id, topic_id=e.topic_id, values=filtered_values)
+            self.add(run_id=e.run_id,  topic_id= e.topic_id, values=e.values)
+        
+        # Fall back code in case we really cannot do without Lenient mode
+        # for e in entries:
+        #     if skip_all_rows and e.topic_id == self.spec.all_topic_id:
+        #         continue
+        #     # Filter extras, require all measures present
+        #     casted = prepare_entry_values(
+        #         self.spec, e.topic_id, e.values,
+        #         on_extra="filter", on_missing="error"
+        #     )
+        #     if casted:
+        #         self._rows.append(LeaderboardEntry(run_id=e.run_id, topic_id=e.topic_id, values=casted))
+        # return self
         return self
 
     def add_from_all(
@@ -552,110 +724,16 @@ class LeaderboardBuilder:
         Returns:
             self for chaining
         """
+        
+        # Ignoreing skil_all_rows
         for lb in leaderboards:
             self.add_entries(lb.entries, skip_all_rows=skip_all_rows)
         return self
 
-    def entries(self) -> tuple[LeaderboardEntry, ...]:
-        """Return the currently staged per-topic entries (no synthetic 'all' rows)."""
-        return tuple(self._rows)
 
-
-    def _detect_missing_run_topic(
-        self,
-        expected_topic_ids: Sequence[str],
-    ) -> List[tuple[str, str]]:
-        """
-        Detect missing (run_id, topic_id) pairs.
-
-        Returns list of (run_id, topic_id) tuples for each run that is missing
-        expected topics.
-        """
-        existing_run_topic: Dict[str, Set[str]] = defaultdict(set)
-        for e in self._rows:
-            if e.topic_id != self.spec.all_topic_id:
-                existing_run_topic[e.run_id].add(e.topic_id)
-
-        expected_set = set(expected_topic_ids)
-        missing: List[tuple[str, str]] = []
-        for run_id in existing_run_topic.keys():
-            for topic_id in expected_set - existing_run_topic[run_id]:
-                missing.append((run_id, topic_id))
-        return missing
-
-    def _compute_aggregates(
-        self,
-        per_topic_entries: List[LeaderboardEntry],
-        phantom_defaults: List[tuple[str, str]],
-    ) -> List[LeaderboardEntry]:
-        """
-        Compute "all" row aggregates from per-topic entries and phantom defaults.
-
-        Args:
-            per_topic_entries: Per-topic entries to aggregate (must not contain "all" entries)
-            phantom_defaults: (run_id, topic_id) pairs to include in aggregation
-                using MeasureSpec default values (no actual entries created)
-
-        Returns:
-            List of aggregate "all" row entries, one per run_id
-        """
-        by_run: Dict[str, Dict[MeasureName, List[Any]]] = defaultdict(lambda: defaultdict(list))
-
-        # Collect values from actual entries
-        for e in per_topic_entries:
-            for k, v in e.values.items():
-                by_run[e.run_id][k].append(v)
-
-        # Include phantom defaults
-        for run_id, _ in phantom_defaults:
-            for ms in self.spec.measures:
-                by_run[run_id][ms.name].append(ms.get_default())
-
-        # Build aggregate rows
-        all_rows: List[LeaderboardEntry] = []
-        for run_id, m2vals in by_run.items():
-            agg_vals: Dict[MeasureName, Any] = {}
-            for ms in self.spec.measures:
-                vals = m2vals.get(ms.name, [])
-                if vals:
-                    agg_vals[ms.name] = ms.get_aggregate()(vals)
-            all_rows.append(LeaderboardEntry(run_id=run_id, topic_id=self.spec.all_topic_id, values=agg_vals))
-
-        return all_rows
-
-    def _handle_aggregates(
-        self,
-        entries: List[LeaderboardEntry],
-        drop_aggregate: bool,
-        phantom_defaults: List[tuple[str, str]],
-    ) -> Tuple[List[LeaderboardEntry], List[LeaderboardEntry]]:
-        """
-        Handle aggregate ("all") rows based on drop_aggregate flag.
-
-        This is the single place where drop_aggregate logic is handled.
-
-        Args:
-            entries: All entries (may include existing "all" rows)
-            drop_aggregate: If True, drop existing aggregates and recompute.
-                           If False, keep existing aggregates as-is.
-            phantom_defaults: (run_id, topic_id) pairs for phantom default handling
-
-        Returns:
-            Tuple of (per_topic_entries, all_entries)
-        """
-        # Separate per-topic from "all" entries
-        per_topic_entries = [e for e in entries if e.topic_id != self.spec.all_topic_id]
-        existing_all_entries = [e for e in entries if e.topic_id == self.spec.all_topic_id]
-
-        if drop_aggregate:
-            # Drop existing aggregates and compute fresh ones
-            all_entries = self._compute_aggregates(per_topic_entries, phantom_defaults)
-        else:
-            # Keep existing aggregates (already cast via add())
-            all_entries = existing_all_entries
-
-        return per_topic_entries, all_entries
-
+    # Build a new leaderboard that is up to spec.
+    
+    
     def build(
         self,
         expected_topic_ids: Optional[Sequence[str]] = None,
@@ -679,6 +757,87 @@ class LeaderboardBuilder:
             drop_aggregate: If True (default), drop any existing "all" entries and
                 recompute fresh aggregates. If False, keep existing "all" entries as-is.
         """
+
+
+
+        def _compute_aggregates(
+            # self,
+            per_topic_entries: List[LeaderboardEntry],
+            phantom_defaults: List[tuple[str, str]],
+        ) -> List[LeaderboardEntry]:
+            """
+            Compute "all" row aggregates from per-topic entries and phantom defaults.
+
+            Args:
+                per_topic_entries: Per-topic entries to aggregate (must not contain "all" entries)
+                phantom_defaults: (run_id, topic_id) pairs to include in aggregation
+                    using MeasureSpec default values (no actual entries created)
+
+            Returns:
+                List of aggregate "all" row entries, one per run_id
+            """
+            by_run: Dict[str, Dict[MeasureName, List[Any]]] = defaultdict(lambda: defaultdict(list))
+
+            # Collect values from actual entries
+            for e in per_topic_entries:
+                for k, v in e.values.items():
+                    by_run[e.run_id][k].append(v)
+
+            # Include phantom defaults
+            for run_id, _ in phantom_defaults:
+                for ms in self.spec.measures:
+                    by_run[run_id][ms.name].append(ms.get_default())
+
+            # Build aggregate rows
+            all_rows: List[LeaderboardEntry] = []
+            for run_id, m2vals in by_run.items():
+                agg_vals: Dict[MeasureName, Any] = {}
+                for ms in self.spec.measures:
+                    vals = m2vals.get(ms.name, [])
+                    if vals:
+                        agg_vals[ms.name] = ms.get_aggregate()(vals)
+                all_rows.append(LeaderboardEntry(run_id=run_id, topic_id=self.spec.all_topic_id, values=agg_vals))
+
+            return all_rows        
+
+        def _handle_aggregates(
+            # self,
+            entries: List[LeaderboardEntry],
+            drop_aggregate: bool,
+            phantom_defaults: List[tuple[str, str]],
+        ) -> Tuple[List[LeaderboardEntry], List[LeaderboardEntry]]:
+            """
+            Handle aggregate ("all") rows based on drop_aggregate flag.
+
+            This is the single place where drop_aggregate logic is handled.
+
+            Args:
+                entries: All entries (may include existing "all" rows)
+                drop_aggregate: If True, drop existing aggregates and recompute.
+                            If False, keep existing aggregates as-is.
+                phantom_defaults: (run_id, topic_id) pairs for phantom default handling
+
+            Returns:
+                Tuple of (per_topic_entries, all_entries)
+            """
+            # Separate per-topic from "all" entries
+            per_topic_entries = [e for e in entries if e.topic_id != self.spec.all_topic_id]
+            existing_all_entries = [e for e in entries if e.topic_id == self.spec.all_topic_id]
+
+            if drop_aggregate:
+                # Drop existing aggregates and compute fresh ones
+                
+                # Only use `per_topic_entries`  drops all else.
+                all_entries = _compute_aggregates(per_topic_entries, phantom_defaults)
+            elif not existing_all_entries: #  missing aggreates -- TODO must check against aggregate spec
+                   # TODO check for cases where SOME all aggregates exist, but some are missing
+                all_entries = _compute_aggregates(per_topic_entries, phantom_defaults)
+            else:
+                # Keep existing aggregates (already cast via add())
+                all_entries = existing_all_entries
+
+            return per_topic_entries, all_entries
+        
         # Step 1: Detect missing pairs
         all_missing: List[tuple[str, str]] = []
         if expected_topic_ids is not None:
@@ -708,7 +867,7 @@ class LeaderboardBuilder:
 
         # Step 3: Handle aggregates via single handler
         all_entries = self._rows + filled_rows
-        per_topic_entries, all_rows = self._handle_aggregates(all_entries, drop_aggregate, phantom_defaults)
+        per_topic_entries, all_rows = _handle_aggregates(all_entries, drop_aggregate, phantom_defaults)
 
         return Leaderboard(
             measures=self.spec.names,
@@ -735,24 +894,27 @@ def _infer_dtype_from_values(values: Sequence[Any]) -> type:
     Infer dtype from a sequence of string values.
 
     Returns:
-        - float: if all values can be parsed as numbers
+        - float: if all values can round-trip through numeric types back to str
         - str: otherwise
 
-    Note: Only float and str are valid dtypes. Bool/int are not inferred
-    because they can't survive save/load round-trips.
+    Handles integers ("5" → int → "5") and floats ("5.5" → float → "5.5").
     """
-    non_none_values = [v for v in values if v is not None]
+    non_none_values = [str(v).strip() for v in values if v is not None]
     if not non_none_values:
         return float  # Default to float for empty
 
-    # Check if all values can be parsed as numbers
     try:
-        for v in non_none_values:
-            float(v)
-        return float
+        if all(str(float(s))==s for s in non_none_values):
+            return float
     except (ValueError, TypeError):
         pass
+        
+    try:
+        if all(str(int(s))==s for s in non_none_values):
+            return float
 
+    except (ValueError, TypeError):
+        pass
+    
     return str
-
 
