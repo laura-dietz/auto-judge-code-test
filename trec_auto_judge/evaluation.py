@@ -1,3 +1,4 @@
+import click
 import pandas as pd
 import sys
 from pathlib import Path
@@ -23,11 +24,38 @@ def parse_correlation_method(method: str) -> tuple[str, int | None]:
     Examples:
         "kendall" -> ("kendall", None)
         "kendall@10" -> ("kendall", 10)
+
+    Raises:
+        ValueError: if base method is invalid or k is not a positive integer.
     """
     if "@" in method:
         base, k_str = method.split("@", 1)
-        return (base, int(k_str))
+        if base not in BASE_CORRELATION_METHODS:
+            raise ValueError(f"Unknown base method '{base}'")
+        k = int(k_str)  # raises ValueError if not int
+        if k <= 0:
+            raise ValueError(f"k must be positive, got {k}")
+        return (base, k)
+    if method not in BASE_CORRELATION_METHODS:
+        raise ValueError(f"Unknown method '{method}'")
     return (method, None)
+
+
+class CorrelationMethodType(click.ParamType):
+    """Click parameter type for correlation methods (method or method@k)."""
+    name = "correlation"
+
+    def convert(self, value, param, ctx):
+        try:
+            parse_correlation_method(value)
+            return value
+        except ValueError as e:
+            methods = ", ".join(BASE_CORRELATION_METHODS)
+            self.fail(
+                f"{e}. Valid: [{methods}] or method@k (e.g., kendall@15).",
+                param,
+                ctx,
+            )
 
 
 class LeaderboardEvaluator():

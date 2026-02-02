@@ -2,7 +2,7 @@ import click
 import glob
 from pathlib import Path
 import pandas as pd
-from ..evaluation import LeaderboardEvaluator, CORRELATION_METHODS
+from ..evaluation import LeaderboardEvaluator, CorrelationMethodType
 from ..click_plus import (
     detect_header_interactive,
     LEADERBOARD_FORMATS,
@@ -105,9 +105,9 @@ def persist_output(df: pd.DataFrame, output: Path) -> None:
 )
 @click.option(
     "--correlation",
-    type=click.Choice(CORRELATION_METHODS),
+    type=CorrelationMethodType(),
     multiple=True,
-    help="Correlation method(s) to compute. Repeatable. If omitted, computes all.",
+    help="Correlation method(s) to compute (e.g., kendall, kendall@15). Repeatable. If omitted, computes all.",
 )
 @click.option(
     "--topic-id",
