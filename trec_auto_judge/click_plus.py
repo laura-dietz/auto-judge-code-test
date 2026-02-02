@@ -21,7 +21,7 @@ from . import AutoJudge
 
 
 # Leaderboard format constants for CLI options
-LEADERBOARD_FORMATS = ["trec_eval", "ir_measures", "tot", "ranking"]
+LEADERBOARD_FORMATS = ["trec_eval", "ir_measures", "tot", "ranking", "jsonl"]
 
 LEADERBOARD_FORMAT_HELP = (
     "  trec_eval: measure topic value (3 cols, run from filename)\n"
@@ -46,6 +46,10 @@ def detect_header_interactive(path: Path, format: str, has_header: bool, label: 
     """
     if has_header:
         return True  # Already specified by user
+
+    # jsonl format never has headers (each line is a complete JSON object)
+    if format == "jsonl":
+        return False
 
     if not path or not path.is_file():
         return False

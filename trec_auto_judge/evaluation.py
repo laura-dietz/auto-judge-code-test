@@ -7,12 +7,12 @@ from trec_auto_judge.eval_results import load as load_eval_result, EvalResult
 
 # TODO: Consider unifying with leaderboard.OnMissing which uses "fix_aggregate" instead of "skip"
 OnMissing = Literal["error", "warn", "skip", "default"]
-EvalResultFormat = Literal["trec_eval", "tot", "ir_measures", "ranking"]
+EvalResultFormat = Literal["trec_eval", "tot", "ir_measures", "ranking", "jsonl"]
 BASE_CORRELATION_METHODS = ["kendall", "pearson", "spearman", "tauap_b"]
 TOP_K_VALUES = [10]
 CORRELATION_METHODS: List[str] = (
     BASE_CORRELATION_METHODS + 
-    []
+    ["kendall@10"]
     # [f"{m}@{k}" for m in BASE_CORRELATION_METHODS for k in TOP_K_VALUES]
 )
 
