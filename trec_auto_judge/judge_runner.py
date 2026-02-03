@@ -73,6 +73,7 @@ def run_judge(
     # Testing flags to limit scope
     limit_topics: Optional[int] = None,
     limit_runs: Optional[int] = None,
+    topic_ids: Optional[Sequence[str]] = None,
     # Modular protocol implementations (alternative to auto_judge)
     nugget_creator=None,  # NuggetCreatorProtocol
     qrels_creator=None,   # QrelsCreatorProtocol
@@ -102,6 +103,7 @@ def run_judge(
         config_name: Variant/sweep name for reproducibility tracking (default: "default")
         limit_topics: If set, limit to first N topics (for testing)
         limit_runs: If set, limit to first N run_ids (for testing)
+        topic_ids: If set, only run on these specific topic IDs (for testing)
 
     Returns:
         JudgeResult with leaderboard, qrels, and final nuggets
@@ -112,6 +114,13 @@ def run_judge(
         limited_topic_ids = {t.request_id for t in rag_topics}
         rag_responses = [r for r in rag_responses if r.metadata.topic_id in limited_topic_ids]
         print(f"[judge_runner] Limited to first {limit_topics} topics: {sorted(limited_topic_ids)}", file=sys.stderr)
+
+    # Apply explicit topic filter if specified (for testing)
+    if topic_ids is not None and len(topic_ids) > 0:
+        topic_ids_set = set(topic_ids)
+        rag_topics = [t for t in rag_topics if t.request_id in topic_ids_set]
+        rag_responses = [r for r in rag_responses if r.metadata.topic_id in topic_ids_set]
+        print(f"[judge_runner] Filtered to explicit topics: {sorted(topic_ids_set)}", file=sys.stderr)
 
     # Apply run limit if specified (for testing)
     if limit_runs is not None and limit_runs > 0:

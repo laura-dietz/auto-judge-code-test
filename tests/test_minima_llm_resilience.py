@@ -8,7 +8,7 @@ These tests verify:
 - Overload warning printed once per request
 - Recovery message printed after overload recovery
 """
-
+import os
 import asyncio
 from dataclasses import replace
 from unittest.mock import patch
@@ -22,6 +22,8 @@ from trec_auto_judge.llm.minima_llm import (
 from trec_auto_judge.llm.llm_config import MinimaLlmConfig
 from trec_auto_judge.llm.llm_protocol import MinimaLlmRequest, MinimaLlmResponse, MinimaLlmFailure
 
+def skip_llm_tests() -> bool:
+    return os.getenv("SKIP_LLM_ENDPOINT_TESTS", "true").lower() in {"1", "true", "yes"}
 
 class TestOverloadStatusCodes:
     """Test that 502 is properly classified as overload status."""
@@ -47,6 +49,10 @@ class TestOverloadStatusCodes:
             assert _is_overload_status(code) is False, f"{code} should not be overload status"
 
 
+@pytest.mark.skipif(
+    skip_llm_tests(),
+    reason="Skipping LLM endpoint tests (SKIP_LLM_ENDPOINT_TESTS set)"
+)
 @pytest.fixture
 def base_config():
     """Load config from environment, override timeouts for fast tests."""
@@ -67,6 +73,12 @@ def base_config():
 class TestInfiniteRetries:
     """Test max_attempts=0 for infinite retries."""
 
+
+
+    @pytest.mark.skipif(
+        skip_llm_tests(),
+        reason="Skipping LLM endpoint tests (SKIP_LLM_ENDPOINT_TESTS set)"
+    )
     def test_infinite_retries_eventually_succeeds(self, base_config):
         """With max_attempts=0, retries should continue until success."""
         config = replace(base_config, max_attempts=0)
@@ -97,6 +109,10 @@ class TestInfiniteRetries:
         assert result.text == "test response"
         assert calls == 3  # Two failures, one success
 
+    @pytest.mark.skipif(
+        skip_llm_tests(),
+        reason="Skipping LLM endpoint tests (SKIP_LLM_ENDPOINT_TESTS set)"
+    )
     def test_limited_retries_fails_after_max(self, base_config):
         """With max_attempts=3, should fail after 3 attempts."""
         config = replace(base_config, max_attempts=3)
@@ -124,6 +140,10 @@ class TestInfiniteRetries:
 class TestOverloadWarnings:
     """Test overload warning and recovery messages."""
 
+    @pytest.mark.skipif(
+        skip_llm_tests(),
+        reason="Skipping LLM endpoint tests (SKIP_LLM_ENDPOINT_TESTS set)"
+    )
     def test_overload_warning_printed_once(self, base_config, capsys):
         """Overload warning should be printed only once per request."""
         config = replace(base_config, max_attempts=5)
@@ -154,6 +174,10 @@ class TestOverloadWarnings:
         assert "HTTP 502" in captured.out
         assert "Ctrl-C" in captured.out
 
+    @pytest.mark.skipif(
+        skip_llm_tests(),
+        reason="Skipping LLM endpoint tests (SKIP_LLM_ENDPOINT_TESTS set)"
+    )
     def test_recovery_message_printed(self, base_config, capsys):
         """Recovery message should be printed after overload recovery."""
         config = replace(base_config, max_attempts=5)
@@ -182,6 +206,10 @@ class TestOverloadWarnings:
         captured = capsys.readouterr()
         assert "Server recovered" in captured.out
 
+    @pytest.mark.skipif(
+        skip_llm_tests(),
+        reason="Skipping LLM endpoint tests (SKIP_LLM_ENDPOINT_TESTS set)"
+    )
     def test_no_warning_on_immediate_success(self, base_config, capsys):
         """No warning should be printed if request succeeds immediately."""
         config = replace(base_config, max_attempts=5)
@@ -208,6 +236,10 @@ class TestOverloadWarnings:
 class TestCooldownOnOverload:
     """Test that 502 triggers cooldown bump."""
 
+    @pytest.mark.skipif(
+        skip_llm_tests(),
+        reason="Skipping LLM endpoint tests (SKIP_LLM_ENDPOINT_TESTS set)"
+    )
     def test_502_triggers_cooldown_bump(self, base_config):
         """502 should trigger cooldown.bump() call."""
         config = replace(
@@ -252,6 +284,10 @@ class TestDspyAdapterInfiniteRetries:
     not 0 (which would cause range(0) = empty loop).
     """
 
+    @pytest.mark.skipif(
+        skip_llm_tests(),
+        reason="Skipping LLM endpoint tests (SKIP_LLM_ENDPOINT_TESTS set)"
+    )
     def test_parse_retry_limit_with_max_attempts_zero(self, base_config):
         """With max_attempts=0, parse_retry_limit should be 3, not 0."""
         dspy = pytest.importorskip("dspy")
@@ -300,6 +336,10 @@ class TestDspyAdapterInfiniteRetries:
         assert call_count >= 1, "process_one should run at least once with max_attempts=0"
         assert results[0].output_text == "mocked_response"
 
+    @pytest.mark.skipif(
+        skip_llm_tests(),
+        reason="Skipping LLM endpoint tests (SKIP_LLM_ENDPOINT_TESTS set)"
+    )
     def test_parse_errors_retry_with_max_attempts_zero(self, base_config):
         """Parse errors should still retry (up to 3 times) with max_attempts=0."""
         dspy = pytest.importorskip("dspy")
@@ -350,6 +390,10 @@ class TestDspyAdapterInfiniteRetries:
         assert call_count == 3, "Should retry parse errors up to 3 times"
         assert results[0].output_text == "success"
 
+    @pytest.mark.skipif(
+        skip_llm_tests(),
+        reason="Skipping LLM endpoint tests (SKIP_LLM_ENDPOINT_TESTS set)"
+    )
     def test_infinite_http_retries_through_dspy_adapter(self, base_config):
         """With max_attempts=0, HTTP 502 errors should retry until success.
 
@@ -411,6 +455,10 @@ class TestDspyAdapterInfiniteRetries:
         assert http_call_count == num_502_before_success + 1
         assert results[0].output_text == "recovered"
 
+    @pytest.mark.skipif(
+        skip_llm_tests(),
+        reason="Skipping LLM endpoint tests (SKIP_LLM_ENDPOINT_TESTS set)"
+    )
     def test_limited_retries_fails_through_dspy_adapter(self, base_config):
         """With max_attempts=3, HTTP errors should fail after 3 attempts.
 

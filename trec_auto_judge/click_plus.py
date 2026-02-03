@@ -1,6 +1,6 @@
 from pathlib import Path
 import sys
-from typing import Optional
+from typing import Optional, Tuple
 from .io import load_runs_failsave
 from .request import load_requests_from_irds, load_requests_from_file
 from .llm import MinimaLlmConfig
@@ -486,6 +486,7 @@ def execute_run_workflow(
     augment_report: Optional[bool] = None,
     limit_topics: Optional[int] = None,
     limit_runs: Optional[int] = None,
+    topic_ids: Optional[Tuple[str, ...]] = None,
     wf=None,
     # Modular protocol implementations (alternative to auto_judge)
     nugget_creator=None,  # NuggetCreatorProtocol
@@ -536,8 +537,8 @@ def execute_run_workflow(
         wf.settings["filebase"] = filebase
         click.echo(f"Filebase override: {filebase}", err=True)
 
-    # If --limit-topics is set, prefix filebase with "tmp-" for test runs
-    if limit_topics is not None and limit_topics > 0:
+    # If --limit-topics or --topics is set, prefix filebase with "tmp-" for test runs
+    if (limit_topics is not None and limit_topics > 0) or (topic_ids is not None and len(topic_ids) > 0):
         current_filebase = wf.settings.get("filebase", "{_name}")
         wf.settings["filebase"] = f"tmp-{current_filebase}"
         click.echo(f"Limited topics mode: filebase changed to {wf.settings['filebase']}", err=True)
@@ -654,6 +655,7 @@ def execute_run_workflow(
             config_name=config.name,
             limit_topics=limit_topics,
             limit_runs=limit_runs,
+            topic_ids=topic_ids,
             # Modular protocol implementations
             nugget_creator=nugget_creator,
             qrels_creator=qrels_creator,
@@ -677,6 +679,8 @@ def options_run(workflow_required: bool = False):
         # Apply options in reverse order (bottom-up)
         func = click.option("--limit-runs", type=int, default=None,
                           help="Limit to first N run_ids (for testing).")(func)
+        func = click.option("--topics", "topic_ids", type=str, multiple=True, default=None,
+                          help="Run only on these specific topic IDs (repeatable, for testing).")(func)
         func = click.option("--limit-topics", type=int, default=None,
                           help="Limit to first N topics (for testing).")(func)
         func = click.option("--augment-report/--no-augment-report", "augment_report",

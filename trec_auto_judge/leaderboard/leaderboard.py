@@ -230,6 +230,13 @@ class Leaderboard:
         LeaderboardVerification(leaderboard = self, warn=warn, expected_topic_ids=expected_topic_ids, on_missing=on_missing) \
             .complete_measures(include_all_row=True) \
             .complete_topics()
+
+
+def mean_of_floats(values: Sequence[Any]) -> float:
+    """Aggregate numeric values via arithmetic mean (values cast to float)."""
+    return mean(float(v) for v in values)
+
+
 @dataclass(frozen=True)
 class MeasureSpec:
     """
@@ -237,14 +244,13 @@ class MeasureSpec:
 
     - `name`: key used in entry.values and output.
     - `aggregate`: computes the synthetic per-run value from per-topic values.
-    - `cast`: normalizes/validates per-topic values when rows are added (output type will be input for aggregate function). Default no-op.
+    - `cast`: normalizes/validates per-topic values when rows are added.
     - `default`: value used for missing (run_id, topic_id) pairs when build() fills gaps.
-      Must be the same type as cast's output (i.e., valid input for aggregate). If None, no default is available.
     """
     name: MeasureName
-    aggregate: AggFn
-    cast: CastFn = lambda x: x
-    default: Any = None
+    aggregate: AggFn = mean_of_floats
+    cast: CastFn = float
+    default: Any = 0.0
 
 
 @dataclass(frozen=True)
@@ -478,10 +484,6 @@ class LeaderboardBuilder:
 
 
 #  === Example aggregators (optional helpers) ====
-
-def mean_of_floats(values: Sequence[Any]) -> float:
-    """Aggregate numeric values via arithmetic mean (values cast to float)."""
-    return mean(float(v) for v in values)
 
 def mean_of_ints(values: Sequence[Any]) -> float:
     """Aggregate numeric values via arithmetic mean (values cast to float)."""
