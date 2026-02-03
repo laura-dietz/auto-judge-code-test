@@ -18,3 +18,8 @@ nugget_settings:
 
 judge_settings:
   grade_threshold: 4
+
+variants:
+  prefnugget-rubric:
+    nugget_settings:
+      prompt: "prefnugget-baseline"
