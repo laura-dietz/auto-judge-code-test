@@ -1,20 +1,14 @@
 # Rubric judge creates nuggets first, then judges using them
 judge_uses_nuggets: true   
 nugget_depends_on_responses: false
-judge: true   # implied
+judge: false # true   # implied
 create_nuggets: true  # implied
 augment_report: true
-# force_recreate_nuggets: false  # default
-
-# judge_uses_nuggets: false   
-# # nugget_depends_on_responses: false #  implied
-# # judge: true   # implied
-# # create_nuggets: false  # implied
-# # force_recreate_nuggets: false  # default
-
 
 settings:
   filebase: "{_name}"
+  max_nuggets_per_topic: 20
+  stop_collecting_at_nuggets_per_topic: 20
 
 nugget_settings:
   prompt: "minimal"
@@ -27,3 +21,7 @@ variants:
   web:
     nugget_settings:
       prompt: "web"
+
+  prefnugget:
+    nugget_settings:
+      prompt: "IterativeGenerateNuggetQuestionsReportRequest"

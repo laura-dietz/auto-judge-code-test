@@ -31,6 +31,7 @@ from trec25.judges.shared.rubric_common import (
 # DSPy Signatures (for nugget generation - specific to RubricJudge)
 # =============================================================================
 
+
 class GenerateNuggetQuestionsMinimal(dspy.Signature):
     __doc__ = dedent(
         """
@@ -75,7 +76,59 @@ class GenerateNuggetQuestionsWeb(dspy.Signature):
         desc="Confidence score from 0.0 to 1.0 indicating how certain you are"
     )
 
+class GenerateNuggetQuestionsReportRequest(dspy.Signature):
+    __doc__ = dedent(
+        """
+        For a query as title, problem statement, and user background, imagine RAG responses.
+        Generate brief, atomic questions that target query-essential information to be answered well
+        in relevant responses.
 
+        Only include differences that change the answer to the query (correctness, completeness,
+        usefulness). Prefer short questions such as "Capital of USA?" or "Process of steel cooking?".
+        Avoid generic quality questions.
+        """
+    )
+
+    query_title: str = dspy.InputField(desc="Query title")
+    query_background: str = dspy.InputField(desc="Background context for the query")
+    query_problem: str = dspy.InputField(desc="Problem statement to be addressed")
+
+    questions: list[str] = dspy.OutputField(
+        desc="List of concise questions that must be answered to address the query"
+    )
+    reasoning: str = dspy.OutputField(
+        desc="Brief explanation of the reasoning behind the questions"
+    )
+    confidence: float = dspy.OutputField(
+        desc="Confidence score from 0.0 to 1.0 indicating how certain you are"
+    )
+
+
+class IterativeGenerateNuggetQuestionsReportRequest(dspy.Signature):
+    __doc__ = dedent(
+        """
+        For a query as title, problem statement, and user background, imagine a good RAG response. Focus on relevance, correctness, completeness.
+        Generate brief, atomic questions that target query-essential information which a good response should answer well.
+
+
+        Avoid generic quality questions.
+        Make questions self-contained (e.g., "Capital of France?" not "The capital?").
+        """
+    )
+
+    query_title: str = dspy.InputField(desc="Query title")
+    query_background: str = dspy.InputField(desc="Background context for the query")
+    query_problem: str = dspy.InputField(desc="Problem statement to be addressed")
+
+    questions: list[str] = dspy.OutputField(
+        desc="List of concise questions that must be answered to address the query"
+    )
+    reasoning: str = dspy.OutputField(
+        desc="Brief explanation of the reasoning behind the questions"
+    )
+    confidence: float = dspy.OutputField(
+        desc="Confidence score from 0.0 to 1.0 indicating how certain you are"
+    )    
 # =============================================================================
 # Data Models (for nugget generation - specific to RubricJudge)
 # =============================================================================
@@ -268,6 +321,7 @@ class RubricJudge(AutoJudge):
         llm_config: MinimaLlmConfig,
         nugget_banks: Optional[NuggetBanksProtocol] = None,
         rag_responses: Optional[Sequence[Report]] = None,
+        max_nuggets_per_topic: Optional[int] = None,
         **kwargs
     ) -> Optional[NuggetBanksProtocol]:
         """Generate nugget questions for each topic using LLM."""
@@ -307,6 +361,8 @@ class RubricJudge(AutoJudge):
             prompt_sig = GenerateNuggetQuestionsMinimal
         elif prompt == "web":
             prompt_sig = GenerateNuggetQuestionsWeb
+        elif prompt == "prefnugget-baseline":
+            prompt_sig = IterativeGenerateNuggetQuestionsReportRequest
         else:
             raise RuntimeError(f"Prompt not defined: {prompt}")    
         
@@ -323,7 +379,7 @@ class RubricJudge(AutoJudge):
             data.query_id: (data.query_title, data.questions)
             for data in gen_data
         }
-        return build_nugget_banks(questions_by_topic)
+        return build_nugget_banks(questions_by_topic, max_per_topic=max_nuggets_per_topic)
 
 
     

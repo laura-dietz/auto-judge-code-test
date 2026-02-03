@@ -1,0 +1,20 @@
+# Baseline: Parametric nugget creation (RubricJudge) + PrefNugget judging
+# Uses LLM parametric knowledge to generate questions (no grounding in passages)
+
+nugget_class: "trec25.judges.rubric.rubric_autojudge:RubricJudge"
+judge_class: "trec25.judges.prefnugget.prefnugget_judge:PrefNuggetJudge"
+
+create_nuggets: true
+judge: true
+judge_uses_nuggets: true
+nugget_depends_on_responses: false  # parametric - no responses needed for nugget creation
+
+settings:
+  filebase: "{_name}"
+  max_nuggets_per_topic: 20
+
+nugget_settings:
+  prompt: "prefnugget-baseline"
+
+judge_settings:
+  grade_threshold: 4

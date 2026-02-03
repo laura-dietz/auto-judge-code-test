@@ -255,3 +255,18 @@ variants:
     judge_settings:
       grade_threshold: 4
       grade_text: "response"  # "response" | "document" | "document_paragraphs"
+
+
+# TODO same for document_paragraphs
+
+  rubric_nuggets:
+    settings:
+    nugget_settings:
+      nugget_bank_file: "task_directory/rubric.nuggets.jsonl"
+ 
+    judge_settings:
+      grade_threshold: 4
+      grade_text: "response"  # "response" | "document" | "document_paragraphs"
+
+
+
