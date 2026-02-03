@@ -20,6 +20,14 @@ judge_settings:
   grade_threshold: 4
 
 variants:
-  prefnugget-rubric:
+  prefnugget-rubric-response:
     nugget_settings:
       prompt: "prefnugget-baseline"
+    judge_settings:
+      grade_text: "response"  # "response" | "document" | "document_paragraphs"
+
+  prefnugget-rubric-docs:
+    nugget_settings:
+      prompt: "prefnugget-baseline"
+    judge_settings:
+      grade_text: "document_paragraphs"  # "response" | "document" | "document_paragraphs"
