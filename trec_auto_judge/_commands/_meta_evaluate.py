@@ -2,7 +2,7 @@ import click
 import glob
 from pathlib import Path
 import pandas as pd
-from ..evaluation import TrecLeaderboardEvaluation, CORRELATION_METHODS
+from ..evaluation_v2 import LeaderboardEvaluator, CorrelationMethodType
 from ..click_plus import (
     detect_header_interactive,
     LEADERBOARD_FORMATS,
@@ -94,9 +94,9 @@ def persist_output(df: pd.DataFrame, output: Path) -> None:
 )
 @click.option(
     "--correlation",
-    type=click.Choice(CORRELATION_METHODS),
+    type=CorrelationMethodType(),
     multiple=True,
-    help="Correlation method(s) to compute. Repeatable. If omitted, computes all.",
+    help="Correlation method(s) to compute (e.g., kendall, kendall@10). Repeatable. If omitted, computes all.",
 )
 @click.argument("input_files", nargs=-1, type=str)
 def meta_evaluate(
@@ -145,7 +145,7 @@ def meta_evaluate(
     eval_measures = list(eval_measure) if eval_measure else None
     correlation_methods = list(correlation) if correlation else None
 
-    te = TrecLeaderboardEvaluation(
+    te = LeaderboardEvaluator(
         truth_leaderboard,
         truth_measures=truth_measures,
         eval_measures=eval_measures,

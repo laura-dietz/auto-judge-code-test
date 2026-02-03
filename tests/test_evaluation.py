@@ -1,6 +1,6 @@
 import unittest
 from tempfile import TemporaryDirectory
-from trec_auto_judge.evaluation import LeaderboardEvaluator
+from trec_auto_judge.evaluation_v2 import LeaderboardEvaluator
 from pathlib import Path
 
 EXAMPLE_01 = """
