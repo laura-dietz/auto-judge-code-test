@@ -18,6 +18,8 @@ RSYNC_DEST="$3" # "server:/auto-judge/out/"  # Change this to where correlation 
 WATCH_PARENT="./eval-watch/in"
 OUT_PARENT="./eval-watch/out"
 
+mkdir -p "$WATCH_PARENT" "$OUT_PARENT"
+
 # Shared options
 # COMMON_OPTS=" --only-shared-runs   --truth-drop-aggregate --out-format jsonl  --only-shared-topics  --on-missing default"
 COMMON_OPTS="   --truth-drop-aggregate --out-format jsonl   --on-missing default"
