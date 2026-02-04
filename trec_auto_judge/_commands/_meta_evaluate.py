@@ -13,9 +13,14 @@ from typing import List, Set
 from tira.io_utils import to_prototext
 
 
-def persist_output(df: pd.DataFrame, output: Path) -> None:
-    if output.name.endswith(".jsonl"):
+def persist_output(df: pd.DataFrame, output: Path, out_format: str = "jsonl") -> None:
+    # Use explicit format, or infer from extension
+    if out_format == "jsonl" or output.name.endswith(".jsonl"):
+        output.parent.mkdir(parents=True, exist_ok=True)
         df.to_json(output, lines=True, orient="records")
+    elif out_format == "table" or output.name.endswith(".txt"):
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_text(df.to_string(index=False))
     elif output.name.endswith(".prototext"):
         ret = {k: v for k, v in df.iloc[0].to_dict().items()}
         ret = to_prototext([ret])
@@ -141,8 +146,14 @@ def persist_output(df: pd.DataFrame, output: Path) -> None:
 @click.option(
     "--out-format",
     type=click.Choice(["table", "jsonl"]),
-    default="table",
-    help="Output format: table (default) or jsonl.",
+    default="jsonl",
+    help="Output file format: jsonl (default) or table. Only affects --output file.",
+)
+@click.option(
+    "--silent",
+    is_flag=True,
+    default=False,
+    help="Suppress table output to stdout.",
 )
 @click.argument("input_files", nargs=-1, type=str)
 def meta_evaluate(
@@ -166,6 +177,7 @@ def meta_evaluate(
     run_id: tuple,
     only_shared_runs: bool,
     out_format: str,
+    silent: bool,
     input_files: tuple,
 ) -> int:
     """Compute correlation between predicted leaderboards and ground-truth leaderboard."""
@@ -356,12 +368,10 @@ def meta_evaluate(
             df_aggr[k] = df[k].mean()
         df = pd.DataFrame([df_aggr])
 
-    if out_format == "jsonl":
-        print(df.to_json(orient="records", lines=True))
-    else:
+    if not silent:
         print(df.to_string(index=False))
 
     if output:
-        persist_output(df, output)
+        persist_output(df, output, out_format)
 
     return 0
