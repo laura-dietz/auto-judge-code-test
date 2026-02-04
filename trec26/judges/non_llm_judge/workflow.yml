@@ -1,0 +1,20 @@
+judge_class: "trec25.judges.non_llm_judge.non_llm_judge.NonLlmJudge"
+
+create_nuggets: false
+create_qrels: true
+judge: true
+judge_uses_qrels: true
+
+judge_settings:
+  # Weights for different metrics (should sum to 1.0)
+  length_weight: 0.2      # Weight for length-based scoring
+  keyword_weight: 0.3     # Weight for keyword matching
+  bm25_weight: 0.3        # Weight for BM25 score
+  coverage_weight: 0.2    # Weight for query coverage
+
+  # Length thresholds (in words)
+  min_length: 50          # Minimum acceptable length
+  optimal_length: 200     # Optimal response length
+  max_length: 500         # Maximum before penalty
+
+sweeps: {}

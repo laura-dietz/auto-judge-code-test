@@ -1,0 +1,35 @@
+# Simple UMBRELA Judge Workflow Configuration
+
+# Judge class for dynamic loading
+judge_class: "trec25.judges.simple_umbrela.simple_umbrela_judge.SimpleUmbrelaJudge"
+
+# Lifecycle: create qrels → judge
+create_nuggets: false
+create_qrels: true   # UMBRELA grades passages first
+judge: true          # Then aggregates to leaderboard
+
+# Data flow
+judge_uses_qrels: true   # Judge needs qrels from create_qrels()
+judge_uses_nuggets: false
+qrels_uses_nuggets: false
+
+# Settings
+settings:
+  filebase: "{_name}"
+
+# Qrels creation settings
+qrels_settings: {}
+
+# Judge settings
+judge_settings:
+  relevance_threshold: 2  # Grade >= 2 is "relevant"
+
+# Variants for different thresholds
+variants:
+  strict:
+    judge_settings:
+      relevance_threshold: 3  # Only grade 3 is relevant
+
+  lenient:
+    judge_settings:
+      relevance_threshold: 1  # Grade >= 1 is relevant

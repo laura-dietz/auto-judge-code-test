@@ -1,0 +1,20 @@
+# LLM Configuration for Simple UMBRELA Judge
+# Using FREE models for testing
+
+# Option 1: Local Ollama (FREE - requires Ollama running locally)
+# Install: https://ollama.ai
+# Run: ollama run llama3.2:3b
+base_url: "http://localhost:11434/v1"
+model: "llama3.2:3b"
+
+# Option 2: Together.ai (FREE tier available)
+# Uncomment to use Together.ai instead:
+# base_url: "https://api.together.xyz/v1"
+# model: "meta-llama/Llama-3.2-3B-Instruct-Turbo"
+# api_key: "your-together-api-key"  # Or use TOGETHER_API_KEY env var
+
+# Option 3: Groq (FREE tier - very fast)
+# Uncomment to use Groq instead:
+# base_url: "https://api.groq.com/openai/v1"
+# model: "llama-3.2-3b-preview"
+# api_key: "your-groq-api-key"  # Or use GROQ_API_KEY env var

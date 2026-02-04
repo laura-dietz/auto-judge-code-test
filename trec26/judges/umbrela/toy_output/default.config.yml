@@ -1,0 +1,19 @@
+name: default
+create_nuggets: false
+create_qrels: true
+judge: true
+llm_model: llama3.2:3b
+timestamp: '2026-02-04T00:47:29.436772+00:00'
+git:
+  commit: 1a3fc0c05b0cbc5b9c7e522cd70c6173cb2803ba
+  dirty: 'true'
+  remote: https://github.com/laura-dietz/auto-judge-code-test.git
+settings:
+  filebase: '{_name}'
+nugget_settings:
+  filebase: '{_name}'
+judge_settings:
+  filebase: '{_name}'
+  relevance_threshold: 2
+qrels_settings:
+  filebase: '{_name}'

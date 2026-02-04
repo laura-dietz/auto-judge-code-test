@@ -1,0 +1,11 @@
+# Simple UMBRELA Judge Dependencies
+
+# DSPy for structured LLM prompting
+dspy-ai>=2.4.0
+
+# Core dependencies
+pydantic>=2.0
+click>=8.0
+
+# Install main project (from parent directory)
+-e ../../..
