@@ -10,7 +10,7 @@ from tempfile import TemporaryDirectory
 EXAMPLE_LEADERBOARD = str((TREC_25_DATA / "spot-check-dataset" / "trec-leaderboard.txt").absolute())
 
 def evaluate_command(measure, truth=EXAMPLE_LEADERBOARD, inp=EXAMPLE_LEADERBOARD, eval_measure="Measure-01", correlation="kendall"):
-    cmd = ["meta-evaluate", "--truth-leaderboard", truth, "--input", inp, "--truth-measure", measure, "--eval-measure", eval_measure or measure, "--truth-format", "tot", "--eval-format", "tot", "--correlation", correlation]
+    cmd = ["meta-evaluate-v2", "--truth-leaderboard", truth, "--input", inp, "--truth-measure", measure, "--eval-measure", eval_measure or measure, "--truth-format", "tot", "--eval-format", "tot", "--correlation", correlation]
     return run_cmd_on_main(cmd)
     
 
@@ -38,7 +38,7 @@ class TestEvaluationInterface(unittest.TestCase):
     def test_invalid_output_path_fails_gracefully(self):
         """Test that invalid output path causes failure but still prints results."""
         target_file = Path("/tmp/results.jsonl-does-not-exist")
-        cmd = ["meta-evaluate", "--truth-leaderboard", EXAMPLE_LEADERBOARD,
+        cmd = ["meta-evaluate-v2", "--truth-leaderboard", EXAMPLE_LEADERBOARD,
                "--input", EXAMPLE_LEADERBOARD, "--truth-measure", "Measure-01",
                "--eval-measure", "Measure-02", "--truth-format", "tot",
                "--eval-format", "tot", "--correlation", "kendall", "--output", target_file]
@@ -74,7 +74,7 @@ class TestEvaluationInterface(unittest.TestCase):
         """Test that --output with .jsonl extension writes valid JSONL."""
         with TemporaryDirectory() as tmp_dir:
             target_file = (Path(tmp_dir) / "results.jsonl").absolute()
-            cmd = ["meta-evaluate", "--truth-leaderboard", EXAMPLE_LEADERBOARD,
+            cmd = ["meta-evaluate-v2", "--truth-leaderboard", EXAMPLE_LEADERBOARD,
                    "--input", EXAMPLE_LEADERBOARD, "--truth-measure", "Measure-01",
                    "--eval-measure", "Measure-02", "--truth-format", "tot",
                    "--eval-format", "tot", "--correlation", "kendall",

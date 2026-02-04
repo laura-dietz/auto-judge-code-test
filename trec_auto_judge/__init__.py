@@ -123,7 +123,7 @@ class AutoJudge(LeaderboardJudgeProtocol, QrelsCreatorProtocol, NuggetCreatorPro
 
 # === The click interface to the trec-auto-judge command line ====
 
-from ._commands._meta_evaluate import meta_evaluate
+from ._commands._meta_evaluate_deprecated import meta_evaluate as meta_evaluate_deprecated
 from ._commands._meta_evaluate_v2 import meta_evaluate as meta_evaluate_v2
 from ._commands._leaderboard import leaderboard
 from ._commands._eval_result import eval_result
@@ -138,7 +138,7 @@ def main():
     pass
 
 
-main.command("meta-evaluate")(meta_evaluate)
+main.command("meta-evaluate-deprecated")(meta_evaluate_deprecated)
 main.command("meta-evaluate-v2")(meta_evaluate_v2)
 main.command("leaderboard")(leaderboard)
 main.add_command(eval_result)

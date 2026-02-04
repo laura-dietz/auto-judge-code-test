@@ -98,6 +98,12 @@ def persist_output(df: pd.DataFrame, output: Path) -> None:
     multiple=True,
     help="Correlation method(s) to compute (e.g., kendall, kendall@10). Repeatable. If omitted, computes all.",
 )
+@click.option(
+    "--out-format",
+    type=click.Choice(["table", "jsonl"]),
+    default="table",
+    help="Output format: table (default) or jsonl.",
+)
 @click.argument("input_files", nargs=-1, type=str)
 def meta_evaluate(
     truth_leaderboard: Path,
@@ -112,6 +118,7 @@ def meta_evaluate(
     output: Path,
     aggregate: bool,
     correlation: tuple,
+    out_format: str,
     input_files: tuple,
 ) -> int:
     """Compute correlation between predicted leaderboards and ground-truth leaderboard."""
@@ -182,7 +189,10 @@ def meta_evaluate(
             df_aggr[k] = df[k].mean()
         df = pd.DataFrame([df_aggr])
 
-    print(df.to_string(index=False))
+    if out_format == "jsonl":
+        print(df.to_json(orient="records", lines=True))
+    else:
+        print(df.to_string(index=False))
 
     if output:
         persist_output(df, output)
