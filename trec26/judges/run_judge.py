@@ -18,6 +18,8 @@ from pathlib import Path
 import json
 from datetime import datetime
 from collections import defaultdict
+import os
+import yaml
 
 
 def load_topics(topics_file, max_topics=None):
@@ -96,6 +98,38 @@ def log_config(log_file, config):
         f.write("\n")
 
 
+def create_llm_config_from_env(output_file):
+    """Create LLM config file from environment variables.
+
+    Reads OPENAI_BASE_URL, OPENAI_MODEL, and OPENAI_API_KEY from environment.
+    """
+    base_url = os.getenv('OPENAI_BASE_URL')
+    model = os.getenv('OPENAI_MODEL')
+    api_key = os.getenv('OPENAI_API_KEY')
+
+    if not base_url or not model:
+        raise ValueError(
+            "OPENAI_BASE_URL and OPENAI_MODEL environment variables must be set. "
+            "Example:\n"
+            "  export OPENAI_BASE_URL='https://api.together.xyz/v1'\n"
+            "  export OPENAI_MODEL='meta-llama/Meta-Llama-3.1-70B-Instruct-Turbo'\n"
+            "  export OPENAI_API_KEY='your-key'"
+        )
+
+    config = {
+        'base_url': base_url,
+        'model': model,
+    }
+
+    if api_key:
+        config['api_key'] = api_key
+
+    with open(output_file, 'w') as f:
+        yaml.dump(config, f)
+
+    return output_file
+
+
 def main():
     parser = argparse.ArgumentParser(description='Run judge with limits and debug logging')
     parser.add_argument('--judge', required=True, choices=['non_llm', 'umbrela'],
@@ -109,6 +143,8 @@ def main():
     parser.add_argument('--workflow', default='workflow.yml',
                        help='Workflow config file')
     parser.add_argument('--llm-config', help='LLM config file (for umbrela)')
+    parser.add_argument('--use-env-llm', action='store_true',
+                       help='Create LLM config from environment variables (OPENAI_BASE_URL, OPENAI_MODEL, OPENAI_API_KEY)')
     parser.add_argument('--max-topics', type=int,
                        help='Maximum number of topics to process')
     parser.add_argument('--max-runs', type=int,
@@ -156,7 +192,19 @@ def main():
     else:  # umbrela
         judge_dir = Path(__file__).parent / "umbrela"
         judge_script = judge_dir / "umbrela_judge.py"
-        llm_config_path = Path(args.llm_config).resolve() if args.llm_config else (judge_dir / 'llm-config.yml')
+
+        # Determine LLM config path
+        if args.use_env_llm:
+            # Create LLM config from environment variables
+            llm_config_path = temp_dir / 'llm-config-env.yml'
+            print(f"Creating LLM config from environment variables...")
+            create_llm_config_from_env(llm_config_path)
+            print(f"  Config: {llm_config_path}")
+        elif args.llm_config:
+            llm_config_path = Path(args.llm_config).resolve()
+        else:
+            llm_config_path = judge_dir / 'llm-config.yml'
+
         cmd = [
             sys.executable, str(judge_script), 'run',
             '--rag-responses', str(runs_dir.resolve()),
