@@ -138,27 +138,32 @@ def main():
     print(f"  Runs: {runs_dir}")
 
     # Build command for actual judge
+    # Convert relative paths to absolute
+    workflow_path = Path(args.workflow).resolve()
+    out_dir_path = Path(args.out_dir).resolve()
+
     judge_dir = Path(__file__).parent / args.judge.replace('_', '_')
     if args.judge == 'non_llm':
         judge_dir = Path(__file__).parent / "non_llm_judge"
         judge_script = judge_dir / "non_llm_judge.py"
         cmd = [
             sys.executable, str(judge_script),
-            '--workflow', args.workflow,
-            '--rag-topics', str(topics_file),
-            '--rag-responses', str(runs_dir),
-            '--out-dir', args.out_dir,
+            '--workflow', str(workflow_path),
+            '--rag-topics', str(topics_file.resolve()),
+            '--rag-responses', str(runs_dir.resolve()),
+            '--out-dir', str(out_dir_path),
         ]
     else:  # umbrela
         judge_dir = Path(__file__).parent / "umbrela"
         judge_script = judge_dir / "umbrela_judge.py"
+        llm_config_path = Path(args.llm_config).resolve() if args.llm_config else (judge_dir / 'llm-config.yml')
         cmd = [
             sys.executable, str(judge_script), 'run',
-            '--rag-responses', str(runs_dir),
-            '--rag-topics', str(topics_file),
-            '--workflow', args.workflow,
-            '--llm-config', args.llm_config or 'llm-config.yml',
-            '--out-dir', args.out_dir,
+            '--rag-responses', str(runs_dir.resolve()),
+            '--rag-topics', str(topics_file.resolve()),
+            '--workflow', str(workflow_path),
+            '--llm-config', str(llm_config_path),
+            '--out-dir', str(out_dir_path),
         ]
 
     print(f"\nRunning judge...")
