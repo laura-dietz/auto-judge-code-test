@@ -6,6 +6,13 @@ judge: true
 judge_uses_qrels: true
 
 judge_settings:
+  # Topic format: auto (default), ragtime, dragun, or rag
+  # auto: Auto-detect based on topic structure
+  # ragtime: Use title + problem_statement + background
+  # dragun: Use body field (document text)
+  # rag: Use title field only
+  topic_format: auto
+
   # Weights for different metrics (should sum to 1.0)
   length_weight: 0.2      # Weight for length-based scoring
   keyword_weight: 0.3     # Weight for keyword matching

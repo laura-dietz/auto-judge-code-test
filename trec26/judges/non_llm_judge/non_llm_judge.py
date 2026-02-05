@@ -86,6 +86,34 @@ class NonLlmJudge(AutoJudge):
         self.k1 = 1.5
         self.b = 0.75
 
+        # Topic format: auto-detect or explicit
+        self.topic_format = settings.get("topic_format", "auto") if settings else "auto"
+
+    # ------------------------------------------------------------------------
+
+    def extract_query(self, topic) -> str:
+        """
+        Extract query text from topic based on format.
+        Supports: RAGTIME (title+problem+background), DRAGUN (body), RAG (title), auto-detect
+        """
+        # Explicit format override
+        if self.topic_format == "dragun":
+            return getattr(topic, "body", topic.title)
+        elif self.topic_format == "rag":
+            return topic.title
+        elif self.topic_format == "ragtime":
+            parts = [topic.title, getattr(topic, "problem_statement", ""), getattr(topic, "background", "")]
+            return " ".join(p for p in parts if p).strip()
+
+        # Auto-detect format
+        if hasattr(topic, 'body') and topic.body:  # DRAGUN
+            return topic.body
+        elif hasattr(topic, 'problem_statement'):  # RAGTIME
+            parts = [topic.title, getattr(topic, "problem_statement", ""), getattr(topic, "background", "")]
+            return " ".join(p for p in parts if p).strip()
+        else:  # RAG (simple title-only)
+            return topic.title
+
     # ------------------------------------------------------------------------
 
     def tokenize(self, text: str) -> list[str]:
@@ -197,8 +225,7 @@ class NonLlmJudge(AutoJudge):
             if not topic:
                 continue
 
-            parts = [topic.title, getattr(topic, "problem_statement", ""), getattr(topic, "background", "")]
-            query = " ".join(p for p in parts if p).strip()
+            query = self.extract_query(topic)
 
             # Use get_report_text() to combine all sentences into one response
             full_response = response.get_report_text()
@@ -220,8 +247,7 @@ class NonLlmJudge(AutoJudge):
             if not topic:
                 continue
 
-            parts = [topic.title, getattr(topic, "problem_statement", ""), getattr(topic, "background", "")]
-            query = " ".join(p for p in parts if p).strip()
+            query = self.extract_query(topic)
 
             # Use get_report_text() to combine all sentences into one response
             full_response = response.get_report_text()

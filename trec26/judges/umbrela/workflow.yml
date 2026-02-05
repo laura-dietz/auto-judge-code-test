@@ -22,6 +22,8 @@ qrels_settings: {}
 
 # Judge settings
 judge_settings:
+  # Topic format: auto (default), ragtime, dragun, or rag
+  topic_format: auto
   relevance_threshold: 2  # Grade >= 2 is "relevant"
 
 # Variants for different thresholds

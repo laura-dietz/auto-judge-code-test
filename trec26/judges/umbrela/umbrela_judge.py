@@ -119,6 +119,35 @@ class UmbrelaJudge(AutoJudge):
 
     nugget_banks_type: Type[NuggetBanksProtocol] = NuggetBanks
     print(f"nugget_banks_type:{nugget_banks_type}")
+
+    def __init__(self, settings: Optional[dict] = None, **kwargs):
+        super().__init__(settings=settings, **kwargs)
+        # Topic format: auto-detect or explicit
+        self.topic_format = settings.get("topic_format", "auto") if settings else "auto"
+
+    def extract_query(self, topic) -> str:
+        """
+        Extract query text from topic based on format.
+        Supports: RAGTIME (title+problem+background), DRAGUN (body), RAG (title), auto-detect
+        """
+        # Explicit format override
+        if self.topic_format == "dragun":
+            return getattr(topic, "body", topic.title)
+        elif self.topic_format == "rag":
+            return topic.title
+        elif self.topic_format == "ragtime":
+            parts = [topic.title, getattr(topic, "problem_statement", ""), getattr(topic, "background", "")]
+            return " ".join(p for p in parts if p).strip()
+
+        # Auto-detect format
+        if hasattr(topic, 'body') and topic.body:  # DRAGUN
+            return topic.body
+        elif hasattr(topic, 'problem_statement'):  # RAGTIME
+            parts = [topic.title, getattr(topic, "problem_statement", ""), getattr(topic, "background", "")]
+            return " ".join(p for p in parts if p).strip()
+        else:  # RAG (simple title-only)
+            return topic.title
+
     def create_qrels(
         self,
         rag_responses: Sequence[Report],
@@ -139,10 +168,7 @@ class UmbrelaJudge(AutoJudge):
             if not topic:
                 continue
 
-            # Construct query from topic fields
-            query = f"{topic.title} {getattr(topic, 'problem_statement', '')} {getattr(topic, 'background', '')}".strip()
-            if not query:
-                query = topic.title  # Fallback to title only
+            query = self.extract_query(topic)
 
             grades.append(UmbrelaGrade(
                 run_id=response.metadata.run_id,
