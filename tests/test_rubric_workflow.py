@@ -168,7 +168,7 @@ class TestRubricWorkflow:
         questions = [n.question for n in nuggets]
         assert "What causes icebergs to melt?" in questions
 
-    @patch('trec_auto_judge.llm.minima_llm_dspy.run_dspy_batch_generic')
+    @patch('minima_llm.dspy_adapter.run_dspy_batch_generic')
     def test_prefnugget_judges_with_rubric_nuggets(
         self,
         mock_dspy,
@@ -207,7 +207,7 @@ class TestRubricWorkflow:
         assert "run-A" in run_ids
         assert "run-B" in run_ids
 
-    @patch('trec_auto_judge.llm.minima_llm_dspy.run_dspy_batch_generic')
+    @patch('minima_llm.dspy_adapter.run_dspy_batch_generic')
     @patch('trec25.judges.rubric.rubric_autojudge.run_dspy_batch_generic')
     def test_full_workflow_rubric_to_prefnugget(
         self,

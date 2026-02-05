@@ -37,11 +37,12 @@ class TestEvaluationInterface(unittest.TestCase):
 
     def test_invalid_output_path_fails_gracefully(self):
         """Test that invalid output path causes failure but still prints results."""
-        target_file = Path("/nonexistent-directory/results.jsonl")
+        # Use /proc/invalid/ which cannot be created on Linux (proc is a virtual filesystem)
+        target_file = Path("/proc/invalid/results.jsonl")
         cmd = ["meta-evaluate", "--truth-leaderboard", EXAMPLE_LEADERBOARD,
                "--input", EXAMPLE_LEADERBOARD, "--truth-measure", "Measure-01",
                "--eval-measure", "Measure-02", "--truth-format", "tot",
-               "--eval-format", "tot", "--correlation", "kendall", "--output", target_file]
+               "--eval-format", "tot", "--correlation", "kendall", "--output", str(target_file)]
         result, stdout = run_cmd_on_main(cmd)
 
         self.assertIsNotNone(result.exception)

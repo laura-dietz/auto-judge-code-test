@@ -1,4 +1,6 @@
 # Umbrela judge: no nuggets (passage-level relevance only)
+judge_class: "trec25.judges.umbrela.umbrela_baseline.UmbrelaJudge"
+
 create_nuggets: false
 judge: true
 augment_report: false

@@ -1,4 +1,6 @@
 # Rubric judge creates nuggets first, then judges using them
+judge_class: "trec25.judges.rubric.rubric_autojudge.RubricJudge"
+
 judge_uses_nuggets: true   
 nugget_depends_on_responses: false
 judge: false # true   # implied

@@ -1,4 +1,6 @@
-# Preferecnce judge does not use nuggets
+# Preference judge does not use nuggets
+judge_class: "trec25.judges.prefjudge.pref_judge.PrefJudge"
+
 judge_uses_nuggets: false
 nugget_depends_on_responses: false
 judge: true   # implied
