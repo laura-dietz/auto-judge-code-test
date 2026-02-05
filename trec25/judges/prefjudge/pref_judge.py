@@ -9,20 +9,20 @@ This judge does not use nuggets.
 from itertools import groupby
 from typing import Dict, List, Optional, Sequence, Type
 
-from trec_auto_judge import (
+from autojudge_base import (
     AutoJudge,
-    LeaderboardSpec,
-    MeasureSpec,
     Leaderboard,
     LeaderboardBuilder,
-    MinimaLlmConfig,
-    NuggetBanks,
+    LeaderboardSpec,
+    MeasureSpec,
     NuggetBanksProtocol,
     Qrels,
     Report,
     Request,
     auto_judge_to_click_command,
 )
+from autojudge_base.nugget_data import NuggetBanks
+from minima_llm import MinimaLlmConfig
 
 # Import shared preference utilities
 from trec25.judges.shared.pref_common import (

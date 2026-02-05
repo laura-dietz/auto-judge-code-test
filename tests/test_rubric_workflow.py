@@ -9,10 +9,10 @@ import pytest
 from typing import List
 from unittest.mock import patch
 
-from trec_auto_judge import Request, Report
-from trec_auto_judge.llm import MinimaLlmConfig
-from trec_auto_judge.report import ReportMetaData, Rag24ReportSentence
-from trec_auto_judge.nugget_data import NuggetBanks
+from autojudge_base import Request, Report
+from autojudge_base.report import ReportMetaData, Rag24ReportSentence
+from autojudge_base.nugget_data import NuggetBanks
+from minima_llm import MinimaLlmConfig
 
 from trec25.judges.rubric.rubric_autojudge import RubricJudge, NuggetGenerationData
 from trec25.judges.prefnugget.prefnugget_judge import PrefNuggetJudge

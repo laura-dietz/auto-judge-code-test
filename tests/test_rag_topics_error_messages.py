@@ -2,9 +2,9 @@ import unittest
 from click.testing import CliRunner
 import click
 from pathlib import Path
-from trec_auto_judge.click_plus import option_rag_responses, option_rag_topics
-from pathlib import Path
 from unittest import mock
+
+from autojudge_base.click_plus import option_rag_responses, option_rag_topics
 
 @click.command()
 @option_rag_topics()

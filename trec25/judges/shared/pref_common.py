@@ -19,13 +19,9 @@ from typing import Callable, Dict, List, Literal, Optional, Set, Tuple, Type
 import dspy
 from pydantic import BaseModel
 
-from trec_auto_judge import (
-    MinimaLlmConfig,
-    OpenAIMinimaLlm,
-    Report,
-    Request,
-)
-from trec_auto_judge.llm.minima_llm_dspy import run_dspy_batch
+from autojudge_base import Report, Request
+from minima_llm import MinimaLlmConfig, OpenAIMinimaLlm
+from minima_llm.dspy_adapter import run_dspy_batch
 
 
 # =============================================================================

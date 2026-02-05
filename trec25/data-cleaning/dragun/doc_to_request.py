@@ -15,9 +15,8 @@ from textwrap import dedent
 import dspy
 
 from trec_auto_judge.request import Request
-from trec_auto_judge.llm import MinimaLlmConfig
-from trec_auto_judge.llm.minima_llm import OpenAIMinimaLlm
-from trec_auto_judge.llm.minima_llm_dspy import MinimaLlmDSPyLM
+from minima_llm import MinimaLlmConfig, OpenAIMinimaLlm
+from minima_llm.dspy_adapter import MinimaLlmDSPyLM
 
 
 # --- DSPy Signature ---

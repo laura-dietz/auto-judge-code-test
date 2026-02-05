@@ -3,7 +3,7 @@ import sys
 from pathlib import Path
 from typing import Dict, List, Literal, Tuple
 
-from trec_auto_judge import Leaderboard
+from autojudge_base import Leaderboard
 
 OnMissing = Literal["error", "warn", "skip", "default"]
 LeaderboardFormat = Literal["trec_eval", "tot", "ir_measures", "ranking", "jsonl"]

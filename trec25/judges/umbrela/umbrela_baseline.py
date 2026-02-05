@@ -1,16 +1,31 @@
 #!/usr/bin/env python3
-from trec_auto_judge import *
-from trec_auto_judge.nugget_data.nugget_data import *
-
 import dspy
 from textwrap import dedent
 import re
 import asyncio
-from typing import *
+from typing import Iterable, Literal, Optional, Sequence, Type
+
 from pydantic import BaseModel
 
-from trec_auto_judge.llm.minima_llm_dspy import run_dspy_batch
-from trec_auto_judge import OpenAIMinimaLlm
+from autojudge_base import (
+    AutoJudge,
+    Leaderboard,
+    LeaderboardBuilder,
+    LeaderboardSpec,
+    LeaderboardVerification,
+    MeasureSpec,
+    NuggetBanksProtocol,
+    Qrels,
+    QrelsSpec,
+    Report,
+    Request,
+    auto_judge_to_click_command,
+    build_qrels,
+    doc_id_md5,
+)
+from autojudge_base.nugget_data import NuggetBanks
+from minima_llm import MinimaLlmConfig, OpenAIMinimaLlm
+from minima_llm.dspy_adapter import run_dspy_batch
 
 
 class UmbrelaAnnotation(BaseModel):

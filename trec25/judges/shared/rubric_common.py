@@ -14,8 +14,8 @@ from typing import Any, Dict, List, Literal, Optional, Sequence, Set, Tuple
 import dspy
 from pydantic import BaseModel
 
-from trec_auto_judge import Report
-from trec_auto_judge.nugget_data import NuggetBank, NuggetBanks, NuggetQuestion
+from autojudge_base import Report
+from autojudge_base.nugget_data import NuggetBank, NuggetBanks, NuggetQuestion
 
 
 # =============================================================================

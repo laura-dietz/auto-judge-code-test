@@ -1,8 +1,8 @@
 """CLI command to run an AutoJudge via workflow.yml."""
 import click
 
-from ..click_plus import options_run, execute_run_workflow
-from ..workflow import load_workflow, load_judge_from_workflow
+from autojudge_base.click_plus import options_run, execute_run_workflow
+from autojudge_base.workflow import load_workflow, load_judge_from_workflow
 
 
 @click.command("run")

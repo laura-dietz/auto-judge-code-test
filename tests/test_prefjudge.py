@@ -13,13 +13,13 @@ import pytest
 from pathlib import Path
 from typing import List, Optional
 
-from trec_auto_judge import Request, Report, Leaderboard, Qrels
-from trec_auto_judge.llm import MinimaLlmConfig
-from trec_auto_judge.leaderboard.leaderboard import (
+from autojudge_base import Request, Report, Leaderboard, Qrels
+from autojudge_base.leaderboard.leaderboard import (
     LeaderboardVerification,
     LeaderboardVerificationError,
 )
-from trec_auto_judge.report import ReportMetaData, Rag24ReportSentence
+from autojudge_base.report import ReportMetaData, Rag24ReportSentence
+from minima_llm import MinimaLlmConfig
 
 
 # =============================================================================

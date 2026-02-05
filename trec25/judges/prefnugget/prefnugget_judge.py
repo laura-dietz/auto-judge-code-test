@@ -12,19 +12,32 @@ from itertools import groupby
 from random import shuffle, Random
 import sys
 from textwrap import dedent
-from typing import Any, Dict, List, Literal, Set
+from typing import Any, Dict, List, Literal, Optional, Sequence, Set, Type
 
 import dspy
 from pydantic import BaseModel
 
-from trec_auto_judge import MinimaLlmConfig
-
-from trec_auto_judge import *
-from trec_auto_judge.nugget_data import NuggetBanks, NuggetBanksProtocol
+from autojudge_base import (
+    AutoJudge,
+    Leaderboard,
+    LeaderboardBuilder,
+    LeaderboardSpec,
+    MeasureSpec,
+    NuggetBanksProtocol,
+    Qrels,
+    QrelsSpec,
+    Report,
+    Request,
+    auto_judge_to_click_command,
+    doc_id_md5,
+    format_preview,
+)
+from autojudge_base.nugget_data import NuggetBanks
+from minima_llm import MinimaLlmConfig
 
 
 # Import shared utilities
-from trec_auto_judge.llm.minima_llm_dspy import run_dspy_batch_generic
+from minima_llm.dspy_adapter import run_dspy_batch_generic
 from trec25.judges.shared.pref_common import (
     PrefAggregateResult,
     PrefJudgment,

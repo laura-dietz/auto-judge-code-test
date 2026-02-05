@@ -1,11 +1,12 @@
 import unittest
-from trec_auto_judge.io import load_runs_failsave
 from pathlib import Path
-from trec_auto_judge.report import *
-from . import TREC_25_DATA
 from tempfile import TemporaryDirectory
 from glob import glob
 import json
+
+from autojudge_base.io import load_runs_failsave
+from autojudge_base.report import Report, ReportMetaData
+from . import TREC_25_DATA
 
 
 

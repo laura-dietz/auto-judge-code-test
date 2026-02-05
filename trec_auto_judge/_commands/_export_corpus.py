@@ -1,7 +1,8 @@
 import click
 from pathlib import Path
-from ..io import load_hf_dataset_config_or_none
 import gzip
+
+from autojudge_base.io import load_hf_dataset_config_or_none
 
 
 @click.argument("corpus-directory", type=Path)

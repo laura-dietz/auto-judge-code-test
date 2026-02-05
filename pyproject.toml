@@ -30,6 +30,8 @@ dependencies = [
     "pydantic>=2.0",
     "ir_datasets",
     "nltk",
+    "autojudge-base",
+    "minima-llm",
 ]
 
 [project.optional-dependencies]

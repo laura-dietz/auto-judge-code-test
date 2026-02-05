@@ -2,15 +2,17 @@ import click
 import glob
 from pathlib import Path
 import pandas as pd
-from ..evaluation_v2 import LeaderboardEvaluator, CorrelationMethodType
-from ..click_plus import (
+from typing import List, Set
+
+from tira.io_utils import to_prototext
+
+from autojudge_base.click_plus import (
     detect_header_interactive,
     LEADERBOARD_FORMATS,
     LEADERBOARD_FORMAT_HELP,
 )
+from ..evaluation_v2 import LeaderboardEvaluator, CorrelationMethodType
 from ..eval_results import load as load_eval_result, EvalResult
-from typing import List, Set
-from tira.io_utils import to_prototext
 
 
 def persist_output(df: pd.DataFrame, output: Path, out_format: str = "jsonl") -> None:

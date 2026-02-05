@@ -6,14 +6,14 @@ import glob
 from pathlib import Path
 import pandas as pd
 from statistics import mean, stdev
+from typing import List, Optional
 
-from trec_auto_judge.eval_results import load as load_eval_result, EvalResult, ALL_TOPIC_ID
-from ..click_plus import (
+from autojudge_base.click_plus import (
     detect_header_interactive,
     LEADERBOARD_FORMATS,
     LEADERBOARD_FORMAT_HELP,
 )
-from typing import List, Optional
+from ..eval_results import load as load_eval_result, EvalResult, ALL_TOPIC_ID
 
 
 @click.option(

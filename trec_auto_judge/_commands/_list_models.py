@@ -3,7 +3,7 @@ import click
 from pathlib import Path
 from typing import Optional
 
-from ..llm_resolver import AvailableModels, ModelPreferences, ModelResolver, ModelResolutionError
+from autojudge_base.llm_resolver import AvailableModels, ModelPreferences, ModelResolver, ModelResolutionError
 
 
 @click.command("list-models")

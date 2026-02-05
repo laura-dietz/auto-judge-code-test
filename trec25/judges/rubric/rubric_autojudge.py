@@ -6,20 +6,32 @@ Rubric-based AutoJudge that:
 3. Derives evaluation score from nugget coverage
 """
 from textwrap import dedent
-from trec_auto_judge import *
-from trec_auto_judge.nugget_data import NuggetBanks, NuggetQuestion
-
 import dspy
 import json
 import re
 from typing import *
 from pydantic import BaseModel
 
-from trec_auto_judge import MinimaLlmConfig
-from trec_auto_judge.leaderboard.leaderboard import OnMissing
+from autojudge_base import (
+    AutoJudge,
+    Leaderboard,
+    LeaderboardBuilder,
+    LeaderboardSpec,
+    MeasureSpec,
+    NuggetBanksProtocol,
+    Qrels,
+    QrelsSpec,
+    Report,
+    Request,
+    auto_judge_to_click_command,
+    doc_id_md5,
+)
+from autojudge_base.nugget_data import NuggetBanks, NuggetQuestion
+from autojudge_base.leaderboard.leaderboard import OnMissing
+from minima_llm import MinimaLlmConfig
 
 # Import shared utilities
-from trec_auto_judge.llm.minima_llm_dspy import run_dspy_batch_generic
+from minima_llm.dspy_adapter import run_dspy_batch_generic
 from trec25.judges.shared.rubric_common import (
     NuggetGradeData,
     GradeNuggetAnswer,

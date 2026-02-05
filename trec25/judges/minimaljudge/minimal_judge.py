@@ -15,25 +15,25 @@ Use this as a starting template for building your own modular judge.
 
 from typing import Iterable, Optional, Sequence, Type
 
-from trec_auto_judge import (
-    MinimaLlmConfig,
-    Report,
-    Request,
+from autojudge_base import (
     Leaderboard,
     LeaderboardBuilder,
     LeaderboardSpec,
     MeasureSpec,
+    NuggetBanksProtocol,
     Qrels,
     QrelsSpec,
+    Report,
+    Request,
     build_qrels,
     doc_id_md5,
 )
-from trec_auto_judge.nugget_data import (
+from autojudge_base.nugget_data import (
     NuggetBanks,
     NuggetBank,
     NuggetQuestion,
-    NuggetBanksProtocol,
 )
+from minima_llm import MinimaLlmConfig
 
 
 # =============================================================================
@@ -262,7 +262,7 @@ class MinimalLeaderboardJudge:
 # by combining all three protocols into a single object.
 
 if __name__ == "__main__":
-    from trec_auto_judge import AutoJudge, auto_judge_to_click_command
+    from autojudge_base import AutoJudge, auto_judge_to_click_command
 
     class MinimalJudgeCombined(AutoJudge):
         """Combined class for CLI compatibility."""

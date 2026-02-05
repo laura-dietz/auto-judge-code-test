@@ -1,12 +1,28 @@
 #!/usr/bin/env python3
-from typing import Type
-from trec_auto_judge import AutoJudge, Sequence, Optional, Report, Request, LeaderboardSpec, LeaderboardBuilder, LeaderboardVerification, MeasureSpec, auto_judge_to_click_command, Leaderboard, Qrels, MinimaLlmConfig, NuggetBanks, NuggetBanksProtocol
-import click
-from pathlib import Path
+from typing import Optional, Sequence, Type
 from collections import defaultdict
-from tqdm import tqdm
+from pathlib import Path
 from statistics import mean
 import random
+
+import click
+from tqdm import tqdm
+
+from autojudge_base import (
+    AutoJudge,
+    Leaderboard,
+    LeaderboardBuilder,
+    LeaderboardSpec,
+    LeaderboardVerification,
+    MeasureSpec,
+    NuggetBanksProtocol,
+    Qrels,
+    Report,
+    Request,
+    auto_judge_to_click_command,
+)
+from autojudge_base.nugget_data import NuggetBanks
+from minima_llm import MinimaLlmConfig
 
 
 def rand(seed: str) -> float:

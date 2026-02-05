@@ -37,7 +37,7 @@ class TestEvaluationInterface(unittest.TestCase):
 
     def test_invalid_output_path_fails_gracefully(self):
         """Test that invalid output path causes failure but still prints results."""
-        target_file = Path("/tmp/results.jsonl-does-not-exist")
+        target_file = Path("/nonexistent-directory/results.jsonl")
         cmd = ["meta-evaluate", "--truth-leaderboard", EXAMPLE_LEADERBOARD,
                "--input", EXAMPLE_LEADERBOARD, "--truth-measure", "Measure-01",
                "--eval-measure", "Measure-02", "--truth-format", "tot",

@@ -14,22 +14,22 @@ import pytest
 from pathlib import Path
 from typing import List, Optional
 
-from trec_auto_judge import Request, Report, Leaderboard, Qrels
-from trec_auto_judge.llm import MinimaLlmConfig
-from trec_auto_judge.nugget_data import (
+from autojudge_base import Request, Report, Leaderboard, Qrels
+from autojudge_base.nugget_data import (
     NuggetBanks,
     NuggetBanksVerification,
     NuggetBanksVerificationError,
 )
-from trec_auto_judge.leaderboard.leaderboard import (
+from autojudge_base.leaderboard.leaderboard import (
     LeaderboardVerification,
     LeaderboardVerificationError,
 )
-from trec_auto_judge.qrels.qrels import (
+from autojudge_base.qrels.qrels import (
     QrelsVerification,
     QrelsVerificationError,
 )
-from trec_auto_judge.report import ReportMetaData, Rag24ReportSentence
+from autojudge_base.report import ReportMetaData, Rag24ReportSentence
+from minima_llm import MinimaLlmConfig
 
 
 # =============================================================================
@@ -366,7 +366,7 @@ class TestVerificationCatchesProblems:
 
     def test_leaderboard_verification_catches_missing_topic(self, sample_topics):
         """Verify LeaderboardVerification catches missing topics."""
-        from trec_auto_judge import LeaderboardSpec, LeaderboardBuilder, MeasureSpec
+        from autojudge_base import LeaderboardSpec, LeaderboardBuilder, MeasureSpec
 
         spec = LeaderboardSpec(measures=(
             MeasureSpec("SCORE"),
@@ -386,7 +386,7 @@ class TestVerificationCatchesProblems:
 
     def test_qrels_verification_catches_duplicates(self, sample_topics):
         """Verify QrelsVerification catches duplicate entries."""
-        from trec_auto_judge.qrels.qrels import Qrels, QrelRow
+        from autojudge_base.qrels.qrels import Qrels, QrelRow
 
         # Create qrels with duplicate
         rows = [

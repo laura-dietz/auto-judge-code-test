@@ -1,6 +1,8 @@
 # PrefNuggetJudge: Extract differentiating nuggets from preference comparisons
 # Requires responses with PrefJudge evaldata (run PrefJudge with --augment-report first)
 
+
+judge_class: "trec25.judges.prefnugget.prefnugget_judge.PrefNuggetJudge"
 judge_uses_nuggets: true
 nugget_depends_on_responses: true  # Need evaldata from PrefJudge
 judge: true                       # No leaderboard output

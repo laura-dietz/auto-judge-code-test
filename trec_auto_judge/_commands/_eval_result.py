@@ -5,7 +5,7 @@ import tempfile
 from pathlib import Path
 from typing import Optional, Set
 
-from trec_auto_judge.eval_results import load, write, EvalResult, ALL_TOPIC_ID
+from ..eval_results import load, write, EvalResult, ALL_TOPIC_ID
 
 
 EVAL_RESULT_FORMATS = ["trec_eval", "tot", "ir_measures", "ranking", "jsonl"]
