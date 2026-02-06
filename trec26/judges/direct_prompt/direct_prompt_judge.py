@@ -199,6 +199,9 @@ class DirectPromptJudge(AutoJudge):
     ) -> Optional[Qrels]:
         """Grade each passage using UMBRELA."""
 
+        # Get topic_format from kwargs (qrels_settings) or fall back to self.topic_format
+        topic_format = kwargs.get("topic_format", self.topic_format)
+
         # Build topic lookup
         topic_dict = {req.request_id: req for req in rag_topics}
 
@@ -221,11 +224,11 @@ class DirectPromptJudge(AutoJudge):
 
         # Determine which prompt to use based on explicit topic_format setting
         # (same logic as extract_query: explicit first, then auto-detect)
-        if self.topic_format == "dragun":
+        if topic_format == "dragun":
             # Explicit DRAGUN dataset
             prompt_class = DragunPrompt
             prompt_name = "DRAGUN"
-        elif self.topic_format in ["rag", "ragtime"]:
+        elif topic_format in ["rag", "ragtime"]:
             # Explicit RAG or RAGTIME dataset
             prompt_class = UmbrelaPrompt
             prompt_name = "UMBRELA"
