@@ -166,23 +166,26 @@ class DirectPromptJudge(AutoJudge):
         # Debug logger
         self.debug_logger = DebugLogger(debug_log)
 
-    def extract_query(self, topic) -> str:
+    def extract_query(self, topic, topic_format: str = None) -> str:
         """
         Extract query text from topic based on explicit format.
         Supports: RAGTIME (title+problem+background), DRAGUN (body), RAG (title)
         REQUIRES explicit topic_format setting - no auto-detection.
         """
-        if self.topic_format == "dragun":
+        # Use provided topic_format or fall back to self.topic_format
+        fmt = topic_format if topic_format is not None else self.topic_format
+
+        if fmt == "dragun":
             return getattr(topic, "body", topic.title)
-        elif self.topic_format == "rag":
+        elif fmt == "rag":
             return topic.title
-        elif self.topic_format == "ragtime":
+        elif fmt == "ragtime":
             parts = [topic.title, getattr(topic, "problem_statement", ""), getattr(topic, "background", "")]
             return ". ".join(p for p in parts if p).strip()
         else:
             raise ValueError(
                 f"topic_format must be explicitly set to 'rag', 'ragtime', or 'dragun'. "
-                f"Got: '{self.topic_format}'. Set --dataset flag or update workflow.yml"
+                f"Got: '{fmt}'. Set --dataset flag or update workflow.yml"
             )
 
     def create_qrels(
@@ -197,17 +200,7 @@ class DirectPromptJudge(AutoJudge):
 
         # Get topic_format from kwargs (qrels_settings)
         # MUST be explicitly set - no auto-detection
-        topic_format = kwargs.get("topic_format", None)
-
-        # Debug: print what we received
-        print(f"[DEBUG] kwargs keys: {kwargs.keys()}")
-        print(f"[DEBUG] topic_format from kwargs: {topic_format}")
-        print(f"[DEBUG] self.topic_format: {self.topic_format}")
-
-        # Use self.topic_format as fallback if not in kwargs
-        if topic_format is None:
-            topic_format = self.topic_format
-            print(f"[DEBUG] Using self.topic_format: {topic_format}")
+        topic_format = kwargs.get("topic_format", self.topic_format)
 
         # Build topic lookup
         topic_dict = {req.request_id: req for req in rag_topics}
@@ -219,7 +212,7 @@ class DirectPromptJudge(AutoJudge):
             if not topic:
                 continue
 
-            query = self.extract_query(topic)
+            query = self.extract_query(topic, topic_format=topic_format)
 
             grades.append(UmbrelaGrade(
                 run_id=response.metadata.run_id,
