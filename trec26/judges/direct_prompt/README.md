@@ -173,11 +173,24 @@ For easier management with filtering and debug logging:
 ```bash
 cd trec26/judges
 
-# Run with limited topics/runs for testing
+# Run with environment-based LLM config (recommended)
 python run_judge.py \
   --judge direct_prompt \
   --rag-topics /path/to/topics.jsonl \
   --rag-responses /path/to/runs/ \
+  --workflow direct_prompt/workflow.yml \
+  --use-env-llm \
+  --out-dir output/ \
+  --dataset dragun \
+  --name dragun_llm
+
+# Or with limited topics/runs for testing
+python run_judge.py \
+  --judge direct_prompt \
+  --rag-topics /path/to/topics.jsonl \
+  --rag-responses /path/to/runs/ \
+  --workflow direct_prompt/workflow.yml \
+  --use-env-llm \
   --out-dir output/ \
   --dataset rag \
   --max-topics 5 \
@@ -225,6 +238,25 @@ JSON Lines format with structured logging:
 | **RAG** | UMBRELA | Query → Response relevance (0-3) |
 | **RAGTIME** | UMBRELA | Report request → Report relevance (0-3) |
 | **DRAGUN** | DRAGUN | News article → Trustworthiness assessment quality (0-3) |
+
+### How Dataset Selection Works
+
+The judge selects which prompt to use based on the `topic_format` setting:
+
+1. **Explicit selection** (recommended): Use `--dataset` flag or set `topic_format` in workflow.yml
+   ```bash
+   --dataset dragun  # Forces DRAGUN prompt
+   --dataset rag     # Forces UMBRELA prompt
+   --dataset ragtime # Forces UMBRELA prompt
+   ```
+
+2. **Auto-detection**: If `topic_format: auto` (default), the judge auto-detects by checking:
+   - If topics have `body` field → DRAGUN prompt
+   - Otherwise → UMBRELA prompt
+
+**Important**: The `topic_format` setting must be in **both** `qrels_settings` and `judge_settings` in workflow.yml:
+- `qrels_settings.topic_format` controls which prompt is used (UMBRELA vs DRAGUN)
+- `judge_settings.topic_format` controls how queries are extracted from topics
 
 ## Customizing the Judge
 
@@ -298,10 +330,7 @@ variants:
   - Verify if citations actually support the claims
   - Assess citation accuracy or completeness
 
-- For proper RAGTIME evaluation with citation validation, you'd need to:
-  - Load the document collection
-  - Retrieve cited documents
-  - Validate citations against document content
+
 
 ## Next Steps
 
