@@ -177,6 +177,8 @@ def main():
     # Resolve debug log path to absolute if provided
     if args.debug_log:
         args.debug_log = str(Path(args.debug_log).resolve())
+        # Ensure parent directory exists for debug log
+        Path(args.debug_log).parent.mkdir(parents=True, exist_ok=True)
 
     # Setup logging if requested
     if args.debug_log:
