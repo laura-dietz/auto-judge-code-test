@@ -237,6 +237,15 @@ class DirectPromptJudge(AutoJudge):
 
         print(f"Grading {len(grades)} passages with {prompt_name}...")
 
+        # Log which prompt type is being used for this session
+        if self.debug_logger.enabled:
+            self.debug_logger.log("PROMPT_SELECTION", {
+                "prompt_type": prompt_name,
+                "topic_format": topic_format,
+                "num_passages": len(grades),
+                "message": f"Using {prompt_name} prompt for grading"
+            })
+
         # Log inputs if debug enabled
         if self.debug_logger.enabled:
             topic_lookup = topic_dict
@@ -264,10 +273,11 @@ class DirectPromptJudge(AutoJudge):
                 self.debug_logger.log(
                     f"INPUT [{grade.run_id} / {grade.topic_id}]",
                     {
+                        "prompt_type": prompt_name,  # Explicitly log which prompt (DRAGUN or UMBRELA)
                         "topic_data": topic_data,
                         "query": grade.query,
                         "response": grade.passage,
-                        "prompt": complete_prompt,
+                        "prompt_template": complete_prompt,
                     }
                 )
 
