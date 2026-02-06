@@ -3,3 +3,20 @@ __pycache__
 test-coverage
 .coverage
 trec_auto_judge.egg-info
+.DS_Store
+dataset/
+# macOS files
+.DS_Store
+
+# Data directories
+dataset/
+**/ragtime_output/
+**/dragun_output/
+**/rag_output/
+**/toy_output/
+**/debug_output/
+**/temp_filtered/
+
+# Debug logs
+*.log
+*.jsonl

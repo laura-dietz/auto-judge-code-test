@@ -29,7 +29,19 @@ def load_topics(topics_file, max_topics=None):
         for i, line in enumerate(f):
             if max_topics and i >= max_topics:
                 break
-            topics.append(json.loads(line))
+            topic = json.loads(line)
+
+            # Normalize topic ID field names
+            # Different datasets use different field names: id, request_id, topic_id, docid
+            if 'request_id' not in topic:
+                if 'id' in topic:
+                    topic['request_id'] = topic['id']
+                elif 'topic_id' in topic:
+                    topic['request_id'] = topic['topic_id']
+                elif 'docid' in topic:
+                    topic['request_id'] = topic['docid']
+
+            topics.append(topic)
     return topics
 
 
@@ -132,7 +144,7 @@ def create_llm_config_from_env(output_file):
 
 def main():
     parser = argparse.ArgumentParser(description='Run judge with limits and debug logging')
-    parser.add_argument('--judge', required=True, choices=['non_llm', 'umbrela'],
+    parser.add_argument('--judge', required=True, choices=['non_llm', 'direct_prompt'],
                        help='Which judge to run')
     parser.add_argument('--rag-topics', required=True,
                        help='Path to topics file')
@@ -142,7 +154,7 @@ def main():
                        help='Output directory')
     parser.add_argument('--workflow', default='workflow.yml',
                        help='Workflow config file')
-    parser.add_argument('--llm-config', help='LLM config file (for umbrela)')
+    parser.add_argument('--llm-config', help='LLM config file (for direct_prompt)')
     parser.add_argument('--use-env-llm', action='store_true',
                        help='Create LLM config from environment variables (OPENAI_BASE_URL, OPENAI_MODEL, OPENAI_API_KEY)')
     parser.add_argument('--max-topics', type=int,
@@ -151,8 +163,20 @@ def main():
                        help='Maximum number of runs to process')
     parser.add_argument('--debug-log',
                        help='Debug log file path')
+    parser.add_argument('--name',
+                       help='Name for output files (replaces {_name} in workflow)')
+    parser.add_argument('--dataset', choices=['rag', 'ragtime', 'dragun'],
+                       help='Dataset type (rag, ragtime, dragun) - sets topic_format explicitly')
 
     args = parser.parse_args()
+
+    # Auto-generate debug log name if --name is provided but --debug-log is not
+    if args.name and not args.debug_log:
+        args.debug_log = f"{args.name}.log"
+
+    # Resolve debug log path to absolute if provided
+    if args.debug_log:
+        args.debug_log = str(Path(args.debug_log).resolve())
 
     # Setup logging if requested
     if args.debug_log:
@@ -175,23 +199,48 @@ def main():
 
     # Build command for actual judge
     # Convert relative paths to absolute
-    workflow_path = Path(args.workflow).resolve()
     out_dir_path = Path(args.out_dir).resolve()
+
+    # Handle workflow: substitute {_name} and topic_format if provided
+    if args.name or args.dataset:
+        # Read workflow and make substitutions
+        with open(args.workflow) as f:
+            workflow_content = f.read()
+
+        if args.name:
+            workflow_content = workflow_content.replace('{_name}', args.name)
+
+        if args.dataset:
+            # Replace topic_format: auto with topic_format: <dataset>
+            import re
+            workflow_content = re.sub(
+                r'topic_format:\s*auto',
+                f'topic_format: {args.dataset}',
+                workflow_content
+            )
+
+        # Write to temp workflow file
+        temp_workflow = temp_dir / 'workflow_custom.yml'
+        with open(temp_workflow, 'w') as f:
+            f.write(workflow_content)
+        workflow_path = temp_workflow.resolve()
+    else:
+        workflow_path = Path(args.workflow).resolve()
 
     judge_dir = Path(__file__).parent / args.judge.replace('_', '_')
     if args.judge == 'non_llm':
         judge_dir = Path(__file__).parent / "non_llm_judge"
         judge_script = judge_dir / "non_llm_judge.py"
         cmd = [
-            sys.executable, str(judge_script),
+            sys.executable, str(judge_script), 'run',
             '--workflow', str(workflow_path),
             '--rag-topics', str(topics_file.resolve()),
             '--rag-responses', str(runs_dir.resolve()),
             '--out-dir', str(out_dir_path),
         ]
-    else:  # umbrela
-        judge_dir = Path(__file__).parent / "umbrela"
-        judge_script = judge_dir / "umbrela_judge.py"
+    else:  # direct_prompt
+        judge_dir = Path(__file__).parent / "direct_prompt"
+        judge_script = judge_dir / "direct_prompt_judge.py"
 
         # Determine LLM config path
         if args.use_env_llm:
@@ -210,7 +259,7 @@ def main():
             '--rag-responses', str(runs_dir.resolve()),
             '--rag-topics', str(topics_file.resolve()),
             '--workflow', str(workflow_path),
-            '--llm-config', str(llm_config_path),
+            '--llm-config', str(llm_config_path.resolve()),
             '--out-dir', str(out_dir_path),
         ]
 
@@ -218,7 +267,13 @@ def main():
     print(f"Command: {' '.join(cmd)}\n")
 
     import subprocess
-    result = subprocess.run(cmd, cwd=judge_dir)
+    # Set up environment variables for the subprocess
+    env = os.environ.copy()
+    if args.judge == 'direct_prompt' and args.debug_log:
+        # Pass debug log path to direct prompt judge via environment variable (already absolute)
+        env['DIRECT_PROMPT_DEBUG_LOG'] = args.debug_log
+
+    result = subprocess.run(cmd, cwd=judge_dir, env=env)
 
     if result.returncode == 0:
         print(f"\n✓ Judge completed successfully")

@@ -1,11 +1,11 @@
-# Simple UMBRELA Judge Workflow Configuration
+# Direct Prompt Judge Workflow Configuration
 
 # Judge class for dynamic loading
-judge_class: "trec25.judges.simple_umbrela.simple_umbrela_judge.SimpleUmbrelaJudge"
+judge_class: "trec26.judges.direct_prompt.direct_prompt_judge.DirectPromptJudge"
 
 # Lifecycle: create qrels → judge
 create_nuggets: false
-create_qrels: true   # UMBRELA grades passages first
+create_qrels: true   # LLM grades passages first using prompts
 judge: true          # Then aggregates to leaderboard
 
 # Data flow
@@ -18,13 +18,15 @@ settings:
   filebase: "{_name}"
 
 # Qrels creation settings
-qrels_settings: {}
+qrels_settings:
+  filebase: "{_name}"
 
 # Judge settings
 judge_settings:
   # Topic format: auto (default), ragtime, dragun, or rag
   topic_format: auto
   relevance_threshold: 2  # Grade >= 2 is "relevant"
+  filebase: "{_name}"
 
 # Variants for different thresholds
 variants:

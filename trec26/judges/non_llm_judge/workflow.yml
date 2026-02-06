@@ -1,11 +1,16 @@
-judge_class: "trec25.judges.non_llm_judge.non_llm_judge.NonLlmJudge"
+judge_class: "trec26.judges.non_llm_judge.non_llm_judge.NonLlmJudge"
 
 create_nuggets: false
 create_qrels: true
 judge: true
 judge_uses_qrels: true
 
+qrels_settings:
+  filebase: "{_name}"
+
 judge_settings:
+  filebase: "{_name}"
+
   # Topic format: auto (default), ragtime, dragun, or rag
   # auto: Auto-detect based on topic structure
   # ragtime: Use title + problem_statement + background
