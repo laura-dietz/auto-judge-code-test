@@ -18,15 +18,16 @@ settings:
   filebase: "{_name}"
 
 # Qrels creation settings
-# NOTE: topic_format is used by create_qrels to select which prompt (UMBRELA vs DRAGUN)
+# NOTE: topic_format MUST be explicitly set - no auto-detection
+# Use --dataset flag with run_judge.py or manually set here
 qrels_settings:
-  topic_format: auto  # auto (default), rag, ragtime, or dragun
+  topic_format: REQUIRED  # MUST be: rag, ragtime, or dragun
   filebase: "{_name}"
 
 # Judge settings
-# NOTE: topic_format controls extract_query behavior
+# NOTE: topic_format controls query extraction and prompt selection
 judge_settings:
-  topic_format: auto  # auto (default), rag, ragtime, or dragun
+  topic_format: REQUIRED  # MUST be: rag, ragtime, or dragun
   relevance_threshold: 2  # Grade >= 2 is "relevant"
   filebase: "{_name}"
 

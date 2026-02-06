@@ -211,10 +211,10 @@ def main():
             workflow_content = workflow_content.replace('{_name}', args.name)
 
         if args.dataset:
-            # Replace topic_format: auto with topic_format: <dataset>
+            # Replace topic_format: REQUIRED (or auto for backwards compat) with topic_format: <dataset>
             import re
             workflow_content = re.sub(
-                r'topic_format:\s*auto',
+                r'topic_format:\s*(REQUIRED|auto)',
                 f'topic_format: {args.dataset}',
                 workflow_content
             )

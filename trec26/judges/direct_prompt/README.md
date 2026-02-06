@@ -241,22 +241,29 @@ JSON Lines format with structured logging:
 
 ### How Dataset Selection Works
 
-The judge selects which prompt to use based on the `topic_format` setting:
+The judge requires **explicit dataset specification** - no auto-detection.
 
-1. **Explicit selection** (recommended): Use `--dataset` flag or set `topic_format` in workflow.yml
-   ```bash
-   --dataset dragun  # Forces DRAGUN prompt
-   --dataset rag     # Forces UMBRELA prompt
-   --dataset ragtime # Forces UMBRELA prompt
-   ```
+**You MUST use the `--dataset` flag** when running via run_judge.py:
+```bash
+--dataset dragun  # Uses DRAGUN prompt
+--dataset rag     # Uses UMBRELA prompt
+--dataset ragtime # Uses UMBRELA prompt
+```
 
-2. **Auto-detection**: If `topic_format: auto` (default), the judge auto-detects by checking:
-   - If topics have `body` field → DRAGUN prompt
-   - Otherwise → UMBRELA prompt
+**Or manually set `topic_format` in workflow.yml** before running:
+```yaml
+qrels_settings:
+  topic_format: dragun  # or: rag, ragtime
 
-**Important**: The `topic_format` setting must be in **both** `qrels_settings` and `judge_settings` in workflow.yml:
+judge_settings:
+  topic_format: dragun  # or: rag, ragtime
+```
+
+**Important**: The `topic_format` setting must be in **both** `qrels_settings` and `judge_settings`:
 - `qrels_settings.topic_format` controls which prompt is used (UMBRELA vs DRAGUN)
 - `judge_settings.topic_format` controls how queries are extracted from topics
+
+**Note**: Auto-detection has been removed. The judge will raise an error if `topic_format` is not explicitly set.
 
 ## Customizing the Judge
 

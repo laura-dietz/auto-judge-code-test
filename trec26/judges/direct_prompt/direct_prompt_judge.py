@@ -168,10 +168,10 @@ class DirectPromptJudge(AutoJudge):
 
     def extract_query(self, topic) -> str:
         """
-        Extract query text from topic based on format.
-        Supports: RAGTIME (title+problem+background), DRAGUN (body), RAG (title), auto-detect
+        Extract query text from topic based on explicit format.
+        Supports: RAGTIME (title+problem+background), DRAGUN (body), RAG (title)
+        REQUIRES explicit topic_format setting - no auto-detection.
         """
-        # Explicit format override
         if self.topic_format == "dragun":
             return getattr(topic, "body", topic.title)
         elif self.topic_format == "rag":
@@ -179,15 +179,11 @@ class DirectPromptJudge(AutoJudge):
         elif self.topic_format == "ragtime":
             parts = [topic.title, getattr(topic, "problem_statement", ""), getattr(topic, "background", "")]
             return ". ".join(p for p in parts if p).strip()
-
-        # Auto-detect format
-        if hasattr(topic, 'body') and topic.body:  # DRAGUN
-            return topic.body
-        elif hasattr(topic, 'problem_statement'):  # RAGTIME
-            parts = [topic.title, getattr(topic, "problem_statement", ""), getattr(topic, "background", "")]
-            return ". ".join(p for p in parts if p).strip()
-        else:  # RAG (simple title-only)
-            return topic.title
+        else:
+            raise ValueError(
+                f"topic_format must be explicitly set to 'rag', 'ragtime', or 'dragun'. "
+                f"Got: '{self.topic_format}'. Set --dataset flag or update workflow.yml"
+            )
 
     def create_qrels(
         self,
@@ -199,8 +195,19 @@ class DirectPromptJudge(AutoJudge):
     ) -> Optional[Qrels]:
         """Grade each passage using UMBRELA."""
 
-        # Get topic_format from kwargs (qrels_settings) or fall back to self.topic_format
-        topic_format = kwargs.get("topic_format", self.topic_format)
+        # Get topic_format from kwargs (qrels_settings)
+        # MUST be explicitly set - no auto-detection
+        topic_format = kwargs.get("topic_format", None)
+
+        # Debug: print what we received
+        print(f"[DEBUG] kwargs keys: {kwargs.keys()}")
+        print(f"[DEBUG] topic_format from kwargs: {topic_format}")
+        print(f"[DEBUG] self.topic_format: {self.topic_format}")
+
+        # Use self.topic_format as fallback if not in kwargs
+        if topic_format is None:
+            topic_format = self.topic_format
+            print(f"[DEBUG] Using self.topic_format: {topic_format}")
 
         # Build topic lookup
         topic_dict = {req.request_id: req for req in rag_topics}
@@ -221,29 +228,19 @@ class DirectPromptJudge(AutoJudge):
                 query=query,
             ))
 
-
-        # Determine which prompt to use based on explicit topic_format setting
-        # (same logic as extract_query: explicit first, then auto-detect)
+        # Determine which prompt to use - EXPLICIT ONLY, no auto-detection
         if topic_format == "dragun":
-            # Explicit DRAGUN dataset
             prompt_class = DragunPrompt
             prompt_name = "DRAGUN"
         elif topic_format in ["rag", "ragtime"]:
-            # Explicit RAG or RAGTIME dataset
             prompt_class = UmbrelaPrompt
             prompt_name = "UMBRELA"
-        else:  # topic_format == "auto"
-            # Auto-detect only when topic_format is "auto"
-            # Check if any topic has 'body' field (DRAGUN indicator)
-            has_body = any(hasattr(topic_dict.get(g.topic_id), 'body') and
-                          topic_dict.get(g.topic_id).body
-                          for g in grades if g.topic_id in topic_dict)
-            if has_body:
-                prompt_class = DragunPrompt
-                prompt_name = "DRAGUN (auto-detected)"
-            else:
-                prompt_class = UmbrelaPrompt
-                prompt_name = "UMBRELA (auto-detected)"
+        else:
+            # If topic_format is "auto" or anything else, raise an error
+            raise ValueError(
+                f"topic_format must be explicitly set to 'rag', 'ragtime', or 'dragun'. "
+                f"Got: '{topic_format}'. Set --dataset flag or update workflow.yml"
+            )
 
         print(f"Grading {len(grades)} passages with {prompt_name}...")
 
