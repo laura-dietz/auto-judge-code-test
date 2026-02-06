@@ -172,7 +172,7 @@ def main():
 
     # Auto-generate debug log name if --name is provided but --debug-log is not
     if args.name and not args.debug_log:
-        args.debug_log = f"{args.name}.log"
+        args.debug_log = str(Path(args.out_dir) / f"{args.name}.log")
 
     # Resolve debug log path to absolute if provided
     if args.debug_log:

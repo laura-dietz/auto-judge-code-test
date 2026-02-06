@@ -198,6 +198,8 @@ python run_judge.py \
   --name test_run
 ```
 
+**Note**: When using `--name`, debug logs are automatically created as `{name}.jsonl` in the `--out-dir` directory.
+
 ## Output Formats
 
 ### Qrels (default.qrels)
@@ -221,9 +223,9 @@ my_best_run_01 all AVG_GRADE 1.75
 my_best_run_01 all IS_RELEVANT 0.5
 ```
 
-### Debug Logs (when using --debug-log)
+### Debug Logs (when using --name or --debug-log)
 
-JSON Lines format with structured logging:
+JSON Lines format with structured logging (automatically created in `--out-dir` when using `--name`):
 
 ```jsonl
 {"event": "session_start", "timestamp": "2026-02-06T...", "message": "Direct Prompt Judge Debug Session Started"}

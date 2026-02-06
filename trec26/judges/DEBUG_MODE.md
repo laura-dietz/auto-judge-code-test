@@ -59,7 +59,7 @@ python run_judge.py \
 
 **Notes**:
 - The `--use-env-llm` flag creates the LLM config from environment variables instead of using `llm-config.yml`
-- The `--name` flag names your output files (e.g., `ragtime_debug.qrels`) and auto-generates debug log
+- The `--name` flag names your output files (e.g., `ragtime_debug.qrels`) and auto-generates debug log in `--out-dir`
 - The `--dataset` flag explicitly sets which prompt to use (UMBRELA for ragtime, DRAGUN for dragun)
 
 ## Examples for Each Dataset
@@ -160,10 +160,8 @@ debug_output/
 ├── ragtime_test.qrels       # Qrels (grades per response) - named via --name
 ├── ragtime_test.leaderboard.txt  # Leaderboard results
 ├── ragtime_test.judgment.json    # Judgment data (JSON)
-└── ragtime_test.config.yml       # Run configuration
-
-# Plus debug log if --name was used
-ragtime_test.jsonl           # Debug log (auto-generated from --name)
+├── ragtime_test.config.yml       # Run configuration
+└── ragtime_test.jsonl       # Debug log (auto-generated from --name)
 ```
 
 ### Debug Log File
@@ -202,9 +200,9 @@ Example JSONL entries:
 - `--out-dir`: Where to save results
 - `--max-topics`: Limit to first N topics (optional)
 - `--max-runs`: Limit to first N runs (optional)
-- `--name`: Name for output files (replaces `{_name}` in workflow, auto-generates debug log name) (optional)
-- `--dataset`: Dataset type - `rag`, `ragtime`, or `dragun` - explicitly sets which prompt to use (optional, auto-detects if not specified)
-- `--debug-log`: Save debug info to JSONL file (optional, auto-generated from --name if --name is provided)
+- `--name`: Name for output files (replaces `{_name}` in workflow, auto-generates debug log as `{name}.jsonl` in `--out-dir`) (optional)
+- `--dataset`: Dataset type - `rag`, `ragtime`, or `dragun` - explicitly sets which prompt to use (required)
+- `--debug-log`: Save debug info to JSONL file (optional, auto-generated in `--out-dir` if --name is provided)
 
 ## Tips
 
