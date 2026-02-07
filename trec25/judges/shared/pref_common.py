@@ -19,9 +19,14 @@ from typing import Callable, Dict, List, Literal, Optional, Set, Tuple, Type
 import dspy
 from pydantic import BaseModel
 
-from autojudge_base import Report, Request
+from autojudge_base import LlmConfigBase, Report, Request
 from minima_llm import MinimaLlmConfig, OpenAIMinimaLlm
 from minima_llm.dspy_adapter import run_dspy_batch
+
+
+def _to_minima_config(llm_config: LlmConfigBase) -> MinimaLlmConfig:
+    """Convert LlmConfigBase to MinimaLlmConfig (env vars as base, raw dict overlaid)."""
+    return MinimaLlmConfig.from_dict(llm_config.raw or {})
 
 
 # =============================================================================
@@ -352,7 +357,7 @@ def compute_pref_aggregates(
 
 def run_pref_judgment_batch(
     grade_data: List[PrefJudgeData],
-    llm_config: MinimaLlmConfig,
+    llm_config: LlmConfigBase,
     signature: Type[dspy.Signature] = PrefJudgment,
     converter: Callable[[dspy.Prediction, PrefJudgeData], None] = None,
 ) -> List[PrefJudgeData]:
@@ -374,11 +379,12 @@ def run_pref_judgment_batch(
     if converter is None:
         converter = signature.convert_prompt_output
 
+    full_config = _to_minima_config(llm_config)
     return asyncio.run(
         run_dspy_batch(
             signature,
             grade_data,
             converter,
-            backend=OpenAIMinimaLlm(llm_config),
+            backend=OpenAIMinimaLlm(full_config),
         )
     )

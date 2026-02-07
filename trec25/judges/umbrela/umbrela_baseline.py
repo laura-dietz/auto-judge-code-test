@@ -13,6 +13,7 @@ from autojudge_base import (
     LeaderboardBuilder,
     LeaderboardSpec,
     LeaderboardVerification,
+    LlmConfigBase,
     MeasureSpec,
     NuggetBanksProtocol,
     Qrels,
@@ -26,6 +27,11 @@ from autojudge_base import (
 from autojudge_base.nugget_data import NuggetBanks
 from minima_llm import MinimaLlmConfig, OpenAIMinimaLlm
 from minima_llm.dspy_adapter import run_dspy_batch
+
+
+def _to_minima_config(llm_config: LlmConfigBase) -> MinimaLlmConfig:
+    """Convert LlmConfigBase to MinimaLlmConfig (env vars as base, raw dict overlaid)."""
+    return MinimaLlmConfig.from_dict(llm_config.raw or {})
 
 
 class UmbrelaAnnotation(BaseModel):
@@ -155,7 +161,7 @@ class UmbrelaJudge(AutoJudge):
         self,
         rag_responses: Sequence[Report],
         rag_topics: Sequence["Request"],
-        llm_config: MinimaLlmConfig,
+        llm_config: LlmConfigBase,
         nugget_banks: Optional[NuggetBanksProtocol] = None,
         **kwargs
     ) -> Optional[NuggetBanksProtocol]:
@@ -165,7 +171,7 @@ class UmbrelaJudge(AutoJudge):
         self,
         rag_responses: Sequence[Report],
         rag_topics: Sequence[Request],
-        llm_config: MinimaLlmConfig,
+        llm_config: LlmConfigBase,
         nugget_banks: Optional[NuggetBanksProtocol] = None,
         **kwargs
     ) -> Optional[Qrels]:
@@ -199,11 +205,12 @@ class UmbrelaJudge(AutoJudge):
         print("Debug in", "\n".join(str(p) for p in alignment_input_list[0:1]))
 
         # Execute with MinimaLLM backend using helper
+        full_config = _to_minima_config(llm_config)
         prompt_output = asyncio.run(run_dspy_batch(
             Umbrela,
             alignment_input_list,
             Umbrela.convert_output,
-            backend=OpenAIMinimaLlm(llm_config)
+            backend=OpenAIMinimaLlm(full_config)
         ))
         print("Debug out", "\n".join(str(p) for p in prompt_output[0:1]))
 
@@ -213,7 +220,7 @@ class UmbrelaJudge(AutoJudge):
         self,
         rag_responses: Sequence[Report],
         rag_topics: Sequence[Request],
-        llm_config: MinimaLlmConfig,
+        llm_config: LlmConfigBase,
         qrels: Optional[Qrels],
         nugget_banks: Optional[NuggetBanksProtocol] = None,
         **kwargs

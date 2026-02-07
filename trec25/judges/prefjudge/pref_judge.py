@@ -14,6 +14,7 @@ from autojudge_base import (
     Leaderboard,
     LeaderboardBuilder,
     LeaderboardSpec,
+    LlmConfigBase,
     MeasureSpec,
     NuggetBanksProtocol,
     Qrels,
@@ -22,7 +23,6 @@ from autojudge_base import (
     auto_judge_to_click_command,
 )
 from autojudge_base.nugget_data import NuggetBanks
-from minima_llm import MinimaLlmConfig
 
 # Import shared preference utilities
 from trec25.judges.shared.pref_common import (
@@ -117,18 +117,18 @@ class PrefJudge(AutoJudge):
         self,
         rag_responses: Sequence[Report],
         rag_topics: Sequence[Request],
-        llm_config: MinimaLlmConfig,
+        llm_config: LlmConfigBase,
         nugget_banks: Optional[NuggetBanksProtocol] = None,
         **kwargs
     ) -> Optional[Qrels]:
         """PrefJudge does not produce qrels."""
         return None
-    
+
     def judge(
         self,
         rag_responses: Sequence[Report],
         rag_topics: Sequence[Request],
-        llm_config: MinimaLlmConfig,
+        llm_config: LlmConfigBase,
         num_others: int,
         num_pivot: int,
         on_missing_evals: str,

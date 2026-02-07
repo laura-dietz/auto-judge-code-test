@@ -22,6 +22,7 @@ from autojudge_base import (
     Leaderboard,
     LeaderboardBuilder,
     LeaderboardSpec,
+    LlmConfigBase,
     MeasureSpec,
     NuggetBanksProtocol,
     Qrels,
@@ -34,6 +35,11 @@ from autojudge_base import (
 )
 from autojudge_base.nugget_data import NuggetBanks
 from minima_llm import MinimaLlmConfig
+
+
+def _to_minima_config(llm_config: LlmConfigBase) -> MinimaLlmConfig:
+    """Convert LlmConfigBase to MinimaLlmConfig (env vars as base, raw dict overlaid)."""
+    return MinimaLlmConfig.from_dict(llm_config.raw or {})
 
 
 # Import shared utilities
@@ -380,7 +386,7 @@ def build_response_lookups(
 def run_preference_phase(
     rag_topic_dict: Dict[str, Request],
     rag_response_by_topic: Dict[str, List[Report]],
-    llm_config: MinimaLlmConfig,
+    llm_config: LlmConfigBase,
     num_pivot: int,
     num_others: int,
     no_dupes: bool,
@@ -575,7 +581,7 @@ class PrefNuggetJudge(AutoJudge):
         self,
         rag_responses: Sequence[Report],
         rag_topics: Sequence[Request],
-        llm_config: MinimaLlmConfig,
+        llm_config: LlmConfigBase,
         nugget_banks: Optional[NuggetBanksProtocol] = None,
         **kwargs
     ) -> Optional[Qrels]:
@@ -602,7 +608,7 @@ class PrefNuggetJudge(AutoJudge):
         self,
         rag_responses: Sequence[Report],
         rag_topics: Sequence[Request],
-        llm_config: MinimaLlmConfig,
+        llm_config: LlmConfigBase,
         pref_judge:Literal['must_decide','ties_allowed'],
         iterative_nuggets:bool,
         max_nuggets_per_topic: int,
@@ -721,11 +727,12 @@ class PrefNuggetJudge(AutoJudge):
                     data.given_exam_questions = tracker.questions(topic_id)
 
                 # Run LLM extraction
+                full_config = _to_minima_config(llm_config)
                 extraction_chunk = run_dspy_batch_generic(
                     extraction_chunk,
                     IterativeExtractDifferentiatingNuggets,
                     convert_output,
-                    llm_config,
+                    full_config,
                 )
 
                 for data in extraction_chunk:
@@ -744,11 +751,12 @@ class PrefNuggetJudge(AutoJudge):
 
         else:
             # Non-iterative: single batch extraction
+            full_config = _to_minima_config(llm_config)
             extraction_result_data = run_dspy_batch_generic(
                 extraction_data,
                 ExtractDifferentiatingNuggets,
                 convert_output,
-                llm_config,
+                full_config,
             )
             print("PrefNuggetJudge: Finished extracting nuggets")
         
@@ -761,7 +769,7 @@ class PrefNuggetJudge(AutoJudge):
         self,
         rag_responses: Sequence[Report],
         rag_topics: Sequence[Request],
-        llm_config: MinimaLlmConfig,
+        llm_config: LlmConfigBase,
         nugget_banks: Optional[NuggetBanksProtocol] = None,
         grade_threshold: int = 4,
         on_missing_evals: str = "fix_aggregate",
@@ -786,11 +794,12 @@ class PrefNuggetJudge(AutoJudge):
 
         # Run LLM grading using shared utility
         print("PrefNuggetJudge: Grading responses...")
+        full_config = _to_minima_config(llm_config)
         grade_data = run_dspy_batch_generic(
             grade_data,
             GradeNuggetAnswer,
             GradeNuggetAnswer.convert_prompt_output,
-            llm_config,
+            full_config,
         )
         print("PrefNuggetJudge: Finished grading")
 

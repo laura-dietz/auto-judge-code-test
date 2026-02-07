@@ -14,6 +14,7 @@ from autojudge_base import (
     LeaderboardBuilder,
     LeaderboardSpec,
     LeaderboardVerification,
+    LlmConfigBase,
     MeasureSpec,
     NuggetBanksProtocol,
     Qrels,
@@ -22,7 +23,6 @@ from autojudge_base import (
     auto_judge_to_click_command,
 )
 from autojudge_base.nugget_data import NuggetBanks
-from minima_llm import MinimaLlmConfig
 
 
 def rand(seed: str) -> float:
@@ -43,7 +43,7 @@ class NaiveJudge(AutoJudge):
         self,
         rag_responses: Sequence["Report"],
         rag_topics: Sequence["Request"],
-        llm_config: MinimaLlmConfig,
+        llm_config: LlmConfigBase,
         nugget_banks: Optional[NuggetBanksProtocol] = None,
         **kwargs
     ) -> Optional[NuggetBanksProtocol]:
@@ -51,7 +51,7 @@ class NaiveJudge(AutoJudge):
 
     def judge(self, rag_responses: Sequence["Report"]
               , rag_topics: Sequence["Request"]
-              , llm_config: MinimaLlmConfig
+              , llm_config: LlmConfigBase
               , nugget_banks: Optional[NuggetBanksProtocol] = None
               , **kwargs) -> "Leaderboard":
         ret = LeaderboardBuilder(NAIVE_LEADERBOARD_SPEC)

@@ -9,10 +9,9 @@ import pytest
 from typing import List
 from unittest.mock import patch
 
-from autojudge_base import Request, Report
+from autojudge_base import Request, Report, LlmConfigBase
 from autojudge_base.report import ReportMetaData, Rag24ReportSentence
 from autojudge_base.nugget_data import NuggetBanks
-from minima_llm import MinimaLlmConfig
 
 from trec25.judges.rubric.rubric_autojudge import RubricJudge, NuggetGenerationData
 from trec25.judges.prefnugget.prefnugget_judge import PrefNuggetJudge
@@ -24,9 +23,9 @@ from trec25.judges.prefnugget.prefnugget_judge import PrefNuggetJudge
 
 
 @pytest.fixture
-def llm_config() -> MinimaLlmConfig:
+def llm_config() -> LlmConfigBase:
     """Minimal LLM config for mocked tests."""
-    return MinimaLlmConfig.from_env()
+    return LlmConfigBase.from_env()
 
 
 @pytest.fixture

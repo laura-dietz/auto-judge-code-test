@@ -17,6 +17,7 @@ from autojudge_base import (
     Leaderboard,
     LeaderboardBuilder,
     LeaderboardSpec,
+    LlmConfigBase,
     MeasureSpec,
     NuggetBanksProtocol,
     Qrels,
@@ -29,6 +30,11 @@ from autojudge_base import (
 from autojudge_base.nugget_data import NuggetBanks, NuggetQuestion
 from autojudge_base.leaderboard.leaderboard import OnMissing
 from minima_llm import MinimaLlmConfig
+
+
+def _to_minima_config(llm_config: LlmConfigBase) -> MinimaLlmConfig:
+    """Convert LlmConfigBase to MinimaLlmConfig (env vars as base, raw dict overlaid)."""
+    return MinimaLlmConfig.from_dict(llm_config.raw or {})
 
 # Import shared utilities
 from minima_llm.dspy_adapter import run_dspy_batch_generic
@@ -330,7 +336,7 @@ class RubricJudge(AutoJudge):
         self,
         prompt: str,
         rag_topics: Sequence[Request],
-        llm_config: MinimaLlmConfig,
+        llm_config: LlmConfigBase,
         nugget_banks: Optional[NuggetBanksProtocol] = None,
         rag_responses: Optional[Sequence[Report]] = None,
         max_nuggets_per_topic: Optional[int] = None,
@@ -378,11 +384,12 @@ class RubricJudge(AutoJudge):
         else:
             raise RuntimeError(f"Prompt not defined: {prompt}")    
         
+        full_config = _to_minima_config(llm_config)
         gen_data = run_dspy_batch_generic(
             gen_data,
             prompt_sig,
             convert_gen_output,
-            llm_config,
+            full_config,
         )
         print(f"Rubric: Finished generating questions")
 
@@ -401,7 +408,7 @@ class RubricJudge(AutoJudge):
         self,
         rag_responses: Sequence[Report],
         rag_topics: Sequence[Request],
-        llm_config: MinimaLlmConfig,
+        llm_config: LlmConfigBase,
         nugget_banks: Optional[NuggetBanksProtocol] = None,
         **kwargs
     ) -> Optional[Qrels]:
@@ -412,7 +419,7 @@ class RubricJudge(AutoJudge):
         self,
         rag_responses: Sequence[Report],
         rag_topics: Sequence[Request],
-        llm_config: MinimaLlmConfig,
+        llm_config: LlmConfigBase,
         nugget_banks: Optional[NuggetBanksProtocol] = None,
         grade_threshold: int = 3,
         filebase: str = "rubric",
@@ -484,11 +491,12 @@ class RubricJudge(AutoJudge):
         # Run LLM grading
         print(f"Rubric: Grading responses...")
         if grade_data:
+            full_config = _to_minima_config(llm_config)
             grade_data = run_dspy_batch_generic(
                 grade_data,
                 GradeNuggetAnswer,
                 convert_grade_output,
-                llm_config,
+                full_config,
             )
         print(f"Rubric: Finished grading")
 

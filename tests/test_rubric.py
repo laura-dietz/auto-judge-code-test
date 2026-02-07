@@ -14,7 +14,7 @@ import pytest
 from pathlib import Path
 from typing import List, Optional
 
-from autojudge_base import Request, Report, Leaderboard, Qrels
+from autojudge_base import Request, Report, Leaderboard, Qrels, LlmConfigBase
 from autojudge_base.nugget_data import (
     NuggetBanks,
     NuggetBanksVerification,
@@ -29,7 +29,6 @@ from autojudge_base.qrels.qrels import (
     QrelsVerificationError,
 )
 from autojudge_base.report import ReportMetaData, Rag24ReportSentence
-from minima_llm import MinimaLlmConfig
 
 
 # =============================================================================
@@ -40,14 +39,13 @@ RUBRIC_JUDGE_DIR = Path(__file__).parent.parent / "trec25" / "judges" / "rubric"
 
 
 @pytest.fixture
-def llm_config() -> MinimaLlmConfig:
+def llm_config() -> LlmConfigBase:
     """Load LLM config from judge's config file or environment."""
     config_path = RUBRIC_JUDGE_DIR / "llm-config.yml"
-    try:
-        return MinimaLlmConfig.from_yaml(config_path)
-    except (FileNotFoundError, ValueError):
-        # Fall back to environment variables
-        return MinimaLlmConfig.from_env()
+    if config_path.exists():
+        return LlmConfigBase.from_yaml(config_path)
+    # Fall back to environment variables
+    return LlmConfigBase.from_env()
 
 
 @pytest.fixture
@@ -125,7 +123,7 @@ class AutoJudgeTestDriver:
         auto_judge,
         rag_topics: List[Request],
         rag_responses: List[Report],
-        llm_config: MinimaLlmConfig,
+        llm_config: LlmConfigBase,
         **kwargs,
     ):
         self.auto_judge = auto_judge
