@@ -1,0 +1,52 @@
+judges:
+  
+  tmp-iter20bothties-few.eval:
+    name: pref best
+    nugget: pairwise
+    preference: best
+    graded: response
+
+  tmp-iter20bothties-few-random-pairs.eval:
+    name: pref random
+    nugget: pairwise
+    preference: random
+    graded: response
+    
+  tmp-iter20bothties-few-docs.eval:
+    name: pref docs
+    nugget: pairwise
+    preference: random
+    graded: docs
+
+  tmp-iter20bothties-few-docs-random-pairs.eval:
+    name: pref random docs
+    nugget: pairwise
+    preference: random
+    graded: docs
+
+
+  tmp-ground-ground-response.eval:
+    name: grounded best
+    nugget: grounded
+    preference: best
+    graded: response
+
+  tmp-ground-ground-random-response.eval:
+    name: grounded random
+    nugget: grounded
+    preference: random
+    graded: response
+
+  tmp-prefnugget-rubric-response.eval:
+    name: rubric
+    nugget: rubric
+    preference: na
+    graded: response
+
+
+  tmp-prefnugget-rubric-docs.eval:
+    name: rubric docs
+    nugget: rubric
+    preference: na
+    graded: docs
+
