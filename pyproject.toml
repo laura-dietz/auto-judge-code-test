@@ -33,6 +33,7 @@ dependencies = [
     "nltk",
     "autojudge-base",
     "minima-llm",
+    "tabulate",
 ]
 
 [project.optional-dependencies]
