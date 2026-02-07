@@ -16,6 +16,7 @@ classifiers = [
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
     "License :: OSI Approved :: MIT License",
     "Operating System :: OS Independent",
     "Intended Audience :: Science/Research",
@@ -75,3 +76,10 @@ line-length = 120
 [tool.ruff.lint]
 select = ["E", "F", "W"]
 ignore = ["E203"]
+
+[tool.uv.workspace]
+members = ["auto-judge-base", "minima-llm", "auto-judge-starterkit"]
+
+[tool.uv.sources]
+autojudge-base = { workspace = true }
+minima-llm = { workspace = true }

@@ -117,7 +117,8 @@ def persist_output(df: pd.DataFrame, output: Path, out_format: str = "jsonl") ->
     help="Correlation method(s) to compute (e.g., kendall, kendall@15). Repeatable. If omitted, computes all.",
 )
 @click.option(
-    "--topic-id",
+    "--topic",
+    "topic_id",
     type=str,
     multiple=True,
     help="Topic ID(s) to use for evaluation. Repeatable. If omitted, uses truth's topics.",
@@ -126,7 +127,7 @@ def persist_output(df: pd.DataFrame, output: Path, out_format: str = "jsonl") ->
     "--topic-ids-from-eval",
     is_flag=True,
     default=False,
-    help="Derive topic IDs from the union of topics in eval leaderboards (ignores --topic-id).",
+    help="Derive topic IDs from the union of topics in eval leaderboards (ignores --topic).",
 )
 @click.option(
     "--only-shared-topics/--all-topics",
@@ -134,7 +135,8 @@ def persist_output(df: pd.DataFrame, output: Path, out_format: str = "jsonl") ->
          "Default (--all-topics) uses provided aggregates without topic filtering.",
 )
 @click.option(
-    "--run-id",
+    "--run",
+    "run_id",
     type=str,
     multiple=True,
     help="Run ID(s) to include in evaluation. Repeatable. If omitted, uses all runs.",

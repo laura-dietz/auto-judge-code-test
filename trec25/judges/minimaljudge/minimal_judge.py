@@ -19,6 +19,7 @@ from autojudge_base import (
     Leaderboard,
     LeaderboardBuilder,
     LeaderboardSpec,
+    LlmConfigProtocol,
     MeasureSpec,
     NuggetBanksProtocol,
     Qrels,
@@ -33,7 +34,7 @@ from autojudge_base.nugget_data import (
     NuggetBank,
     NuggetQuestion,
 )
-from minima_llm import MinimaLlmConfig
+# LlmConfigProtocol imported from autojudge_base above
 
 
 # =============================================================================
@@ -87,7 +88,7 @@ class MinimalNuggetCreator:
         self,
         rag_responses: Iterable[Report],
         rag_topics: Sequence[Request],
-        llm_config: MinimaLlmConfig,
+        llm_config: LlmConfigProtocol,
         nugget_banks: Optional[NuggetBanksProtocol] = None,
         # Settings from workflow.yml nugget_settings
         questions_per_topic: int = 3,
@@ -137,7 +138,7 @@ class MinimalQrelsCreator:
         self,
         rag_responses: Iterable[Report],
         rag_topics: Sequence[Request],
-        llm_config: MinimaLlmConfig,
+        llm_config: LlmConfigProtocol,
         nugget_banks: Optional[NuggetBanksProtocol] = None,
         # Settings from workflow.yml qrels_settings
         grade_range: tuple = (0, 3),
@@ -185,7 +186,7 @@ class MinimalLeaderboardJudge:
         self,
         rag_responses: Iterable[Report],
         rag_topics: Sequence[Request],
-        llm_config: MinimaLlmConfig,
+        llm_config: LlmConfigProtocol,
         nugget_banks: Optional[NuggetBanksProtocol] = None,
         qrels: Optional[Qrels] = None,
         # Settings from workflow.yml judge_settings
