@@ -77,6 +77,9 @@ line-length = 120
 select = ["E", "F", "W"]
 ignore = ["E203"]
 
+[tool.uv]
+default-extras = ["dspy", "test"]
+
 [tool.uv.workspace]
 members = ["auto-judge-base", "minima-llm", "auto-judge-starterkit"]
 
