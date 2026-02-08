@@ -249,14 +249,27 @@ class CitationJudge(AutoJudge):
         # Log inputs if debug enabled
         if self.debug_logger.enabled:
             for assessment in assessments:
+                log_data = {
+                    "sentence": assessment.sentence,
+                    "citation_id": assessment.citation_id,
+                    "citation_exists": assessment.citation_exists,
+                    "document_length": len(assessment.document),
+                }
+
+                # Include full prompt for existing citations (similar to direct_prompt_judge)
+                if assessment.citation_exists:
+                    # Build complete prompt as it would be sent to LLM
+                    template = AttestationPrompt.__doc__
+                    complete_prompt = template.format(
+                        sentence=assessment.sentence,
+                        document=assessment.document
+                    )
+                    log_data["prompt_template"] = complete_prompt
+                    log_data["document_text"] = assessment.document
+
                 self.debug_logger.log(
                     f"CITATION_INPUT [{assessment.run_id} / {assessment.topic_id}]",
-                    {
-                        "sentence": assessment.sentence,
-                        "citation_id": assessment.citation_id,
-                        "citation_exists": assessment.citation_exists,
-                        "document_length": len(assessment.document),
-                    }
+                    log_data
                 )
 
         # Run attestation checks via DSPy (only for existing citations)
