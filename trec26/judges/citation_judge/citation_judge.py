@@ -112,8 +112,9 @@ class AttestationPrompt(dspy.Signature):
 # Qrels spec for citation assessments
 CITATION_QRELS = QrelsSpec(
     topic_id=lambda x: x.topic_id,
-    doc_id=lambda x: doc_id_md5(f"{x.sentence}_{x.citation_id}"),
+    doc_id=lambda x: doc_id_md5(f"{x.run_id}_{x.sentence}_{x.citation_id}"),
     grade=lambda x: 1.0 if (x.citation_exists and x.citation_supports) else 0.0,
+    on_duplicate="keep_max"  # Keep highest grade if duplicate entries
 )
 
 # Leaderboard spec for citation metrics
