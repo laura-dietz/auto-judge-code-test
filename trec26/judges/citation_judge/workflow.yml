@@ -1,0 +1,32 @@
+# Citation Judge Workflow Configuration
+
+# Judge class for dynamic loading
+judge_class: "trec26.judges.citation_judge.citation_judge.CitationJudge"
+
+# Lifecycle: create qrels → judge
+create_nuggets: false
+create_qrels: true   # LLM validates citations using Auto-ARGUE
+judge: true          # Then aggregates to leaderboard
+
+# Data flow
+judge_uses_qrels: true   # Judge needs qrels from create_qrels()
+judge_uses_nuggets: false
+qrels_uses_nuggets: false
+
+# Settings
+settings:
+  filebase: "{_name}"
+
+# Qrels creation settings
+# NOTE: topic_format controls query extraction
+qrels_settings:
+  topic_format: auto  # auto, rag, ragtime, or dragun
+  filebase: "{_name}"
+
+# Judge settings
+judge_settings:
+  topic_format: auto  # auto, rag, ragtime, or dragun
+  filebase: "{_name}"
+
+# No variants for now - citation validation is binary
+variants: {}

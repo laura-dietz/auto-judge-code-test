@@ -62,6 +62,39 @@ python run_judge.py \
 - The `--name` flag names your output files (e.g., `ragtime_debug.qrels`) and auto-generates debug log in `--out-dir`
 - The `--dataset` flag explicitly sets which prompt to use (UMBRELA for ragtime, DRAGUN for dragun)
 
+### Test Citation Judge (With LLM - Auto-ARGUE)
+
+```bash
+cd trec26/judges
+
+# Set environment variables for your LLM provider
+export OPENAI_BASE_URL="https://api.together.xyz/v1"
+export OPENAI_MODEL="meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo"
+export OPENAI_API_KEY="your-key"
+
+# Use --use-env-llm to pull config from environment variables
+python run_judge.py \
+  --judge citation \
+  --rag-topics ../../dataset/ragtime-export/RAGTIME-data/ragtime25_main_eng.jsonl \
+  --rag-responses ../../dataset/ragtime-export/runs/repgen/ \
+  --workflow citation_judge/workflow.yml \
+  --use-env-llm \
+  --out-dir ./debug_output/ \
+  --max-topics 2 \
+  --max-runs 1 \
+  --name ragtime_citations \
+  --dataset ragtime
+```
+
+**Result**: Validates citations for 2 topics × 1 run using Auto-ARGUE attestation prompt
+
+**Cost**: ~$0.002 per citation (varies with number of citations)
+
+**Notes**:
+- Citation judge validates that cited documents actually support the claims
+- Uses Auto-ARGUE attestation prompt for each citation
+- Reports metrics: CITATION_ACCURACY, CITATION_SUPPORT, AVG_CITATIONS, PERFECT_CITATIONS
+
 ## Examples for Each Dataset
 
 ### RAGTIME (Test 5 topics, 3 runs)
@@ -89,6 +122,19 @@ python run_judge.py \
   --max-topics 5 \
   --max-runs 3 \
   --name ragtime_llm \
+  --dataset ragtime
+
+# With citation judge (uses Auto-ARGUE attestation)
+python run_judge.py \
+  --judge citation \
+  --rag-topics ../../dataset/ragtime-export/RAGTIME-data/ragtime25_main_eng.jsonl \
+  --rag-responses ../../dataset/ragtime-export/runs/repgen/ \
+  --workflow citation_judge/workflow.yml \
+  --use-env-llm \
+  --out-dir ./ragtime_test/ \
+  --max-topics 5 \
+  --max-runs 3 \
+  --name ragtime_citations \
   --dataset ragtime
 ```
 
@@ -118,6 +164,19 @@ python run_judge.py \
   --max-runs 3 \
   --name rag_llm \
   --dataset rag
+
+# With citation judge (uses Auto-ARGUE attestation)
+python run_judge.py \
+  --judge citation \
+  --rag-topics ../../dataset/rag-export/trec_rag_2025_queries.jsonl \
+  --rag-responses ../../dataset/rag-export/runs/generation/ \
+  --workflow citation_judge/workflow.yml \
+  --use-env-llm \
+  --out-dir ./rag_test/ \
+  --max-topics 5 \
+  --max-runs 3 \
+  --name rag_citations \
+  --dataset rag
 ```
 
 ### DRAGUN (Test 3 topics, 2 runs)
@@ -145,6 +204,19 @@ python run_judge.py \
   --max-topics 3 \
   --max-runs 2 \
   --name dragun_llm \
+  --dataset dragun
+
+# With citation judge (uses Auto-ARGUE attestation)
+python run_judge.py \
+  --judge citation \
+  --rag-topics ../../dataset/dragun-export/trec-2025-dragun-topics.jsonl \
+  --rag-responses ../../dataset/dragun-export/runs/repgen/ \
+  --workflow citation_judge/workflow.yml \
+  --use-env-llm \
+  --out-dir ./dragun_test/ \
+  --max-topics 3 \
+  --max-runs 2 \
+  --name dragun_citations \
   --dataset dragun
 ```
 
@@ -191,12 +263,12 @@ Example JSONL entries:
 
 ## Arguments
 
-- `--judge`: Which judge (`non_llm` or `direct_prompt`)
+- `--judge`: Which judge (`non_llm`, `direct_prompt`, or `citation`)
 - `--rag-topics`: Path to topics file
 - `--rag-responses`: Path to runs directory
 - `--workflow`: Workflow config file
-- `--llm-config`: LLM config file (direct_prompt only, optional if using --use-env-llm)
-- `--use-env-llm`: Create LLM config from environment variables (direct_prompt only)
+- `--llm-config`: LLM config file (direct_prompt and citation only, optional if using --use-env-llm)
+- `--use-env-llm`: Create LLM config from environment variables (direct_prompt and citation only)
 - `--out-dir`: Where to save results
 - `--max-topics`: Limit to first N topics (optional)
 - `--max-runs`: Limit to first N runs (optional)

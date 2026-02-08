@@ -144,7 +144,7 @@ def create_llm_config_from_env(output_file):
 
 def main():
     parser = argparse.ArgumentParser(description='Run judge with limits and debug logging')
-    parser.add_argument('--judge', required=True, choices=['non_llm', 'direct_prompt'],
+    parser.add_argument('--judge', required=True, choices=['non_llm', 'direct_prompt', 'citation'],
                        help='Which judge to run')
     parser.add_argument('--rag-topics', required=True,
                        help='Path to topics file')
@@ -240,11 +240,35 @@ def main():
             '--rag-responses', str(runs_dir.resolve()),
             '--out-dir', str(out_dir_path),
         ]
-    else:  # direct_prompt
+    elif args.judge == 'direct_prompt':
         judge_dir = Path(__file__).parent / "direct_prompt"
         judge_script = judge_dir / "direct_prompt_judge.py"
 
         # Determine LLM config path
+        if args.use_env_llm:
+            # Create LLM config from environment variables
+            llm_config_path = temp_dir / 'llm-config-env.yml'
+            print(f"Creating LLM config from environment variables...")
+            create_llm_config_from_env(llm_config_path)
+            print(f"  Config: {llm_config_path}")
+        elif args.llm_config:
+            llm_config_path = Path(args.llm_config).resolve()
+        else:
+            llm_config_path = judge_dir / 'llm-config.yml'
+
+        cmd = [
+            sys.executable, str(judge_script), 'run',
+            '--rag-responses', str(runs_dir.resolve()),
+            '--rag-topics', str(topics_file.resolve()),
+            '--workflow', str(workflow_path),
+            '--llm-config', str(llm_config_path.resolve()),
+            '--out-dir', str(out_dir_path),
+        ]
+    else:  # citation
+        judge_dir = Path(__file__).parent / "citation_judge"
+        judge_script = judge_dir / "citation_judge.py"
+
+        # Determine LLM config path (same logic as direct_prompt)
         if args.use_env_llm:
             # Create LLM config from environment variables
             llm_config_path = temp_dir / 'llm-config-env.yml'
@@ -274,6 +298,9 @@ def main():
     if args.judge == 'direct_prompt' and args.debug_log:
         # Pass debug log path to direct prompt judge via environment variable (already absolute)
         env['DIRECT_PROMPT_DEBUG_LOG'] = args.debug_log
+    elif args.judge == 'citation' and args.debug_log:
+        # Pass debug log path to citation judge via environment variable (already absolute)
+        env['CITATION_DEBUG_LOG'] = args.debug_log
 
     result = subprocess.run(cmd, cwd=judge_dir, env=env)
 
