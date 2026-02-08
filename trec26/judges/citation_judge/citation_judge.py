@@ -46,7 +46,7 @@ class CitationAssessment(BaseModel):
     topic_id: str
     sentence: str
     citation_id: str
-    document: str  # Changed from document_text to match AttestationPrompt
+    document: str  
 
     # LLM outputs (filled after assessment)
     citation_exists: Optional[bool] = None  # Does citation exist in documents?
@@ -94,6 +94,26 @@ class AttestationPrompt(dspy.Signature):
         Document: Recent studies have revealed significant changes in global climate patterns, including a 15% increase in global temperatures. Scientists attribute this rise to factors such as greenhouse gas emissions and deforestation.
         Answer (YES/NO): YES
 
+        4. Sentence: Water boils at 100 degrees Celsius at sea level.
+        Document: The boiling point of a liquid depends on factors such as atmospheric pressure and altitude. In high-altitude regions, liquids can reach their boiling point at lower temperatures due to reduced air pressure. Different substances have varying boiling points based on their chemical properties and external conditions.
+        Answer (YES/NO): NO
+
+        5. Sentence: The new treatment method reduced recovery time by 40%.
+        Document: A recent medical study demonstrated that the Accelerated Healing Therapy (AHT) significantly improved patient outcomes, leading to a 40% reduction in recovery time. Researchers found that patients receiving AHT healed faster compared to those undergoing traditional methods. These findings suggest that AHT could enhance efficiency in medical care and improve overall patient well-being.
+        Answer (YES/NO): YES
+
+        6. Sentence: Researchers have identified three key factors affecting climate change.
+        Document: Researchers have identified three key factors affecting climate change: greenhouse gas emissions, deforestation, and industrial activities. These elements contribute to rising global temperatures, extreme weather patterns, and environmental imbalances. Addressing these factors is crucial for developing effective strategies to mitigate climate change and protect the planet.
+        Answer (YES/NO): YES
+
+        7. Sentence: The algorithm outperforms all existing methods on benchmark datasets.
+        Document: The newly developed NexusNet algorithm outperforms all existing methods on benchmark datasets, demonstrating superior accuracy and efficiency. Comparative testing shows that NexusNet achieves higher precision while maintaining faster processing times. These results highlight its potential for widespread application in data analysis and machine learning tasks.
+        Answer (YES/NO): YES
+
+        8. Sentence: The experiment was conducted in a controlled laboratory environment.
+        Document: The study was carried out in a natural setting, allowing researchers to observe real-world conditions. Participants were exposed to everyday variables, providing a more authentic representation of how the subject interacts in typical environments. This approach aimed to enhance the relevance and applicability of the findings.
+        Answer (YES/NO): NO             
+        
         Sentence: {sentence}
         Document: {document}
         Answer (YES/NO):
