@@ -34,6 +34,7 @@ dependencies = [
     "autojudge-base",
     "minima-llm",
     "tabulate",
+    "matplotlib",
 ]
 
 [project.optional-dependencies]

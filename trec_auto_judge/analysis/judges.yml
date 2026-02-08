@@ -15,7 +15,7 @@ judges:
   tmp-iter20bothties-few-docs.eval:
     name: pref docs
     nugget: pairwise
-    preference: random
+    preference: best
     graded: docs
 
   tmp-iter20bothties-few-docs-random-pairs.eval:

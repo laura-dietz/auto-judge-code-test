@@ -13,7 +13,10 @@ Usage:
 
 import click
 import yaml
+import numpy as np
 import pandas as pd
+import matplotlib
+import matplotlib.pyplot as plt
 from pathlib import Path
 from typing import Optional, Sequence
 
@@ -24,7 +27,6 @@ BASE_META_COLS = ["Judge", "Dataset", "TruthMeasure", "EvalMeasure"]
 
 def get_meta_columns(df: pd.DataFrame) -> list[str]:
     """Get all non-metric columns present in df."""
-    metric_types = (int, float)
     meta = []
     for c in df.columns:
         if c in BASE_META_COLS:
@@ -325,6 +327,249 @@ def _pivot_measures_table(
     return format_table(pivoted, fmt, highlight_max=True, metric_cols=measure_cols, same_threshold=same_threshold)
 
 
+# -- Plotting ------------------------------------------------------------------
+
+# Category value -> fill color (nugget dimension)
+COLOR_MAP = {
+    "pairwise": "#8321CF",   # dark purple
+    "grounded": "#79C4F4",   # medium sky blue
+    "rubric":   "#C6F752",   # cool orange
+}
+
+# Category value -> hatch pattern (additive across dimensions)
+HATCH_MAP = {
+    "best":     "",
+    "random":   "..",
+    "na":       "",
+    "response": "",
+    "docs":     "//",
+}
+
+# Fallback palettes when no judges YAML is used
+_FALLBACK_COLORS = ["0.30", "0.55", "0.78", "0.92", "0.42", "0.65"]
+_FALLBACK_HATCHES = ["", "//", "\\\\", "xx", "..", "++"]
+
+
+def _get_category_columns(df: pd.DataFrame) -> list[str]:
+    """Get category columns (string cols that aren't base meta cols)."""
+    return [c for c in df.columns if c not in BASE_META_COLS and not pd.api.types.is_numeric_dtype(df[c])]
+
+
+def _build_style_map(
+    df: pd.DataFrame,
+) -> dict[str, tuple[str, str]]:
+    """Map each judge to (color, hatch) based on category values.
+
+    Color is looked up from the first category value that matches COLOR_MAP.
+    Hatch patterns are combined from all category values matching HATCH_MAP.
+    Falls back to per-judge sequential assignment if no categories.
+    """
+    cat_cols = _get_category_columns(df)
+
+    if not cat_cols:
+        return {
+            judge: (_FALLBACK_COLORS[i % len(_FALLBACK_COLORS)],
+                    _FALLBACK_HATCHES[i % len(_FALLBACK_HATCHES)])
+            for i, judge in enumerate(df["Judge"].unique())
+        }
+
+    style_map = {}
+    for _, row in df.iterrows():
+        judge = row["Judge"]
+        if judge in style_map:
+            continue
+
+        # Find color: first category value present in COLOR_MAP
+        color = "0.5"
+        for cat in cat_cols:
+            val = row[cat]
+            if val in COLOR_MAP:
+                color = COLOR_MAP[val]
+                break
+
+        # Combine hatches: all category values present in HATCH_MAP
+        hatch = ""
+        for cat in cat_cols:
+            val = row[cat]
+            if val in HATCH_MAP:
+                hatch += HATCH_MAP[val]
+
+        style_map[judge] = (color, hatch)
+
+    return style_map
+
+
+def _is_dark(color: str) -> bool:
+    """Check if a color is dark based on perceived luminance."""
+    from matplotlib.colors import to_rgb
+    r, g, b = to_rgb(color)
+    # Perceived luminance (ITU-R BT.601)
+    return 0.299 * r + 0.587 * g + 0.114 * b < 0.5
+
+
+def _setup_plot_style():
+    """Configure matplotlib for Google Sheets-like clean style."""
+    matplotlib.use("pdf")
+    plt.rcParams.update({
+        "font.family": "sans-serif",
+        "font.size": 9,
+        "axes.linewidth": 0,
+        "axes.axisbelow": True,
+        "axes.grid": False,
+        "axes.facecolor": "white",
+        "axes.edgecolor": "white",
+        "axes.spines.top": False,
+        "axes.spines.right": False,
+        "axes.spines.left": False,
+        "axes.spines.bottom": False,
+        "legend.fontsize": 8,
+        "legend.frameon": False,
+        "xtick.major.size": 0,
+        "ytick.major.size": 0,
+        "xtick.color": "0.4",
+        "ytick.color": "0.4",
+        "text.color": "0.3",
+        "axes.labelcolor": "0.3",
+        "figure.dpi": 300,
+        "figure.facecolor": "white",
+    })
+
+
+def plot_grouped_bar(
+    df: pd.DataFrame,
+    group_cols: list[str],
+    series_col: str,
+    title: str,
+    out_path: Path,
+    ylabel: str = "Correlation",
+):
+    """Grouped bar chart in Google Sheets style with category-based colors.
+
+    Args:
+        df: DataFrame with series_col and group_cols as numeric columns
+        group_cols: Column names for x-axis groups (bar clusters)
+        series_col: Column with series labels (e.g., Judge)
+        title: Plot title
+        out_path: Output PDF path
+        ylabel: Y-axis label
+    """
+    _setup_plot_style()
+    style_map = _build_style_map(df)
+
+    n_series = len(df)
+    n_groups = len(group_cols)
+
+    x = np.arange(n_groups)
+    total_width = 0.75
+    bar_width = total_width / n_series
+
+    fig, ax = plt.subplots(figsize=(max(5, n_groups * 1.5), 3.2))
+
+    for i, (_, row) in enumerate(df.iterrows()):
+        judge = row[series_col]
+        color, hatch = style_map.get(judge, ("#999999", ""))
+        values = [row[c] for c in group_cols]
+        offset = (i - n_series / 2 + 0.5) * bar_width
+        edge = ("white" if _is_dark(color) else "0.3") if hatch else color
+        ax.bar(
+            x + offset, values, bar_width * 0.75,
+            color=color,
+            hatch=hatch,
+            edgecolor=edge,
+            linewidth=0.3,
+            label=judge,
+        )
+
+    # Y-axis: light horizontal grid lines, ticks at 0.25 intervals
+    ax.set_yticks([0, 0.25, 0.50, 0.75, 1.00])
+    ax.yaxis.grid(True, color="0.85", linewidth=0.5)
+    ax.xaxis.grid(False)
+    ax.set_ylim(0, 1.05)
+
+    # X-axis
+    ax.set_xticks(x)
+    ax.set_xticklabels(group_cols, rotation=0, ha="center", fontsize=8, color="0.4")
+
+    # Labels and title
+    ax.set_ylabel(ylabel, fontsize=9, color="0.4")
+    ax.set_title(title, fontsize=10, color="0.3", loc="left", pad=10)
+
+    # Legend outside right, no frame
+    ax.legend(
+        loc="upper left", bbox_to_anchor=(1.01, 1), borderaxespad=0,
+        handlelength=1.2, handleheight=0.8,
+    )
+
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(out_path, format="pdf", bbox_inches="tight", pad_inches=0.03)
+    plt.close(fig)
+
+
+def _slugify(s: str) -> str:
+    """Convert string to filesystem-safe slug."""
+    return s.replace("/", "_").replace(" ", "_").replace("=", "").replace(",", "")
+
+
+def plot_correlation_consistency(
+    df: pd.DataFrame,
+    metric_cols: list[str],
+    plot_dir: Path,
+):
+    """One plot per (Dataset, TruthMeasure, EvalMeasure)."""
+    group_keys = [c for c in ["Dataset", "TruthMeasure", "EvalMeasure"] if c in df.columns]
+
+    for group_vals, group_df in df.groupby(group_keys, sort=True):
+        if not isinstance(group_vals, tuple):
+            group_vals = (group_vals,)
+        label_parts = [f"{k}={v}" for k, v in zip(group_keys, group_vals)]
+        title = ", ".join(label_parts)
+        slug = _slugify("_".join(str(v) for v in group_vals))
+
+        avail = [c for c in metric_cols if c in group_df.columns]
+        plot_grouped_bar(group_df, avail, "Judge", title, plot_dir / f"{slug}.pdf")
+
+
+def plot_measures_as_columns(
+    df: pd.DataFrame,
+    metric_cols: list[str],
+    plot_dir: Path,
+):
+    """One plot per (Dataset, correlation metric)."""
+    dataset_keys = ["Dataset"] if "Dataset" in df.columns else []
+
+    for metric in metric_cols:
+        if metric not in df.columns:
+            continue
+
+        def _plot_one(sub_df: pd.DataFrame, title: str, slug: str):
+            sub_df = sub_df.copy()
+            sub_df["_measure_col"] = sub_df["TruthMeasure"] + " / " + sub_df["EvalMeasure"]
+            meta = get_meta_columns(sub_df)
+            row_id_cols = [c for c in meta if c not in ["Dataset", "TruthMeasure", "EvalMeasure", "_measure_col"]]
+
+            pivoted = sub_df.pivot_table(
+                index=row_id_cols, columns="_measure_col", values=metric, aggfunc="first",
+            ).reset_index()
+            pivoted.columns.name = None
+
+            judge_order = {j: i for i, j in enumerate(sub_df["Judge"].unique())}
+            pivoted["_sort"] = pivoted["Judge"].map(lambda j: judge_order.get(j, len(judge_order)))
+            pivoted = pivoted.sort_values("_sort").drop(columns=["_sort"])
+
+            measure_cols = [c for c in pivoted.columns if c not in row_id_cols]
+            plot_grouped_bar(pivoted, measure_cols, "Judge", title, plot_dir / f"{slug}.pdf", ylabel=metric)
+
+        if dataset_keys:
+            for dataset, ds_df in df.groupby("Dataset", sort=True):
+                title = f"Dataset={dataset}, Correlation={metric}"
+                slug = _slugify(f"{dataset}_{metric}")
+                _plot_one(ds_df, title, slug)
+        else:
+            title = f"Correlation={metric}"
+            slug = _slugify(metric)
+            _plot_one(df, title, slug)
+
+
 @click.command()
 @click.option(
     "--dataset", "-d",
@@ -395,6 +640,12 @@ def _pivot_measures_table(
     help="Threshold for 'statistically different' (reserved for future use).",
 )
 @click.option(
+    "--plot-dir",
+    type=click.Path(path_type=Path),
+    default=None,
+    help="Output directory for PDF plots (one per table).",
+)
+@click.option(
     "--output", "-o",
     type=click.Path(path_type=Path),
     help="Output file. If omitted, prints to stdout.",
@@ -412,6 +663,7 @@ def main(
     eval_measures: tuple,
     same: float,
     different: float,
+    plot_dir: Optional[Path],
     output: Optional[Path],
 ):
     """Generate correlation consistency tables from meta-evaluate JSONL output.
@@ -472,8 +724,15 @@ def main(
     # Produce tables based on --columns mode
     if columns == "measures":
         result = measures_as_columns(df, metric_cols, format, same_threshold=same)
+        if plot_dir:
+            plot_measures_as_columns(df, metric_cols, plot_dir)
     else:
         result = correlation_consistency(df, metric_cols, format, same_threshold=same)
+        if plot_dir:
+            plot_correlation_consistency(df, metric_cols, plot_dir)
+
+    if plot_dir:
+        click.echo(f"Plots written to {plot_dir}/", err=True)
 
     # Append category comparison if judges YAML provides categories
     if judges_data:
