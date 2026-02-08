@@ -178,6 +178,7 @@ def aggregate_by_judge(
     return df.groupby(group_cols)[available].mean().reset_index()
 
 
+
 def bold_max(
     df: pd.DataFrame,
     metric_cols: list[str],
@@ -230,13 +231,53 @@ def correlation_consistency(
     metric_cols: list[str],
     fmt: str = "github",
     same_threshold: float = 0.01,
+    summary: bool = False,
 ) -> str:
-    """One table per (Dataset, TruthMeasure, EvalMeasure).
+    """One table per (Dataset, TruthMeasure, EvalMeasure), or one wide table if summary.
 
     Rows: Judge
     Columns: correlation metrics
     Highest value per column bolded.
     """
+    if summary:
+        # One wide table: pivot Dataset/TruthMeasure/EvalMeasure into column prefixes
+        df = df.copy()
+        if "Dataset" in df.columns:
+            df["_group"] = df["Dataset"] + " / " + df["TruthMeasure"] + " / " + df["EvalMeasure"]
+        else:
+            df["_group"] = df["TruthMeasure"] + " / " + df["EvalMeasure"]
+
+        meta = get_meta_columns(df)
+        row_id_cols = [c for c in meta if c not in ["Dataset", "TruthMeasure", "EvalMeasure", "_group"]]
+
+        # Pivot each metric, then merge
+        merged = None
+        for metric in metric_cols:
+            if metric not in df.columns:
+                continue
+            piv = df.pivot_table(
+                index=row_id_cols, columns="_group", values=metric, aggfunc="first",
+            )
+            # Prefix columns with metric name
+            piv.columns = [f"{g} / {metric}" for g in piv.columns]
+            if merged is None:
+                merged = piv
+            else:
+                merged = merged.join(piv)
+
+        if merged is None:
+            return ""
+        merged = merged.reset_index()
+        merged.columns.name = None
+
+        # Preserve judge order
+        judge_order = {j: i for i, j in enumerate(df["Judge"].unique())}
+        merged["_sort"] = merged["Judge"].map(lambda j: judge_order.get(j, len(judge_order)))
+        merged = merged.sort_values("_sort").drop(columns=["_sort"])
+
+        value_cols = [c for c in merged.columns if c not in row_id_cols]
+        return format_table(merged, fmt, highlight_max=True, metric_cols=value_cols, same_threshold=same_threshold)
+
     sections = []
     group_keys = [c for c in ["Dataset", "TruthMeasure", "EvalMeasure"] if c in df.columns]
 
@@ -263,23 +304,27 @@ def measures_as_columns(
     metric_cols: list[str],
     fmt: str = "github",
     same_threshold: float = 0.01,
+    summary: bool = False,
 ) -> str:
-    """One table per (Dataset, correlation metric).
+    """One table per (Dataset, correlation metric), or one wide table if summary.
 
     Rows: Judge
-    Columns: TruthMeasure/EvalMeasure combinations
+    Columns: TruthMeasure/EvalMeasure combinations (prefixed with Dataset if summary)
     Highest value per column bolded.
     """
     sections = []
-
-    # Group by Dataset (if present) then iterate correlation metrics
     dataset_keys = ["Dataset"] if "Dataset" in df.columns else []
 
     for metric in metric_cols:
         if metric not in df.columns:
             continue
 
-        if dataset_keys:
+        if summary:
+            # One wide table: Dataset / TruthMeasure / EvalMeasure as columns
+            sections.append(f"#### Correlation={metric}\n")
+            sections.append(_pivot_measures_table(df, metric, fmt, same_threshold, include_dataset=True))
+            sections.append("")
+        elif dataset_keys:
             for dataset, ds_df in df.groupby("Dataset", sort=True):
                 sections.append(f"#### Dataset={dataset}, Correlation={metric}\n")
                 sections.append(_pivot_measures_table(ds_df, metric, fmt, same_threshold))
@@ -297,11 +342,15 @@ def _pivot_measures_table(
     metric: str,
     fmt: str,
     same_threshold: float,
+    include_dataset: bool = False,
 ) -> str:
     """Pivot a single metric into columns of TruthMeasure/EvalMeasure."""
     # Create composite column name
     df = df.copy()
-    df["_measure_col"] = df["TruthMeasure"] + " / " + df["EvalMeasure"]
+    if include_dataset and "Dataset" in df.columns:
+        df["_measure_col"] = df["Dataset"] + " / " + df["TruthMeasure"] + " / " + df["EvalMeasure"]
+    else:
+        df["_measure_col"] = df["TruthMeasure"] + " / " + df["EvalMeasure"]
 
     # Get row identity columns (Judge + any category cols)
     meta = get_meta_columns(df)
@@ -609,6 +658,11 @@ def plot_measures_as_columns(
     help="Average metrics across datasets (per judge) before tabulating.",
 )
 @click.option(
+    "--summary/--no-summary",
+    default=False,
+    help="Produce one summary table across all datasets/measures.",
+)
+@click.option(
     "--correlation",
     type=str,
     multiple=True,
@@ -634,12 +688,6 @@ def plot_measures_as_columns(
     help="Threshold for 'statistically same': values within this of the max are also bolded.",
 )
 @click.option(
-    "--different",
-    type=float,
-    default=0.1,
-    help="Threshold for 'statistically different' (reserved for future use).",
-)
-@click.option(
     "--plot-dir",
     type=click.Path(path_type=Path),
     default=None,
@@ -658,11 +706,11 @@ def main(
     all_judges: bool,
     columns: str,
     aggregate: bool,
+    summary: bool,
     correlation: tuple,
     truth_measure: tuple,
     eval_measures: tuple,
     same: float,
-    different: float,
     plot_dir: Optional[Path],
     output: Optional[Path],
 ):
@@ -723,11 +771,11 @@ def main(
 
     # Produce tables based on --columns mode
     if columns == "measures":
-        result = measures_as_columns(df, metric_cols, format, same_threshold=same)
+        result = measures_as_columns(df, metric_cols, format, same_threshold=same, summary=summary)
         if plot_dir:
             plot_measures_as_columns(df, metric_cols, plot_dir)
     else:
-        result = correlation_consistency(df, metric_cols, format, same_threshold=same)
+        result = correlation_consistency(df, metric_cols, format, same_threshold=same, summary=summary)
         if plot_dir:
             plot_correlation_consistency(df, metric_cols, plot_dir)
 
