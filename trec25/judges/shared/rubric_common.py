@@ -7,7 +7,10 @@ Provides:
 - Grade aggregation and coverage computation
 """
 
+import json
 import re
+from collections import defaultdict
+from pathlib import Path
 from textwrap import dedent
 from typing import Any, Dict, List, Literal, Optional, Sequence, Set, Tuple
 
@@ -15,7 +18,12 @@ import dspy
 from pydantic import BaseModel
 
 from autojudge_base import Report
-from autojudge_base.nugget_data import NuggetBank, NuggetBanks, NuggetQuestion
+from autojudge_base.nugget_data import (
+    NuggetBank,
+    NuggetBanks,
+    NuggetQuestion,
+    Reference,
+)
 
 
 # =============================================================================
@@ -464,4 +472,110 @@ def build_nugget_banks(
         total += len(nuggets)
 
     print(f"Created {total} nuggets across {len(banks)} topics")
+    return NuggetBanks.from_banks_list(banks)
+
+
+# =============================================================================
+# Nugget-Relevant Document Export
+# =============================================================================
+
+
+class NuggetDocEntry(BaseModel):
+    """A nugget question with its relevant document IDs."""
+
+    question: str
+    doc_ids: List[str]
+    aggregator: str = "OR"
+    answer_type: str = "OPEN_ENDED_ANSWER"
+
+    def to_collaborator_value(self) -> list:
+        """Serialize to collaborator format: ["OR", {"OPEN_ENDED_ANSWER": [...]}]"""
+        return [self.aggregator, {self.answer_type: self.doc_ids}]
+
+
+class TopicNuggetDocs(BaseModel):
+    """All nugget-document mappings for a single topic."""
+
+    topic_id: str
+    entries: List[NuggetDocEntry]
+
+    def to_collaborator_dict(self) -> dict:
+        """Serialize to collaborator format: {question: ["OR", {...}], ...}"""
+        return {e.question: e.to_collaborator_value() for e in self.entries}
+
+
+def collect_nugget_relevant_docs(
+    grade_data: List[NuggetGradeData],
+    grade_threshold: int = 3,
+) -> Dict[str, TopicNuggetDocs]:
+    """Collect nugget-relevant documents from document-level grading data.
+
+    Groups by (query_id, question), collects doc_ids where grade >= threshold.
+    Run-agnostic: aggregates across all runs.
+
+    Args:
+        grade_data: List of graded nugget-document pairs (with doc_id set)
+        grade_threshold: Minimum grade to count as "covered"
+
+    Returns:
+        Dict mapping topic_id -> TopicNuggetDocs
+    """
+    # Group by (query_id, question) -> set of doc_ids meeting threshold
+    relevant: Dict[Tuple[str, str], Set[str]] = defaultdict(set)
+
+    for data in grade_data:
+        if data.doc_id is None:
+            continue
+        if data.grade >= grade_threshold:
+            relevant[(data.query_id, data.question)].add(data.doc_id)
+
+    # Build TopicNuggetDocs per topic
+    topic_entries: Dict[str, List[NuggetDocEntry]] = defaultdict(list)
+    for (query_id, question), doc_ids in sorted(relevant.items()):
+        topic_entries[query_id].append(
+            NuggetDocEntry(question=question, doc_ids=sorted(doc_ids))
+        )
+
+    return {
+        topic_id: TopicNuggetDocs(topic_id=topic_id, entries=entries)
+        for topic_id, entries in topic_entries.items()
+    }
+
+
+def write_nugget_docs_collaborator(
+    topics: Dict[str, TopicNuggetDocs],
+    output_dir: Path,
+) -> None:
+    """Write one nuggets_{topic_id}.json per topic in collaborator format."""
+    output_dir.mkdir(parents=True, exist_ok=True)
+    for topic_id, topic in topics.items():
+        path = output_dir / f"nuggets_{topic_id}.json"
+        path.write_text(json.dumps(topic.to_collaborator_dict(), indent=4))
+    print(f"Wrote {len(topics)} collaborator nugget files to {output_dir}")
+
+
+def nugget_docs_to_nugget_banks(
+    topics: Dict[str, TopicNuggetDocs],
+) -> NuggetBanks:
+    """Convert nugget-doc references to NuggetBanks format.
+
+    Each NuggetDocEntry becomes a NuggetQuestion with:
+    - references: list of Reference(doc_id=...) for each relevant doc
+    - answers: None (open-ended question)
+    """
+    banks = []
+    for topic_id, topic in topics.items():
+        bank = NuggetBank(query_id=topic_id, title_query=topic_id)
+        nuggets = []
+        for entry in topic.entries:
+            refs = [Reference(doc_id=doc_id) for doc_id in entry.doc_ids]
+            nuggets.append(
+                NuggetQuestion(
+                    query_id=topic_id,
+                    question=entry.question,
+                    references=refs,
+                )
+            )
+        bank.add_nuggets(nuggets)
+        banks.append(bank)
     return NuggetBanks.from_banks_list(banks)

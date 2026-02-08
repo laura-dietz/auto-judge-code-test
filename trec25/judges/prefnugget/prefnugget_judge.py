@@ -9,6 +9,7 @@ This judge is primarily a nugget creator - judge() returns (None, None).
 """
 import collections
 from itertools import groupby
+from pathlib import Path
 from random import shuffle, Random
 import sys
 from textwrap import dedent
@@ -33,7 +34,7 @@ from autojudge_base import (
     doc_id_md5,
     format_preview,
 )
-from autojudge_base.nugget_data import NuggetBanks
+from autojudge_base.nugget_data import NuggetBanks, write_nugget_banks
 from minima_llm import MinimaLlmConfig
 
 
@@ -60,6 +61,9 @@ from trec25.judges.shared.rubric_common import (
     compute_nugget_aggregates,
     compute_nugget_aggregates_for_documents,
     build_nugget_banks,
+    collect_nugget_relevant_docs,
+    write_nugget_docs_collaborator,
+    nugget_docs_to_nugget_banks,
 )
 
 
@@ -809,6 +813,15 @@ class PrefNuggetJudge(AutoJudge):
             aggregates = compute_nugget_aggregates(grade_data, nuggets_per_topic, grade_threshold)
         else:
             aggregates = compute_nugget_aggregates_for_documents(grade_data, nuggets_per_topic, grade_threshold)
+
+        # TODO break this out of the main code, because this is a side-show.
+        # Export nugget-relevant documents (only for document-level grading)
+        if grade_text != "response":
+            nugget_doc_topics = collect_nugget_relevant_docs(grade_data, grade_threshold)
+            if nugget_doc_topics:
+                write_nugget_docs_collaborator(nugget_doc_topics, Path(f"{filebase}.nugget-docs"))
+                doc_banks = nugget_docs_to_nugget_banks(nugget_doc_topics)
+                write_nugget_banks(doc_banks, Path(f"{filebase}.nugget-docs.nuggets.jsonl"))
 
         # Update Report.evaldata
         for response in rag_responses:

@@ -31,7 +31,7 @@ def get_meta_columns(df: pd.DataFrame) -> list[str]:
     for c in df.columns:
         if c in BASE_META_COLS:
             meta.append(c)
-        elif df[c].dtype == object and c not in BASE_META_COLS:
+        elif not pd.api.types.is_numeric_dtype(df[c]) and c not in BASE_META_COLS:
             # String columns added by judges YAML (categories)
             meta.append(c)
     return meta
