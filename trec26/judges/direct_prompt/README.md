@@ -1,6 +1,8 @@
-# Direct Prompt Judge - Starter Kit
+# Direct Prompt Judge
 
-A simple LLM-based judge for evaluating RAG responses using direct prompting. Uses different prompt strategies based on dataset type.
+> **Setup and usage**: See [main judges README](../README.md) for installation, environment setup, and running instructions.
+
+LLM-based judge that evaluates RAG response relevance using direct prompting. Uses different prompt strategies based on dataset type.
 
 ## What This Judge Does
 
@@ -14,196 +16,84 @@ A simple LLM-based judge for evaluating RAG responses using direct prompting. Us
    - `AVG_GRADE`: Average score (0-3)
    - `IS_RELEVANT`: Percentage of responses with grade >= 2
 
-**Note**: This judge evaluates response quality/relevance only. It does NOT validate citations or check if cited documents actually support claims.
+**Note**: This judge evaluates response quality/relevance only. It does NOT validate citations or check if cited documents actually support claims. For citation validation, use the [citation judge](../citation_judge/README.md).
 
-## Files
+## Prompts
 
-```
-direct_prompt/
-├── direct_prompt_judge.py   # Judge implementation
-├── workflow.yml             # Configuration
-├── llm-config.yml          # LLM settings (free models)
-├── requirements.txt        # Dependencies
-└── README.md               # This file
-```
+### UMBRELA Prompt (RAG & RAGTIME)
 
-## Setup
+Used for relevance grading on a 0-3 scale:
+- **Grade 0**: Completely irrelevant or wrong
+- **Grade 1**: Partially relevant but incomplete
+- **Grade 2**: Relevant with minor issues
+- **Grade 3**: Highly relevant and complete
 
-### 1. Create Virtual Environment
+The prompt asks the LLM to evaluate how well the response answers the query, considering:
+- Completeness of answer
+- Accuracy of information
+- Relevance to query
 
-```bash
-cd trec26/judges/direct_prompt
-python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
-```
+### DRAGUN Prompt (DRAGUN)
 
-### 2. Install Dependencies
+Used for trustworthiness assessment of news article reports:
+- **Grade 0**: Misleading or false assessment
+- **Grade 1**: Partially accurate but incomplete
+- **Grade 2**: Mostly accurate trustworthiness evaluation
+- **Grade 3**: Comprehensive and accurate trustworthiness analysis
 
-```bash
-pip install -r requirements.txt
-```
+The prompt asks the LLM to evaluate how well the report assesses the news article's trustworthiness.
 
-### 3. Setup a Free LLM (Choose One)
+## Dataset Selection
 
-#### Option A: Ollama (Local, Completely Free)
+The judge requires **explicit dataset specification** via the `--dataset` flag:
 
 ```bash
-# Install Ollama: https://ollama.ai
-# Download a model
-ollama pull llama3.2:3b
-
-# Verify it's running
-curl http://localhost:11434/api/tags
+--dataset rag      # Uses UMBRELA prompt, extracts query from topic.title
+--dataset ragtime  # Uses UMBRELA prompt, extracts query from topic.title + problem_statement + background
+--dataset dragun   # Uses DRAGUN prompt, extracts query from topic.body (news article)
 ```
 
-The `llm-config.yml` is already configured for Ollama by default.
+See [main README](../README.md#dataset-types) for details on dataset formats.
 
-#### Option B: Groq (Cloud, Free Tier)
-
-1. Sign up at https://console.groq.com
-2. Get your free API key
-3. Update `llm-config.yml`:
-
-```yaml
-base_url: "https://api.groq.com/openai/v1"
-model: "llama-3.2-3b-preview"
-api_key: "your-groq-api-key"
-```
-
-Or set environment variable:
-```bash
-export GROQ_API_KEY="your-groq-api-key"
-```
-
-#### Option C: Together.ai (Cloud, Free Tier)
-
-1. Sign up at https://together.ai
-2. Get your free API key
-3. Update `llm-config.yml`:
-
-```yaml
-base_url: "https://api.together.xyz/v1"
-model: "meta-llama/Llama-3.2-3B-Instruct-Turbo"
-api_key: "your-together-api-key"
-```
-
-## Running the Judge
-
-### Basic Usage
-
-```bash
-# Activate environment
-source venv/bin/activate
-
-# Run with test data
-python direct_prompt_judge.py run \
-  --rag-responses /path/to/runs/ \
-  --rag-topics /path/to/topics.jsonl \
-  --workflow workflow.yml \
-  --llm-config llm-config.yml \
-  --out-dir output/
-
-# Check outputs
-ls output/
-# default.qrels              # Response grades
-# default.judgment.json      # Leaderboard (JSON)
-# default.leaderboard.txt    # Leaderboard (TREC format)
-# default.config.yml         # Run configuration
-```
-
-### Dataset-Specific Prompts
-
-Use the `--dataset` flag to explicitly control which prompt to use:
-
-```bash
-# RAG dataset (uses UMBRELA prompt)
-python direct_prompt_judge.py run \
-  --rag-responses /path/to/rag_runs/ \
-  --rag-topics /path/to/rag_topics.jsonl \
-  --workflow workflow.yml \
-  --llm-config llm-config.yml \
-  --dataset rag \
-  --out-dir output/rag/
-
-# RAGTIME dataset (uses UMBRELA prompt)
-python direct_prompt_judge.py run \
-  --rag-responses /path/to/ragtime_runs/ \
-  --rag-topics /path/to/ragtime_topics.jsonl \
-  --workflow workflow.yml \
-  --llm-config llm-config.yml \
-  --dataset ragtime \
-  --out-dir output/ragtime/
-
-# DRAGUN dataset (uses DRAGUN trustworthiness prompt)
-python direct_prompt_judge.py run \
-  --rag-responses /path/to/dragun_runs/ \
-  --rag-topics /path/to/dragun_topics.jsonl \
-  --workflow workflow.yml \
-  --llm-config llm-config.yml \
-  --dataset dragun \
-  --out-dir output/dragun/
-```
-
-**Note:** Without `--dataset`, the judge auto-detects based on topic fields.
-
-### Run with Variants
-
-```bash
-# Strict mode (only grade 3 is relevant)
-python direct_prompt_judge.py run \
-  --rag-responses ../../../tests/resources/spot-check-fully-local/runs/ \
-  --rag-topics ../../../tests/resources/example-rag-topics.jsonl \
-  --workflow workflow.yml \
-  --variant strict \
-  --out-dir output/
-
-# Lenient mode (grade >= 1 is relevant)
-python direct_prompt_judge.py run \
-  --rag-responses ../../../tests/resources/spot-check-fully-local/runs/ \
-  --rag-topics ../../../tests/resources/example-rag-topics.jsonl \
-  --workflow workflow.yml \
-  --variant lenient \
-  --out-dir output/
-```
-
-### Using run_judge.py Helper
-
-For easier management with filtering and debug logging:
+## Quick Start
 
 ```bash
 cd trec26/judges
 
-# Run with environment-based LLM config (recommended)
-python run_judge.py \
-  --judge direct_prompt \
-  --rag-topics /path/to/topics.jsonl \
-  --rag-responses /path/to/runs/ \
-  --workflow direct_prompt/workflow.yml \
-  --use-env-llm \
-  --out-dir output/ \
-  --dataset dragun \
-  --name dragun_llm
+# Set environment variables (see main README)
+export OPENAI_BASE_URL="your-endpoint"
+export OPENAI_MODEL="your-model"
+export OPENAI_API_KEY="your-key"
 
-# Or with limited topics/runs for testing
+# Run on RAGTIME dataset
 python run_judge.py \
   --judge direct_prompt \
-  --rag-topics /path/to/topics.jsonl \
-  --rag-responses /path/to/runs/ \
+  --rag-topics ../../dataset/ragtime-export/RAGTIME-data/ragtime25_main_eng.jsonl \
+  --rag-responses ../../dataset/ragtime-export/runs/repgen/ \
   --workflow direct_prompt/workflow.yml \
   --use-env-llm \
-  --out-dir output/ \
-  --dataset rag \
-  --max-topics 5 \
-  --max-runs 3 \
-  --name test_run
+  --out-dir ./output/ \
+  --dataset ragtime
+
+# Test with limited data
+python run_judge.py \
+  --judge direct_prompt \
+  --rag-topics path/to/topics.jsonl \
+  --rag-responses path/to/runs/ \
+  --workflow direct_prompt/workflow.yml \
+  --use-env-llm \
+  --out-dir ./output/ \
+  --dataset ragtime \
+  --max-topics 2 \
+  --max-runs 1 \
+  --name test
 ```
 
-**Note**: When using `--name`, debug logs are automatically created as `{name}.jsonl` in the `--out-dir` directory.
+See [EXAMPLES.md](../EXAMPLES.md) for more examples across all datasets.
 
-## Output Formats
+## Output Format
 
 ### Qrels (default.qrels)
-
 TREC format: `topic_id system doc_id grade`
 
 ```
@@ -213,78 +103,39 @@ TREC format: `topic_id system doc_id grade`
 ```
 
 ### Leaderboard (default.leaderboard.txt)
-
 ```
-my_best_run_01 28 AVG_GRADE 2.5
-my_best_run_01 28 IS_RELEVANT 1.0
-my_best_run_01 29 AVG_GRADE 1.0
-my_best_run_01 29 IS_RELEVANT 0.0
-my_best_run_01 all AVG_GRADE 1.75
-my_best_run_01 all IS_RELEVANT 0.5
+run_01 28 AVG_GRADE 2.5
+run_01 28 IS_RELEVANT 1.0
+run_01 all AVG_GRADE 2.0
+run_01 all IS_RELEVANT 0.75
 ```
 
-### Debug Logs (when using --name or --debug-log)
-
-JSON Lines format with structured logging (automatically created in `--out-dir` when using `--name`):
+### Debug Logs (when using --name)
+JSON Lines format with prompts and LLM outputs:
 
 ```jsonl
-{"event": "session_start", "timestamp": "2026-02-06T...", "message": "Direct Prompt Judge Debug Session Started"}
-{"event": "INPUT", "timestamp": "2026-02-06T...", "run_id": "run1", "topic_id": "28", "query": "...", "response": "...", "prompt": "..."}
-{"event": "OUTPUT", "timestamp": "2026-02-06T...", "run_id": "run1", "topic_id": "28", "output": 3, "grade": 3}
+{"event": "INPUT", "run_id": "run1", "topic_id": "28", "query": "...", "response": "...", "prompt": "..."}
+{"event": "OUTPUT", "run_id": "run1", "topic_id": "28", "output": 3, "grade": 3}
 ```
 
-## Supported Datasets
-
-| Dataset | Prompt Used | Evaluates |
-|---------|------------|-----------|
-| **RAG** | UMBRELA | Query → Response relevance (0-3) |
-| **RAGTIME** | UMBRELA | Report request → Report relevance (0-3) |
-| **DRAGUN** | DRAGUN | News article → Trustworthiness assessment quality (0-3) |
-
-### How Dataset Selection Works
-
-The judge requires **explicit dataset specification** - no auto-detection.
-
-**You MUST use the `--dataset` flag** when running via run_judge.py:
-```bash
---dataset dragun  # Uses DRAGUN prompt
---dataset rag     # Uses UMBRELA prompt
---dataset ragtime # Uses UMBRELA prompt
-```
-
-**Or manually set `topic_format` in workflow.yml** before running:
-```yaml
-qrels_settings:
-  topic_format: dragun  # or: rag, ragtime
-
-judge_settings:
-  topic_format: dragun  # or: rag, ragtime
-```
-
-**Important**: The `topic_format` setting must be in **both** `qrels_settings` and `judge_settings`:
-- `qrels_settings.topic_format` controls which prompt is used (UMBRELA vs DRAGUN)
-- `judge_settings.topic_format` controls how queries are extracted from topics
-
-**Note**: Auto-detection has been removed. The judge will raise an error if `topic_format` is not explicitly set.
-
-## Customizing the Judge
+## Customization
 
 ### Modify Prompts
 
 Edit `direct_prompt_judge.py`:
 
-**UMBRELA Prompt** (for RAG/RAGTIME):
+**UMBRELA Prompt** (RAG/RAGTIME):
 ```python
 class UmbrelaPrompt(dspy.Signature):
     """UMBRELA prompting framework for passage grading."""
 
     __doc__ = dedent("""
         # Modify this prompt for your use case
-        Given a query and a passage, provide a score...
+        Given a query and a passage, provide a score from 0-3...
     """)
 ```
 
-**DRAGUN Prompt** (for DRAGUN):
+**DRAGUN Prompt** (DRAGUN):
 ```python
 class DragunPrompt(dspy.Signature):
     """DRAGUN trustworthiness assessment prompt."""
@@ -326,10 +177,60 @@ Edit `workflow.yml`:
 
 ```yaml
 variants:
+  strict:
+    judge_settings:
+      relevance_threshold: 3  # Only grade 3 is relevant
+
+  lenient:
+    judge_settings:
+      relevance_threshold: 1  # Grade >= 1 is relevant
+
   my_variant:
     judge_settings:
       relevance_threshold: 2
       # Add custom settings
+```
+
+Run with variant:
+```bash
+python direct_prompt_judge.py run \
+  --rag-responses path/to/runs/ \
+  --rag-topics path/to/topics.jsonl \
+  --workflow workflow.yml \
+  --variant strict \
+  --out-dir output/
+```
+
+## Combining with Citation Judge
+
+To evaluate both content relevance AND citation quality, run both judges:
+
+```bash
+# 1. Run content relevance
+python run_judge.py \
+  --judge direct_prompt \
+  --rag-topics topics.jsonl \
+  --rag-responses runs/ \
+  --workflow direct_prompt/workflow.yml \
+  --use-env-llm \
+  --out-dir output/ \
+  --dataset ragtime \
+  --name content
+
+# 2. Run citation validation
+python run_judge.py \
+  --judge citation \
+  --rag-topics topics.jsonl \
+  --rag-responses runs/ \
+  --workflow citation_judge/workflow.yml \
+  --use-env-llm \
+  --out-dir output/ \
+  --dataset ragtime \
+  --name citations
+
+# 3. Analyze both
+cat output/content.leaderboard.txt
+cat output/citations.leaderboard.txt
 ```
 
 ## Limitations
@@ -339,12 +240,18 @@ variants:
   - Verify if citations actually support the claims
   - Assess citation accuracy or completeness
 
+  Use the [citation judge](../citation_judge/README.md) for citation validation.
 
+- **LLM-dependent**: Results vary based on LLM model and prompt design
+- **Cost**: Requires API calls for each response (use `--max-topics` for testing)
 
-## Next Steps
+## Files
 
-1. **Test with your data**: Replace test data paths with your RAG responses
-2. **Try different datasets**: Use `--dataset` flag for explicit control
-3. **Compare models**: Test different LLMs with the same prompts
-4. **Customize**: Modify prompts, measures, or add new variants
-5. **Debug**: Use `--debug-log` to inspect prompt inputs/outputs
+```
+direct_prompt/
+├── direct_prompt_judge.py   # Judge implementation
+├── workflow.yml             # Configuration and variants
+├── llm-config.yml          # LLM settings (optional)
+├── requirements.txt        # Dependencies
+└── README.md               # This file
+```

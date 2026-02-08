@@ -1,5 +1,7 @@
 # Non-LLM Judge
 
+> **Setup and usage**: See [main judges README](../README.md) for installation and running instructions.
+
 A deterministic judge that scores RAG responses using multiple non-LLM metrics.
 
 ## Overview
@@ -57,17 +59,35 @@ Default weights (configurable):
 - BM25: 30%
 - Coverage: 20%
 
-## Usage
+## Quick Start
 
+```bash
+cd trec26/judges
 
-python -m venv venv            
-source venv/bin/activate
+# Run non-LLM judge (no LLM or environment variables needed)
+python run_judge.py \
+  --judge non_llm \
+  --rag-topics ../../dataset/ragtime-export/RAGTIME-data/ragtime25_main_eng.jsonl \
+  --rag-responses ../../dataset/ragtime-export/runs/repgen/ \
+  --workflow non_llm_judge/workflow.yml \
+  --out-dir ./output/ \
+  --dataset ragtime
 
+# Test with limited data
+python run_judge.py \
+  --judge non_llm \
+  --rag-topics path/to/topics.jsonl \
+  --rag-responses path/to/runs/ \
+  --workflow non_llm_judge/workflow.yml \
+  --out-dir ./output/ \
+  --dataset ragtime \
+  --max-topics 3 \
+  --max-runs 2
+```
 
-export OPENAI_BASE_URL="http://localhost:11434/v1"             
-export OPENAI_MODEL="dummy"
+See [EXAMPLES.md](../EXAMPLES.md) and [main README](../README.md) for more examples.
 
-### Using the CLI
+### Using the CLI Directly
 
 
 

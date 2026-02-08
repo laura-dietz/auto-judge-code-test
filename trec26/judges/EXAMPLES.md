@@ -1,15 +1,21 @@
-# Debug Mode - Testing Judges with Limited Data
+# Judge Examples - Complete Reference
 
-Use `run_judge.py` to test judges on a small subset of data with detailed logging.
+> **New to judges?** Start with [README.md](README.md) for setup, overview, and quick start.
+
+This file contains comprehensive examples for running all judges across all datasets.
 
 ## Features
 
-- **Limit topics**: Process only first N topics
-- **Limit runs**: Process only first N runs
-- **Debug logging**: Save detailed information to log file
-- **Filtered dataset**: Automatically creates filtered subset
+- **Limit topics**: Process only first N topics (`--max-topics`)
+- **Limit runs**: Process only first N runs (`--max-runs`)
+- **Debug logging**: Save detailed information to JSONL log file
+- **Filtered dataset**: Automatically creates filtered subset in `temp_filtered/`
 
-## Usage
+## Setup
+
+See [README.md](README.md#prerequisites) for installation and environment variable configuration.
+
+## Usage Examples
 
 ### Test Non-LLM Judge (Quick)
 
@@ -31,13 +37,10 @@ python run_judge.py \
 
 ### Test Direct Prompt Judge (With LLM)
 
+**Prerequisites**: Set environment variables (see [README.md](README.md#environment-variables))
+
 ```bash
 cd trec26/judges
-
-# Set environment variables for your LLM provider
-export OPENAI_BASE_URL="https://api.together.xyz/v1"
-export OPENAI_MODEL="meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo"
-export OPENAI_API_KEY="your-key"
 
 # Use --use-env-llm to pull config from environment variables
 python run_judge.py \
@@ -64,13 +67,10 @@ python run_judge.py \
 
 ### Test Citation Judge (With LLM - Auto-ARGUE)
 
+**Prerequisites**: Set environment variables (see [README.md](README.md#environment-variables))
+
 ```bash
 cd trec26/judges
-
-# Set environment variables for your LLM provider
-export OPENAI_BASE_URL="https://api.together.xyz/v1"
-export OPENAI_MODEL="meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo"
-export OPENAI_API_KEY="your-key"
 
 # Use --use-env-llm to pull config from environment variables
 python run_judge.py \
