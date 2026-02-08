@@ -77,7 +77,7 @@ class CitationAssessment(BaseModel):
     topic_id: str
     sentence: str
     citation_id: str
-    document_text: str
+    document: str  # Changed from document_text to match AttestationPrompt
 
     # LLM outputs (filled after assessment)
     citation_exists: Optional[bool] = None  # Does citation exist in documents?
@@ -262,16 +262,16 @@ class CitationJudge(AutoJudge):
                     if citation_exists:
                         # Document is a Document object with .text attribute
                         doc = documents[citation_id]
-                        document_text = doc.get_text() if hasattr(doc, 'get_text') else doc.text
+                        document = doc.get_text() if hasattr(doc, 'get_text') else doc.text
                     else:
-                        document_text = ""
+                        document = ""
 
                     assessments.append(CitationAssessment(
                         run_id=response.metadata.run_id,
                         topic_id=response.metadata.topic_id,
                         sentence=sentence,
                         citation_id=citation_id,
-                        document_text=document_text,
+                        document=document,
                         citation_exists=citation_exists,
                     ))
 
@@ -286,7 +286,7 @@ class CitationJudge(AutoJudge):
                         "sentence": assessment.sentence,
                         "citation_id": assessment.citation_id,
                         "citation_exists": assessment.citation_exists,
-                        "document_length": len(assessment.document_text),
+                        "document_length": len(assessment.document),
                     }
                 )
 
