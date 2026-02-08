@@ -228,19 +228,28 @@ class CitationJudge(AutoJudge):
             if not topic:
                 continue
 
-            # Get response text and documents
-            response_obj = response.get_raw()
-            documents = response_obj.get('documents', {})
+            # Get documents dictionary
+            documents = response.documents or {}
 
             # Parse responses array
-            responses_array = response_obj.get('responses', [])
+            responses_array = response.responses or []
 
             # Track citation stats for this response
             total_citations = 0
 
             for resp_segment in responses_array:
-                sentence = resp_segment.get('text', '')
-                citations = resp_segment.get('citations', [])
+                sentence = resp_segment.text if hasattr(resp_segment, 'text') else ''
+                citations_raw = resp_segment.citations if hasattr(resp_segment, 'citations') else []
+
+                # Handle both dict (RAGTIME) and list (RAG/DRAGUN) citations
+                if isinstance(citations_raw, dict):
+                    # RAGTIME: citations is Dict[str, float]
+                    citations = list(citations_raw.keys())
+                elif citations_raw is None:
+                    citations = []
+                else:
+                    # RAG/DRAGUN: citations is List[str] or List[int]
+                    citations = [str(c) for c in citations_raw]
 
                 # Count citations
                 total_citations += len(citations)
@@ -251,7 +260,9 @@ class CitationJudge(AutoJudge):
                     citation_exists = citation_id in documents
 
                     if citation_exists:
-                        document_text = documents[citation_id].get('text', '')
+                        # Document is a Document object with .text attribute
+                        doc = documents[citation_id]
+                        document_text = doc.get_text() if hasattr(doc, 'get_text') else doc.text
                     else:
                         document_text = ""
 
@@ -346,9 +357,8 @@ class CitationJudge(AutoJudge):
 
         # Process each response
         for response in rag_responses:
-            response_obj = response.get_raw()
-            documents = response_obj.get('documents', {})
-            responses_array = response_obj.get('responses', [])
+            documents = response.documents or {}
+            responses_array = response.responses or []
 
             # Calculate citation metrics for this response
             total_citations = 0
@@ -356,8 +366,18 @@ class CitationJudge(AutoJudge):
             supported_citations = 0
 
             for resp_segment in responses_array:
-                sentence = resp_segment.get('text', '')
-                citations = resp_segment.get('citations', [])
+                sentence = resp_segment.text if hasattr(resp_segment, 'text') else ''
+                citations_raw = resp_segment.citations if hasattr(resp_segment, 'citations') else []
+
+                # Handle both dict (RAGTIME) and list (RAG/DRAGUN) citations
+                if isinstance(citations_raw, dict):
+                    # RAGTIME: citations is Dict[str, float]
+                    citations = list(citations_raw.keys())
+                elif citations_raw is None:
+                    citations = []
+                else:
+                    # RAG/DRAGUN: citations is List[str] or List[int]
+                    citations = [str(c) for c in citations_raw]
 
                 total_citations += len(citations)
 
