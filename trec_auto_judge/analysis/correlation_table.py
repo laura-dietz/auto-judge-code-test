@@ -210,6 +210,113 @@ def bold_max(
     return out
 
 
+# -- LaTeX rendering -----------------------------------------------------------
+
+def _latex_escape(s: str) -> str:
+    """Escape LaTeX special characters in text."""
+    s = str(s)
+    s = s.replace("_", "\\_")
+    s = s.replace("&", "\\&")
+    s = s.replace("%", "\\%")
+    s = s.replace("#", "\\#")
+    return s
+
+
+def _render_latex_booktabs(
+    df: pd.DataFrame,
+    metric_cols: list[str],
+    same_threshold: float = 0.02,
+    highlight_max: bool = True,
+    float_format: str = ".4f",
+) -> str:
+    """Render DataFrame as LaTeX booktabs table with proper escaping.
+
+    Auto-detects hierarchical columns (containing ' / ') and renders
+    multi-row headers with \\cmidrule(lr).
+    """
+    value_cols = [c for c in metric_cols if c in df.columns]
+    row_id_cols = [c for c in df.columns if c not in value_cols]
+
+    # Format numeric cells (with optional bold for max)
+    formatted = df.copy()
+    for col in value_cols:
+        if highlight_max:
+            max_val = formatted[col].max()
+            cutoff = max_val - same_threshold
+            formatted[col] = formatted[col].apply(
+                lambda v, c=cutoff: f"\\textbf{{{v:.4f}}}" if v >= c else f"{v:.4f}"
+            )
+        else:
+            formatted[col] = formatted[col].apply(
+                lambda v: f"{v:{float_format}}" if isinstance(v, (int, float)) else str(v)
+            )
+
+    hierarchical = any(" / " in str(c) for c in value_cols)
+
+    n_total = len(df.columns)
+    lines = []
+    lines.append("\\begin{tabular}{" + "l" * n_total + "}")
+    lines.append("\\toprule")
+
+    if hierarchical:
+        parsed = [col.split(" / ") for col in value_cols]
+        n_levels = max(len(p) for p in parsed)
+        for p in parsed:
+            while len(p) < n_levels:
+                p.append("")
+
+        # Multi-row headers (all levels except last)
+        for level in range(n_levels - 1):
+            groups = []
+            i = 0
+            while i < len(parsed):
+                val = parsed[i][level]
+                span = 1
+                while i + span < len(parsed) and parsed[i + span][level] == val:
+                    span += 1
+                col_start = len(row_id_cols) + i + 1  # 1-indexed
+                groups.append((val, span, col_start))
+                i += span
+
+            parts = [""] * len(row_id_cols)
+            for val, span, _ in groups:
+                parts.append(f"\\multicolumn{{{span}}}{{c}}{{{_latex_escape(val)}}}")
+            lines.append(" & ".join(parts))
+            lines.append("\\tabularnewline")
+
+            cmidrules = []
+            for val, span, start in groups:
+                if val:
+                    cmidrules.append(f"\\cmidrule(lr){{{start}-{start + span - 1}}}")
+            if cmidrules:
+                lines.append("".join(cmidrules))
+
+        # Last level header row
+        last_parts = [_latex_escape(c) for c in row_id_cols]
+        for p in parsed:
+            last_parts.append(_latex_escape(p[-1]))
+        lines.append(" & ".join(last_parts) + "\\tabularnewline")
+    else:
+        header = [_latex_escape(c) for c in row_id_cols + value_cols]
+        lines.append(" & ".join(header) + "\\tabularnewline")
+
+    lines.append("\\midrule")
+
+    # Data rows
+    for _, row in formatted.iterrows():
+        parts = [_latex_escape(str(row[c])) for c in row_id_cols]
+        for col in value_cols:
+            parts.append(str(row[col]))  # Already formatted; don't escape \textbf
+        lines.append(" & ".join(parts) + " \\tabularnewline")
+
+    lines.append("\\bottomrule")
+    lines.append("\\end{tabular}")
+
+    return "\n".join(lines)
+
+
+# -- Generic table formatting --------------------------------------------------
+
 def format_table(
     df: pd.DataFrame,
     fmt: str = "github",
@@ -219,6 +326,11 @@ def format_table(
     same_threshold: float = 0.02,
 ) -> str:
     """Format DataFrame as table string using pandas to_markdown."""
+    if fmt == "latex":
+        return _render_latex_booktabs(
+            df, metric_cols or [], same_threshold=same_threshold,
+            highlight_max=highlight_max, float_format=float_format,
+        )
     if highlight_max and metric_cols:
         df = bold_max(df, metric_cols, fmt, same_threshold)
         # Already string-formatted, don't apply floatfmt
