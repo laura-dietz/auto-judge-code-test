@@ -37,38 +37,7 @@ from trec_auto_judge import (
 )
 from trec_auto_judge.leaderboard.leaderboard import mean_of_floats, mean_of_bools
 from trec_auto_judge.nugget_data import NuggetBanksProtocol
-
-
-def run_dspy_batch(prompt_class, items, convert_output_fn, backend):
-    """Simple wrapper for DSPy batch processing (async)."""
-    async def _run():
-        predictor = dspy.Predict(prompt_class)
-
-        # Configure DSPy backend
-        old_lm = dspy.settings.lm
-        try:
-            dspy.settings.configure(lm=backend)
-
-            # Run predictions
-            for item in items:
-                # Extract input fields from item
-                inputs = {
-                    field_name: getattr(item, field_name)
-                    for field_name in prompt_class.input_fields.keys()
-                }
-
-                # Get prediction
-                prediction = predictor(**inputs)
-
-                # Convert output to item
-                convert_output_fn(prediction, item)
-
-            return items
-        finally:
-            if old_lm:
-                dspy.settings.configure(lm=old_lm)
-
-    return _run()
+from trec_auto_judge.llm.minima_llm_dspy import run_dspy_batch
 
 
 class CitationAssessment(BaseModel):
