@@ -159,10 +159,12 @@ CITATION_SPEC = LeaderboardSpec(measures=(
 class CitationJudge(AutoJudge):
     """Judge that validates citations using Auto-ARGUE framework."""
 
-    def __init__(self):
-        self.debug_logger = DebugLogger(
-            log_file=os.environ.get('CITATION_DEBUG_LOG')
-        )
+    def __init__(self, settings: Optional[dict] = None, debug_log: Optional[str] = None, **kwargs):
+        super().__init__(settings=settings, **kwargs)
+        # Topic format: auto-detect or explicit
+        self.topic_format = settings.get("topic_format", "auto") if settings else "auto"
+        # Debug logger
+        self.debug_logger = DebugLogger(debug_log)
 
     def extract_query(self, topic: Request, topic_format: str = "auto") -> str:
         """Extract query from topic based on dataset format."""
@@ -210,10 +212,8 @@ class CitationJudge(AutoJudge):
     ) -> Qrels:
         """Assess citations for each response."""
 
-        import os
-
         # Get topic_format from kwargs
-        topic_format = kwargs.get("topic_format", "auto")
+        topic_format = kwargs.get("topic_format", self.topic_format)
 
         # Build topic lookup
         topic_dict = {req.request_id: req for req in rag_topics}
@@ -396,7 +396,20 @@ class CitationJudge(AutoJudge):
 
         return leaderboard
 
+    def create_nuggets(self, *args, **kwargs):
+        """Not used by CitationJudge."""
+        return None
+
+
+# CLI Entry Point
 
 if __name__ == "__main__":
     import os
-    CitationJudge().cli()
+    from trec_auto_judge import auto_judge_to_click_command
+
+    # Check for debug log from environment variable (set by run_judge.py)
+    debug_log = os.getenv('CITATION_DEBUG_LOG')
+
+    judge = CitationJudge(debug_log=debug_log)
+    cli = auto_judge_to_click_command(judge, "citation-judge")
+    cli()
