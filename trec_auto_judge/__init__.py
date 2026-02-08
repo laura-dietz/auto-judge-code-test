@@ -71,6 +71,7 @@ from ._commands._leaderboard import leaderboard
 from ._commands._eval_result import eval_result
 from ._commands._export_corpus import export_corpus
 from ._commands._list_models import list_models
+from ._commands._qrel_evaluate import qrel_evaluate
 from ._commands._run import run_workflow
 from click import group
 from autojudge_base.click_plus import option_rag_responses, option_rag_topics, option_ir_dataset, auto_judge_to_click_command
@@ -86,6 +87,7 @@ main.command("leaderboard")(leaderboard)
 main.add_command(eval_result)
 main.command()(export_corpus)
 main.add_command(list_models)
+main.add_command(qrel_evaluate, "qrel-evaluate")
 main.add_command(run_workflow)
 
 

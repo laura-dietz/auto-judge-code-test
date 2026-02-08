@@ -35,6 +35,8 @@ dependencies = [
     "minima-llm",
     "tabulate",
     "matplotlib",
+    "scikit-learn",
+    "krippendorff",
 ]
 
 [project.optional-dependencies]
