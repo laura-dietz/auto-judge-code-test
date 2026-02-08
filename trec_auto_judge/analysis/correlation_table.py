@@ -256,6 +256,75 @@ def correlation_consistency(
     return "\n".join(sections)
 
 
+def measures_as_columns(
+    df: pd.DataFrame,
+    metric_cols: list[str],
+    fmt: str = "github",
+    same_threshold: float = 0.01,
+) -> str:
+    """One table per (Dataset, correlation metric).
+
+    Rows: Judge
+    Columns: TruthMeasure/EvalMeasure combinations
+    Highest value per column bolded.
+    """
+    sections = []
+
+    # Group by Dataset (if present) then iterate correlation metrics
+    dataset_keys = ["Dataset"] if "Dataset" in df.columns else []
+
+    for metric in metric_cols:
+        if metric not in df.columns:
+            continue
+
+        if dataset_keys:
+            for dataset, ds_df in df.groupby("Dataset", sort=True):
+                sections.append(f"#### Dataset={dataset}, Correlation={metric}\n")
+                sections.append(_pivot_measures_table(ds_df, metric, fmt, same_threshold))
+                sections.append("")
+        else:
+            sections.append(f"#### Correlation={metric}\n")
+            sections.append(_pivot_measures_table(df, metric, fmt, same_threshold))
+            sections.append("")
+
+    return "\n".join(sections)
+
+
+def _pivot_measures_table(
+    df: pd.DataFrame,
+    metric: str,
+    fmt: str,
+    same_threshold: float,
+) -> str:
+    """Pivot a single metric into columns of TruthMeasure/EvalMeasure."""
+    # Create composite column name
+    df = df.copy()
+    df["_measure_col"] = df["TruthMeasure"] + " / " + df["EvalMeasure"]
+
+    # Get row identity columns (Judge + any category cols)
+    meta = get_meta_columns(df)
+    row_id_cols = [c for c in meta if c not in ["Dataset", "TruthMeasure", "EvalMeasure", "_measure_col"]]
+
+    # Pivot
+    pivoted = df.pivot_table(
+        index=row_id_cols,
+        columns="_measure_col",
+        values=metric,
+        aggfunc="first",
+    ).reset_index()
+
+    # Flatten MultiIndex columns if needed
+    pivoted.columns.name = None
+
+    # Preserve judge order from the original df
+    judge_order = {j: i for i, j in enumerate(df["Judge"].unique())}
+    pivoted["_sort"] = pivoted["Judge"].map(lambda j: judge_order.get(j, len(judge_order)))
+    pivoted = pivoted.sort_values("_sort").drop(columns=["_sort"])
+
+    measure_cols = [c for c in pivoted.columns if c not in row_id_cols]
+    return format_table(pivoted, fmt, highlight_max=True, metric_cols=measure_cols, same_threshold=same_threshold)
+
+
 @click.command()
 @click.option(
     "--dataset", "-d",
@@ -281,6 +350,13 @@ def correlation_consistency(
     "--all-judges/--no-all-judges",
     default=False,
     help="Include judges not defined in --judges YAML (default: only defined judges).",
+)
+@click.option(
+    "--columns",
+    type=click.Choice(["correlations", "measures"]),
+    default="correlations",
+    help="What to show as columns: 'correlations' (one table per dataset/truth/eval) "
+         "or 'measures' (one table per dataset/correlation metric).",
 )
 @click.option(
     "--aggregate/--no-aggregate",
@@ -329,6 +405,7 @@ def main(
     format: str,
     judges: Optional[Path],
     all_judges: bool,
+    columns: str,
     aggregate: bool,
     correlation: tuple,
     truth_measure: tuple,
@@ -392,8 +469,11 @@ def main(
     if aggregate:
         df = aggregate_by_judge(df, metrics=metric_cols)
 
-    # Produce correlation_consistency tables
-    result = correlation_consistency(df, metric_cols, format, same_threshold=same)
+    # Produce tables based on --columns mode
+    if columns == "measures":
+        result = measures_as_columns(df, metric_cols, format, same_threshold=same)
+    else:
+        result = correlation_consistency(df, metric_cols, format, same_threshold=same)
 
     # Append category comparison if judges YAML provides categories
     if judges_data:
