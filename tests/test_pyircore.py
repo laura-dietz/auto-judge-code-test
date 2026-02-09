@@ -1,7 +1,7 @@
 # This is copied from https://github.com/eldrin/pyircor/blob/master/tests/test_pyircor.py
 import unittest
 
-from trec_auto_judge.pyircore import tauap_b
+from autojudge_evaluate.pyircore import tauap_b
 
 
 # Test data

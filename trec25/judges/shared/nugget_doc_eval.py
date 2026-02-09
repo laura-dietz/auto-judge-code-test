@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Dict, List, Optional, Set, Tuple
 
 from autojudge_base.qrels import Qrels, QrelRow
-from trec25.judges.shared.rubric_common import NuggetDocEntry, TopicNuggetDocs
+from autojudge_base.nugget_doc_models import NuggetDocEntry, TopicNuggetDocs
 
 
 # =============================================================================

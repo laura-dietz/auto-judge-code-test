@@ -2,4 +2,10 @@ __pycache__
 .approval_tests_temp
 test-coverage
 .coverage
-.egg-info
+*.egg-info/
+
+# Child repos (independent public packages, installed as workspace deps)
+auto-judge-base/
+auto-judge-evaluate/
+auto-judge-starterkit/
+minima-llm/

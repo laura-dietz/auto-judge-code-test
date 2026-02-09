@@ -1,5 +1,17 @@
+styles:
+  colors:
+    pairwise: "#8321CF"    # dark purple
+    grounded: "#79C4F4"    # medium sky blue
+    rubric:   "#C6F752"    # lime green
+  hatches:
+    best:     ""
+    random:   ".."
+    na:       ""
+    response: ""
+    docs:     "//"
+
 judges:
-  
+
   tmp-iter20bothties-few.eval:
     name: pref best
     nugget: pairwise
@@ -11,7 +23,7 @@ judges:
     nugget: pairwise
     preference: random
     graded: response
-    
+
   tmp-iter20bothties-few-docs.eval:
     name: pref docs
     nugget: pairwise
@@ -49,4 +61,3 @@ judges:
     nugget: rubric
     preference: na
     graded: docs
-

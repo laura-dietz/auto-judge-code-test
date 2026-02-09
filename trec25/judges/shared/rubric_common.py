@@ -480,28 +480,8 @@ def build_nugget_banks(
 # =============================================================================
 
 
-class NuggetDocEntry(BaseModel):
-    """A nugget question with its relevant document IDs."""
-
-    question: str
-    doc_ids: List[str]
-    aggregator: str = "OR"
-    answer_type: str = "OPEN_ENDED_ANSWER"
-
-    def to_collaborator_value(self) -> list:
-        """Serialize to collaborator format: ["OR", {"OPEN_ENDED_ANSWER": [...]}]"""
-        return [self.aggregator, {self.answer_type: self.doc_ids}]
-
-
-class TopicNuggetDocs(BaseModel):
-    """All nugget-document mappings for a single topic."""
-
-    topic_id: str
-    entries: List[NuggetDocEntry]
-
-    def to_collaborator_dict(self) -> dict:
-        """Serialize to collaborator format: {question: ["OR", {...}], ...}"""
-        return {e.question: e.to_collaborator_value() for e in self.entries}
+# Re-export from autojudge_base for backwards compatibility
+from autojudge_base.nugget_doc_models import NuggetDocEntry, TopicNuggetDocs, write_nugget_docs_collaborator  # noqa: F401
 
 
 def collect_nugget_relevant_docs(
@@ -540,18 +520,6 @@ def collect_nugget_relevant_docs(
         topic_id: TopicNuggetDocs(topic_id=topic_id, entries=entries)
         for topic_id, entries in topic_entries.items()
     }
-
-
-def write_nugget_docs_collaborator(
-    topics: Dict[str, TopicNuggetDocs],
-    output_dir: Path,
-) -> None:
-    """Write one nuggets_{topic_id}.json per topic in collaborator format."""
-    output_dir.mkdir(parents=True, exist_ok=True)
-    for topic_id, topic in topics.items():
-        path = output_dir / f"nuggets_{topic_id}.json"
-        path.write_text(json.dumps(topic.to_collaborator_dict(), indent=4))
-    print(f"Wrote {len(topics)} collaborator nugget files to {output_dir}")
 
 
 def nugget_docs_to_nugget_banks(

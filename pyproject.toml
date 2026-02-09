@@ -32,6 +32,7 @@ dependencies = [
     "ir_datasets",
     "nltk",
     "autojudge-base",
+    "autojudge-evaluate",
     "minima-llm",
     "tabulate",
     "matplotlib",
@@ -82,8 +83,9 @@ select = ["E", "F", "W"]
 ignore = ["E203"]
 
 [tool.uv.workspace]
-members = ["auto-judge-base", "minima-llm", "auto-judge-starterkit"]
+members = ["auto-judge-base", "minima-llm", "auto-judge-starterkit", "auto-judge-evaluate"]
 
 [tool.uv.sources]
 autojudge-base = { workspace = true }
+autojudge-evaluate = { workspace = true }
 minima-llm = { workspace = true }
