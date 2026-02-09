@@ -1,6 +1,0 @@
-# Naive judge: no nuggets
-judge_class: "trec25.judges.naive.naive_baseline.NaiveJudge"
-
-create_nuggets: false
-judge: true
-augment_report: false
